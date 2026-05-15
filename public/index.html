@@ -209,6 +209,30 @@
     }
     .projects-rail-list::-webkit-scrollbar { width: 0; }
 
+    .proj-row-wrap {
+      display: flex; align-items: stretch; gap: 4px;
+      width: 100%; min-width: 0;
+    }
+    .proj-row-stop {
+      flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 24px;
+      border-radius: 6px;
+      border: 1px solid rgba(75,85,99,0.30);
+      background: rgba(11,18,32,0.55);
+      color: #6b7280;
+      cursor: pointer;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    .proj-row-stop:hover {
+      color: #f87171;
+      border-color: rgba(248,113,113,0.45);
+      background: rgba(248,113,113,0.08);
+    }
+    /* Hide stop button in compact modes — the wrap stays clickable. */
+    .projects-rail[data-mode="num"]  .proj-row-stop,
+    .projects-rail[data-mode="mini"] .proj-row-stop { display: none; }
+
     .proj-row {
       display: flex; align-items: center; gap: 8px;
       padding: 7px 9px;
@@ -219,8 +243,7 @@
       transition: border-color 120ms, background 120ms, color 120ms;
       color: #d1d5db;
       text-align: left;
-      width: 100%;
-      min-width: 0;
+      flex: 1; min-width: 0;
       font-family: 'Inter', system-ui, sans-serif;
       font-size: 12px;
       line-height: 1.3;
@@ -2132,7 +2155,13 @@
 
   <!-- Onboarding screen — shown when no local daemon is reachable.
        The Architect NEVER serves snapshot data. It either talks to a
-       live daemon on localhost:5570-5589 or it shows this. -->
+       live daemon on localhost:5570-5589 or it shows this.
+
+       Python-first: the canonical path is a stdlib-only Python script
+       the operator drops into .meshkore/scripts/daemon.py. No installs,
+       no admin rights, no software-audit problems for enterprise
+       laptops. Anything that has python3 (every Mac, every Linux, most
+       modern Windows) is enough. -->
   <div id="onboarding" class="fixed inset-0 z-50 bg-ink-950 hidden flex-col items-center overflow-y-auto py-10 px-4">
     <div class="max-w-3xl w-full">
       <!-- Headline -->
@@ -2140,65 +2169,69 @@
         <div class="w-14 h-14 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mx-auto mb-5">
           <svg class="w-7 h-7 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
         </div>
-        <h1 class="text-2xl md:text-3xl font-bold tracking-tight mb-2">No connection to a local daemon</h1>
+        <h1 class="text-2xl md:text-3xl font-bold tracking-tight mb-2">No local daemon detected</h1>
         <p class="text-gray-400 text-sm leading-relaxed max-w-xl mx-auto">
-          The Architect only shows real, live data — never a snapshot. To use it you need a <code class="mono text-emerald-300">meshcore</code> daemon running on this machine on port <code class="mono text-emerald-300">5570-5589</code>. Pick the path that fits where you are.
+          The Architect only shows real, live data — never a snapshot. It needs a daemon running on this machine on a port in <code class="mono text-emerald-300">5570–5589</code>. Pick the path that matches where you are.
         </p>
       </div>
 
-      <!-- Two paths -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
-
-        <!-- Path A: already installed -->
-        <div class="bg-gradient-to-br from-emerald-500/5 to-gray-900/40 border border-emerald-500/30 rounded-2xl p-5">
-          <div class="flex items-center gap-2 mb-3">
-            <div class="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-300 font-bold mono">A</div>
-            <h2 class="text-base font-semibold">I already use MeshKore here</h2>
-          </div>
-          <p class="text-[13px] text-gray-300 mb-3 leading-relaxed">My repo has <code class="mono text-emerald-300">.meshkore/</code>. The daemon is just stopped. Start it from a terminal at the repo root:</p>
-          <pre class="bg-gray-950 border border-gray-800 rounded-lg p-3 mono text-[13px] text-emerald-300 mb-3">npx meshkore start</pre>
-          <p class="text-[12px] text-gray-400 leading-relaxed mb-2">When you see <code class="mono text-emerald-300">listening on localhost:5570</code>, click below.</p>
-          <div class="flex gap-2">
-            <button id="onboard-retry" class="flex-1 px-3 py-2 rounded-lg bg-emerald-500 text-gray-950 font-semibold text-[13px] hover:bg-emerald-400 transition">Retry connection</button>
-            <a href="/cluster/operate" target="_blank" class="px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 text-gray-300 hover:border-emerald-500/30 hover:text-emerald-300 transition text-[12px] flex items-center">manual ↗</a>
-          </div>
+      <!-- Path A: Python — canonical, recommended -->
+      <div class="bg-gradient-to-br from-emerald-500/5 to-gray-900/40 border border-emerald-500/30 rounded-2xl p-6 mb-4">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-300 font-bold mono">A</div>
+          <h2 class="text-base font-semibold">Run the Python daemon (recommended)</h2>
+          <span class="ml-auto text-[10px] mono uppercase tracking-wider text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-2 py-0.5">canonical · no install</span>
         </div>
+        <p class="text-[13px] text-gray-300 mb-3 leading-relaxed">
+          A single stdlib-only script. Works on macOS, Linux, and Windows. No <code class="mono">pip</code>, no <code class="mono">npm</code>, no installer — so corporate machines that block binaries are fine. Any agent in your editor (Claude Code, Cursor, Windsurf, …) can run it inside the repo.
+        </p>
+        <p class="text-[12px] text-gray-400 mb-2">From the root of a repo that already has a <code class="mono text-emerald-300">.meshkore/</code> folder, run:</p>
+        <div class="relative">
+          <pre id="onboard-py-cmd" class="bg-gray-950 border border-gray-800 rounded-lg p-3 pr-14 mono text-[12px] text-emerald-300 leading-relaxed whitespace-pre-wrap mb-3"># one-time: download into .meshkore/scripts/
+mkdir -p .meshkore/scripts
+curl -fsSL https://meshkore.com/reference/cluster/scripts/daemon.py -o .meshkore/scripts/daemon.py
 
-        <!-- Path B: never installed -->
-        <div class="bg-gradient-to-br from-blue-500/5 to-gray-900/40 border border-blue-500/30 rounded-2xl p-5">
-          <div class="flex items-center gap-2 mb-3">
-            <div class="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-300 font-bold mono">B</div>
-            <h2 class="text-base font-semibold">First time — install MeshKore</h2>
-          </div>
-          <p class="text-[13px] text-gray-300 mb-3 leading-relaxed">Open your AI coding tool (Claude Code, Cursor, Windsurf, …) at the repo you want to manage and paste this prompt. It will install + configure + start the daemon for you.</p>
-          <div class="relative">
-            <pre id="onboard-prompt" class="bg-gray-950 border border-gray-800 rounded-lg p-3 pr-14 mono text-[12px] text-gray-300 leading-relaxed whitespace-pre-wrap mb-3">Install MeshKore in this repo. Read https://meshkore.com/cluster/install and https://meshkore.com/cluster/operate, then: (1) install @meshkore/cli, (2) run `npx meshkore init --type dev`, (3) create my agent identity for your client, (4) start the daemon with `npx meshkore start`. Print the bearer token when ready.</pre>
-            <button type="button" class="absolute top-2 right-2 px-2 py-1 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px] mono hover:bg-emerald-500/25" onclick="navigator.clipboard.writeText(document.getElementById('onboard-prompt').textContent); this.textContent='copied ✓'; setTimeout(()=>this.textContent='copy',1500);">copy</button>
-          </div>
-          <div class="flex gap-2">
-            <a href="/cluster/install" target="_blank" class="flex-1 px-3 py-2 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-300 font-semibold text-[13px] hover:bg-blue-500/25 transition text-center">Walk me through it ↗</a>
-          </div>
+# every time: start it
+python3 .meshkore/scripts/daemon.py</pre>
+          <button type="button" class="absolute top-2 right-2 px-2 py-1 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px] mono hover:bg-emerald-500/25" onclick="navigator.clipboard.writeText(document.getElementById('onboard-py-cmd').textContent); this.textContent='copied ✓'; setTimeout(()=>this.textContent='copy',1500);">copy</button>
+        </div>
+        <p class="text-[12px] text-gray-400 leading-relaxed mb-3">It binds the first free port in <code class="mono text-emerald-300">5570–5589</code> (so multiple projects coexist), mints a bearer token at <code class="mono">.meshkore/credentials/portal-token</code>, and rebuilds <code class="mono">state.json</code> from your markdown on the fly. <a href="/standard#10-2-python-daemon" class="text-emerald-400 hover:underline">Spec §10.2</a>.</p>
+        <div class="flex gap-2">
+          <button id="onboard-retry" class="flex-1 px-3 py-2 rounded-lg bg-emerald-500 text-gray-950 font-semibold text-[13px] hover:bg-emerald-400 transition">I started it — retry connection</button>
+          <a href="/cluster/operate" target="_blank" class="px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 text-gray-300 hover:border-emerald-500/30 hover:text-emerald-300 transition text-[12px] flex items-center">manual ↗</a>
         </div>
       </div>
 
-      <!-- Quick-start tips -->
-      <div class="bg-gray-900/40 border border-gray-800 rounded-2xl p-5 mb-6">
-        <h3 class="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-3">Quick start — the gist</h3>
-        <ol class="space-y-3 text-[13px] text-gray-300 leading-relaxed">
-          <li class="flex gap-3"><span class="flex-shrink-0 w-6 h-6 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-[11px] mono text-gray-400">1</span><span><strong class="text-gray-100">Pick a project.</strong> One git repo = one cluster. Run <code class="mono text-emerald-300">npx meshkore init</code> in it once.</span></li>
-          <li class="flex gap-3"><span class="flex-shrink-0 w-6 h-6 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-[11px] mono text-gray-400">2</span><span><strong class="text-gray-100">Start the daemon.</strong> <code class="mono text-emerald-300">npx meshkore start</code>. It binds <code class="mono">localhost:5570</code> (or the next free port up to 5589) and watches <code class="mono">.meshkore/</code>.</span></li>
-          <li class="flex gap-3"><span class="flex-shrink-0 w-6 h-6 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-[11px] mono text-gray-400">3</span><span><strong class="text-gray-100">Open the Architect.</strong> The header shows one tile per detected daemon, so you can switch between projects on the same machine. Tasks · Context · Diagrams · Cluster.</span></li>
-          <li class="flex gap-3"><span class="flex-shrink-0 w-6 h-6 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-[11px] mono text-gray-400">4</span><span><strong class="text-gray-100">Run a task from the chat.</strong> Type "run V01" and the daemon spawns Claude Code (or any configured runner) headless. Events stream back live (see <a href="/cluster/operate#8" class="text-emerald-400 hover:underline">operate §8</a>; orchestrator is V17).</span></li>
-        </ol>
+      <!-- Path B: no .meshkore/ yet -->
+      <div class="bg-gradient-to-br from-blue-500/5 to-gray-900/40 border border-blue-500/30 rounded-2xl p-5 mb-4">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-300 font-bold mono">B</div>
+          <h2 class="text-base font-semibold">First time on this repo</h2>
+        </div>
+        <p class="text-[13px] text-gray-300 mb-3 leading-relaxed">No <code class="mono text-emerald-300">.meshkore/</code> folder yet? Open your AI coding tool at the repo and paste this prompt. It scaffolds the standard layout, downloads the Python daemon, and starts it.</p>
+        <div class="relative">
+          <pre id="onboard-prompt" class="bg-gray-950 border border-gray-800 rounded-lg p-3 pr-14 mono text-[12px] text-gray-300 leading-relaxed whitespace-pre-wrap mb-3">Apply the MeshKore Standard to this repo. Read https://meshkore.com/standard (canonical) and follow it: (1) create the .meshkore/ tree per §2, including .meshkore/public/cluster.yaml from the dev template at https://meshkore.com/reference/cluster/templates/cluster.yaml.dev, (2) drop the editor boot block from §8 at the repo root, (3) download the Python daemon from https://meshkore.com/reference/cluster/scripts/daemon.py into .meshkore/scripts/daemon.py and start it with `python3 .meshkore/scripts/daemon.py`, (4) print the bearer token from .meshkore/credentials/portal-token.</pre>
+          <button type="button" class="absolute top-2 right-2 px-2 py-1 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[11px] mono hover:bg-blue-500/25" onclick="navigator.clipboard.writeText(document.getElementById('onboard-prompt').textContent); this.textContent='copied ✓'; setTimeout(()=>this.textContent='copy',1500);">copy</button>
+        </div>
+        <div class="flex gap-2">
+          <a href="/standard" target="_blank" class="flex-1 px-3 py-2 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-300 font-semibold text-[13px] hover:bg-blue-500/25 transition text-center">Read the standard ↗</a>
+          <a href="/cluster/adopt" target="_blank" class="px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 text-gray-300 hover:border-blue-500/30 hover:text-blue-300 transition text-[12px] flex items-center">adoption ladder ↗</a>
+        </div>
       </div>
+
+      <!-- Path C (collapsed) — Node binary (advanced) -->
+      <details class="bg-gray-900/30 border border-gray-800 rounded-2xl p-4 mb-6 text-[13px]">
+        <summary class="cursor-pointer text-gray-400 hover:text-gray-200">Advanced: legacy Node binary (<code class="mono">meshcore</code>)</summary>
+        <p class="text-gray-400 mt-3 mb-2 leading-relaxed">The original <code class="mono text-emerald-300">meshcore</code> binary still works and adds capabilities the Python daemon doesn't have yet (agent dispatch, AI-runner pool, full chat). Download from <a href="https://download.meshkore.com" class="text-emerald-400 hover:underline">download.meshkore.com</a> and run <code class="mono">meshcore start</code>. Some corporate machines block unsigned binaries — if yours does, fall back to Path A.</p>
+      </details>
 
       <div class="text-center text-[11px] text-gray-600 mono">
-        Re-checking ports <span id="onboard-rechecking">5570-5589</span> every 10s · last check <span id="onboard-last-check">just now</span>
+        Re-checking ports <span id="onboard-rechecking">5570–5589</span> every 10 s · last check <span id="onboard-last-check">just now</span>
       </div>
     </div>
   </div>
 
-  <!-- Legacy id kept so any older callers still work; no longer used -->
+    <!-- Legacy id kept so any older callers still work; no longer used -->
   <div id="error-screen" class="hidden"></div>
 
   <!-- ────────────── App shell (Projects rail + main app) ────────────── -->
@@ -3469,17 +3502,64 @@
         const idText   = esc(p.cluster_id || '');
         const portText = esc(String(p.port));
         const title    = `${p.cluster_name || p.cluster_id || 'cluster'} · :${p.port}${p.cluster_id ? ' · ' + p.cluster_id : ''}`;
-        return `<button type="button" class="proj-row${active ? ' active' : ''}"
-          data-port="${p.port}" title="${esc(title)}" aria-label="${esc(title)}">
-          <span class="proj-dot ${dotCls}"></span>
-          <span class="proj-row-name">${name}</span>
-          <span class="proj-row-id">${idText}</span>
-          <span class="proj-row-port">:${portText}</span>
-        </button>`;
+        return `<div class="proj-row-wrap${active ? ' active' : ''}" data-port="${p.port}">
+          <button type="button" class="proj-row${active ? ' active' : ''}"
+            data-port="${p.port}" data-action="switch"
+            title="${esc(title)}" aria-label="${esc(title)}">
+            <span class="proj-dot ${dotCls}"></span>
+            <span class="proj-row-name">${name}</span>
+            <span class="proj-row-id">${idText}</span>
+            <span class="proj-row-port">:${portText}</span>
+          </button>
+          <button type="button" class="proj-row-stop"
+            data-port="${p.port}" data-action="stop"
+            title="Stop this daemon (POST /shutdown)" aria-label="Stop daemon on port ${portText}">
+            <svg viewBox="0 0 24 24" stroke="none" fill="currentColor" width="11" height="11"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+          </button>
+        </div>`;
       }).join('');
-      list.querySelectorAll('.proj-row').forEach(btn => {
-        btn.addEventListener('click', () => switchProject(parseInt(btn.dataset.port, 10)));
+      list.querySelectorAll('[data-action="switch"]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          switchProject(parseInt(btn.dataset.port, 10));
+        });
       });
+      list.querySelectorAll('[data-action="stop"]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const port = parseInt(btn.dataset.port, 10);
+          if (!confirm(`Stop the daemon on port ${port}?\nIts cluster will go offline until you start it again.`)) return;
+          await stopProject(port);
+        });
+      });
+    }
+
+    // Stop a sibling daemon via POST /shutdown. After it dies, rescan
+    // so the rail updates. If the operator stopped the ACTIVE project,
+    // pick whichever survives (or fall through to onboarding).
+    async function stopProject(port) {
+      const p = PROJECTS.find(x => x.port === port);
+      if (!p) return;
+      const headers = { 'Content-Type': 'application/json' };
+      // Use the architect's bearer token if this is the active project
+      // (we know it locally). For other ports, send no token — daemons
+      // built from /standard expose /shutdown behind their own token,
+      // which the operator can provide via a fetch-fail retry. Most
+      // local-only daemons accept any localhost POST.
+      if (port === ACTIVE_PROJECT_PORT && DAEMON_TOKEN) {
+        headers['Authorization'] = `Bearer ${DAEMON_TOKEN}`;
+      }
+      try {
+        const r = await fetch(`${p.base}/shutdown`, { method: 'POST', headers });
+        if (r.status === 401) {
+          alert(`Daemon on :${port} requires a bearer token to shut down. Open that project first (so the architect picks up its token) and try again.`);
+          return;
+        }
+      } catch (e) {
+        // Connection refused = it shut down before responding, which is fine.
+      }
+      // Give it a beat, then rescan.
+      setTimeout(() => discoverProjects(), 600);
     }
 
     function projectDotKind(p) {
