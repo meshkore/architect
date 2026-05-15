@@ -1,0 +1,18 @@
+# Portal-specific headers.
+#
+# The portal is a daemon client. It must NOT be cached aggressively
+# (a stale shell against a fresh daemon API is the worst kind of bug
+# to diagnose), but should still hit the CF edge for SSL termination
+# and global delivery.
+
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+
+/index.html
+  Cache-Control: no-cache, must-revalidate
+
+/
+  Cache-Control: no-cache, must-revalidate

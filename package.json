@@ -1,0 +1,14 @@
+{
+  "name": "@meshkore/architect",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MeshKore architect cockpit — chat-driven, repo-as-database UI. Deploys to architect.meshkore.com.",
+  "scripts": {
+    "dev": "npx serve public -l 4173",
+    "build": "echo 'No build step yet — public/ is served as-is. Vite will be added in Phase 3 (modularization).'",
+    "deploy": "npx wrangler pages deploy public --project-name meshkore-portal"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
