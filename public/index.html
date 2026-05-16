@@ -316,6 +316,17 @@
       padding: 6px 8px;
       border-top: 1px solid rgba(75,85,99,0.20);
       flex-shrink: 0;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .projects-rail-foot-btn.is-primary {
+      background: rgba(16,185,129,0.10);
+      border-color: rgba(52,211,153,0.35);
+      color: #6ee7b7;
+    }
+    .projects-rail-foot-btn.is-primary:hover {
+      color: #d1fae5;
+      border-color: rgba(52,211,153,0.55);
+      background: rgba(16,185,129,0.18);
     }
     .projects-rail-foot-btn {
       width: 100%;
@@ -2253,6 +2264,10 @@ python3 .meshkore/scripts/daemon.py</pre>
         <!-- populated by renderProjectsRail() -->
       </div>
       <div class="projects-rail-foot">
+        <button id="projects-rail-add" class="projects-rail-foot-btn is-primary" title="Add another project to this architect">
+          <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4" fill="none" width="13" height="13"><path d="M12 5v14M5 12h14"/></svg>
+          <span class="projects-rail-foot-label">add project</span>
+        </button>
         <button id="projects-rail-refresh" class="projects-rail-foot-btn" title="Rescan for daemons on ports 5570-5589">
           <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" width="13" height="13"><path d="M4 4v6h6M20 20v-6h-6M5 13a8 8 0 1014.5-3.5"/></svg>
           <span class="projects-rail-foot-label">rescan</span>
@@ -3580,6 +3595,116 @@ python3 .meshkore/scripts/daemon.py</pre>
         try { await discoverProjects(); } finally {
           if (btn) btn.disabled = false;
         }
+      });
+      $('projects-rail-add')?.addEventListener('click', openAddProjectModal);
+    }
+
+    // Open the "Add a project" modal — explains how to spin up another
+    // local daemon (paste this prompt into your AI agent inside the new
+    // repo) and points to the public docs for the cloud option (which
+    // the cloud-team agent is wiring up separately).
+    async function openAddProjectModal() {
+      const STD = 'https://meshkore.com/standard';
+      const DAEMON_URL = 'https://meshkore.com/reference/cluster/scripts/daemon.py';
+      const promptText =
+`Apply the MeshKore Standard to this repo so it shows up in my architect.
+
+1. Read the canonical standard at ${STD}.
+2. Create the .meshkore/ tree per §2 of the standard.
+   Use ${STD.replace('/standard', '/reference/cluster/templates/cluster.yaml.dev')}
+   as the starter for .meshkore/public/cluster.yaml.
+3. Drop the editor boot block from §8 at the repo root (CLAUDE.md / .cursorrules / .windsurfrules — pick whichever your editor needs).
+4. Download the Python daemon into .meshkore/scripts/daemon.py:
+       mkdir -p .meshkore/scripts
+       curl -fsSL ${DAEMON_URL} -o .meshkore/scripts/daemon.py
+5. Start it:
+       python3 .meshkore/scripts/daemon.py
+   It will bind the first free port in 5570-5589, mint a bearer token at
+   .meshkore/credentials/portal-token, and rebuild state.json from the
+   markdown filesystem.
+6. Print the chosen port + bearer token so I can verify the architect
+   picks it up.
+
+When the daemon is running, my architect at https://architect.meshkore.com
+will auto-detect it and add it to the Projects rail. No further steps.`;
+
+      await mcModal({
+        title: 'Add another project to this architect',
+        subtitle: 'Each project = its own .meshkore/ folder with its own daemon. Architect lists them in the left rail.',
+        body: `
+          <style>
+            .add-proj-body { display: flex; flex-direction: column; gap: 14px; }
+            .add-proj-section { background: rgba(11,18,32,0.5); border: 1px solid rgba(75,85,99,0.30); border-radius: 10px; padding: 14px 16px; }
+            .add-proj-section h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #e5e7eb; display: flex; align-items: center; gap: 8px; }
+            .add-proj-section h4 .pill { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; background: rgba(52,211,153,0.10); color: #6ee7b7; border: 1px solid rgba(52,211,153,0.30); }
+            .add-proj-section h4 .pill.is-cloud { background: rgba(96,165,250,0.10); color: #93c5fd; border-color: rgba(96,165,250,0.30); }
+            .add-proj-section h4 .pill.is-soon { background: rgba(251,191,36,0.10); color: #fbbf24; border-color: rgba(251,191,36,0.30); }
+            .add-proj-section p { font-size: 12.5px; color: #d1d5db; line-height: 1.55; margin: 4px 0; }
+            .add-proj-prompt {
+              position: relative;
+              background: #020617; border: 1px solid rgba(75,85,99,0.40);
+              border-radius: 8px; padding: 10px 44px 10px 12px;
+              font-family: 'JetBrains Mono', monospace; font-size: 11.5px;
+              color: #cbd5e1; line-height: 1.55;
+              white-space: pre-wrap; word-break: break-word;
+              max-height: 240px; overflow-y: auto;
+            }
+            .add-proj-copy {
+              position: absolute; top: 8px; right: 8px;
+              padding: 4px 8px; border-radius: 5px;
+              background: rgba(16,185,129,0.15);
+              color: #6ee7b7;
+              border: 1px solid rgba(52,211,153,0.40);
+              font-family: 'JetBrains Mono', monospace; font-size: 10px;
+              cursor: pointer; transition: background 120ms;
+            }
+            .add-proj-copy:hover { background: rgba(16,185,129,0.30); }
+            .add-proj-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+            .add-proj-link {
+              padding: 4px 9px; border-radius: 5px;
+              background: rgba(11,18,32,0.5);
+              border: 1px solid rgba(75,85,99,0.30);
+              font-family: 'JetBrains Mono', monospace; font-size: 11px;
+              color: #cbd5e1; text-decoration: none;
+              transition: border-color 120ms, color 120ms;
+            }
+            .add-proj-link:hover { border-color: rgba(52,211,153,0.45); color: #34d399; }
+          </style>
+          <div class="add-proj-body">
+
+            <div class="add-proj-section">
+              <h4>Local — your machine right now <span class="pill">available</span></h4>
+              <p>Open your AI agent (Claude Code, Cursor, Windsurf, …) in the repo you want to add and paste this prompt. It applies the standard, starts the Python daemon, and the architect picks it up automatically:</p>
+              <div class="add-proj-prompt"><button type="button" class="add-proj-copy" id="add-proj-copy-btn">copy</button><span id="add-proj-prompt-text">${esc(promptText)}</span></div>
+              <p style="margin-top:8px; font-size:11.5px; color:#9ca3af;">
+                The daemon binds the first free port in 5570–5589, so multiple projects on the same machine never clash. Stop any of them later from the rail's Stop button (▢).
+              </p>
+              <div class="add-proj-links">
+                <a class="add-proj-link" href="${STD}" target="_blank">/standard ↗</a>
+                <a class="add-proj-link" href="${STD}#10-3-adding-more-projects-to-your-architect" target="_blank">§10.3 details ↗</a>
+                <a class="add-proj-link" href="${DAEMON_URL}" target="_blank">daemon.py source ↗</a>
+              </div>
+            </div>
+
+            <div class="add-proj-section" style="opacity: 0.85;">
+              <h4>Cloud — projects on other machines or your phone <span class="pill is-cloud">cloud</span> <span class="pill is-soon">in progress</span></h4>
+              <p>To work with repositories that don't live on this machine (a teammate's laptop, a remote VM, your phone), the architect will connect to a cloud relay instead of a local daemon. Each remote daemon stays the canonical Python script — it just registers itself with the relay so the architect can reach it through the cloud.</p>
+              <p>A separate work-stream is wiring the cloud relay, the local-to-cloud bridge daemon, and the mobile-friendly architect-cloud mode. When it ships you'll see a <em>Cloud</em> tab in this dialog with the registration prompt.</p>
+              <p style="font-size:11.5px; color:#9ca3af;">Track the work and see the design at <a href="https://meshkore.com/standard#10-3-adding-more-projects-to-your-architect" target="_blank" class="add-proj-link" style="padding:0; border:0; background:transparent;">standard §10.3</a> (Cloud mode subsection).</p>
+            </div>
+
+          </div>`,
+        buttons: [{ id: 'close', label: 'Close' }],
+        onMount: (body) => {
+          const copy = body.querySelector('#add-proj-copy-btn');
+          const txt  = body.querySelector('#add-proj-prompt-text');
+          copy?.addEventListener('click', () => {
+            const t = txt?.textContent || '';
+            navigator.clipboard.writeText(t);
+            copy.textContent = 'copied ✓';
+            setTimeout(() => { copy.textContent = 'copy'; }, 1500);
+          });
+        },
       });
     }
 
