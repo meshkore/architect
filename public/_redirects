@@ -1,0 +1,9 @@
+# Architect (architect.meshkore.com) is the cockpit app, nothing else.
+# Marketing / docs / landing live on meshkore.com.
+#
+# Legacy /about path used to host the public landing before it moved
+# to meshkore.com/architect (2026-05-17). Redirect so any external
+# bookmarks or social-card scrapes resolve cleanly.
+/about      https://meshkore.com/architect  301
+/about/     https://meshkore.com/architect  301
+/about/*    https://meshkore.com/architect  301
