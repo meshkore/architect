@@ -1,17 +1,19 @@
 # CF Pages project config — meshkore-portal (architect cockpit).
 #
-# This is the operator cockpit, deployed independently from the public
-# webapp (meshkore.com). Subdomain: architect.meshkore.com.
+# Subdomain:  architect.meshkore.com
+# (alias)     portal.meshkore.com
+# Account:    875bd2c5943a18d6c520d894ed12905f (rjj@proars.com)
+# Project:    meshkore-portal
 #
-# The architect cockpit is a fully client-side SPA that talks ONLY to
-# the local meshcore daemon at http://localhost:5570 (or :5571-5589).
-# No server-side concerns — no Functions, no R2, no DB. CF Pages just
-# serves the static bundle from public/.
+# Build:      Solid + Vite + Tailwind → dist/
+# Deploy:     cd architect && npm run deploy:prod
+#             (`deploy:prod` = `vite build` + `wrangler pages deploy dist
+#              --project-name meshkore-portal --branch main`)
 #
-# Account: 875bd2c5943a18d6c520d894ed12905f (rjj@proars.com)
-# Project: meshkore-portal
-# Deploy: wrangler pages deploy architect/public --project-name meshkore-portal --branch main --commit-dirty=true
+# The cockpit is fully client-side. It talks ONLY to the local meshcore
+# daemon at http://localhost:5570 (or :5571–5589). No server-side
+# concerns — no Functions, no R2, no DB. CF Pages just serves dist/.
 
 name = "meshkore-portal"
-compatibility_date = "2026-05-12"
-pages_build_output_dir = "public"
+compatibility_date = "2026-05-18"
+pages_build_output_dir = "dist"

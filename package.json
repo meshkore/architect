@@ -1,14 +1,32 @@
 {
   "name": "@meshkore/architect",
-  "version": "0.1.0",
+  "version": "0.2.0-alpha",
   "private": true,
-  "description": "MeshKore architect cockpit — chat-driven, repo-as-database UI. Deploys to architect.meshkore.com.",
+  "description": "MeshKore architect cockpit — Solid.js SPA. Talks to the local meshcore daemon over HTTP+WS.",
+  "type": "module",
   "scripts": {
-    "dev": "npx serve public -l 4173",
-    "build": "echo 'No build step yet — public/ is served as-is. Vite will be added in Phase 3 (modularization).'",
-    "deploy": "npx wrangler pages deploy public --project-name meshkore-portal"
+    "dev": "vite --port 4173",
+    "build": "vite build",
+    "preview": "vite preview --port 4174",
+    "typecheck": "tsc --noEmit",
+    "deploy:preview": "npm run build && npx wrangler pages deploy dist --project-name meshkore-portal --branch preview-solid --commit-dirty=true",
+    "deploy:prod": "npm run build && npx wrangler pages deploy dist --project-name meshkore-portal --branch main --commit-dirty=true"
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "@solidjs/router": "^0.15.0",
+    "solid-js": "^1.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0",
+    "vite-plugin-solid": "^2.10.0",
+    "wrangler": "^4.44.0"
   }
 }

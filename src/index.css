@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  body { @apply bg-gray-950 text-gray-100 antialiased; }
+  /* Mono utility (also exists as Tailwind `font-mono`). Kept as a named
+     class so static HTML in error fallbacks can use it without Tailwind. */
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+}
+
+@layer utilities {
+  /* Brand gradient used for hero word accents. Same gradient as webapp/. */
+  .grad {
+    background: linear-gradient(135deg, #34d399 0%, #6ee7b7 60%, #a7f3d0 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+}
