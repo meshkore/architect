@@ -230,14 +230,18 @@
        up/down before the first letter. No fill flashing, no halo, no
        border pulse — nothing that competes with the working area.
     */
+    /* V42 — Replace the full white border with a LEFT accent bar drawn
+       via inset box-shadow. Bar is dim slate for idle rows and a thick
+       bright bar (white) for the active project. The rest of the row
+       has no border at all — fits the minimal panel aesthetic.       */
     .proj-row {
       display: flex; align-items: center; gap: 8px;
-      padding: 7px 10px;
+      padding: 7px 10px 7px 14px;       /* extra left so content clears the accent bar */
       border-radius: 8px;
-      border: 1px solid rgba(75,85,99,0.30);
+      border: none;
       background: transparent;
       cursor: pointer;
-      transition: border-color 160ms, background 160ms, color 160ms;
+      transition: background 160ms, color 160ms, box-shadow 160ms;
       color: #cbd5e1;
       text-align: left;
       flex: 1; min-width: 0;
@@ -245,20 +249,22 @@
       font-size: 12px;
       line-height: 1.3;
       position: relative;
+      box-shadow: inset 2px 0 0 0 rgba(75,85,99,0.55);
     }
     .proj-row:hover {
-      border-color: rgba(255,255,255,0.40);
+      background: rgba(255,255,255,0.04);
       color: #f3f4f6;
+      box-shadow: inset 2px 0 0 0 rgba(148,163,184,0.85);
     }
     .proj-row.active {
-      background: rgba(2,6,23,0.95);
-      border-color: #f3f4f6;
+      background: rgba(255,255,255,0.05);
       color: #ffffff;
       font-weight: 600;
+      box-shadow: inset 4px 0 0 0 #f3f4f6;   /* triple-thick white accent */
     }
     .proj-row.active:hover {
-      background: rgba(11,18,32,1);
-      border-color: #ffffff;
+      background: rgba(255,255,255,0.08);
+      box-shadow: inset 4px 0 0 0 #ffffff;
     }
 
     /* ── Working indicator — a 2 px vertical bar that bounces up/down
@@ -292,15 +298,16 @@
       50%      { top: calc(100% - 5px); }
     }
 
-    /* Stopped — dashed border, dim. No animation. */
+    /* Stopped — left accent in dim blue (revival cue). No fill. */
     .proj-row-wrap.is-stopped .proj-row {
-      background: rgba(11,18,32,0.30);
-      border: 1px dashed rgba(96,165,250,0.30);
+      background: transparent;
       color: #9ca3af;
+      box-shadow: inset 2px 0 0 0 rgba(96,165,250,0.45);
     }
     .proj-row-wrap.is-stopped .proj-row:hover {
-      border-color: rgba(96,165,250,0.55);
+      background: rgba(96,165,250,0.05);
       color: #cbd5e1;
+      box-shadow: inset 2px 0 0 0 rgba(96,165,250,0.75);
     }
     .proj-row-wrap.is-stopped .proj-row.is-working::before { display: none; }
 
