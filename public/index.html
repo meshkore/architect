@@ -291,20 +291,32 @@
     }
     .proj-row.active:hover { background: rgba(52,211,153,0.10); }
 
-    /* ── Working indicator — a 2 px vertical bar that bounces up/down
-       inside its own 2×14 track, placed BEFORE the project name. Only
-       visible when .is-working is set; idle rows render an invisible
-       placeholder so layout doesn't shift. ── */
+    /* V45 — Vertical activity indicator with THREE mutually-exclusive
+       states. Position is always reserved (2×14 px) so the row layout
+       never shifts. Render order: working ⟩ pending ⟩ idle.
+         idle    → dashed grey vertical line (no animation)
+         pending → dashed YELLOW vertical line (no animation)
+         working → solid bouncing 5 px slug + grey track behind it
+    */
     .proj-working-bar {
       flex-shrink: 0;
       width: 2px;
       height: 14px;
-      border-radius: 1px;
-      background: transparent;
       position: relative;
+      /* Default: dashed grey line for idle. Uses border-left so the
+         dashes are pure CSS, no extra elements. */
+      border-left: 2px dashed rgba(75,85,99,0.55);
     }
+    /* Pending review takes over from idle. */
+    .proj-row.is-pending-review .proj-working-bar {
+      border-left-color: #fbbf24;          /* amber-400 */
+    }
+    /* Working takes over from both — hide the dashed line and draw the
+       bouncing slug as ::before. */
     .proj-row.is-working .proj-working-bar {
+      border-left: none;
       background: rgba(148,163,184,0.15);
+      border-radius: 1px;
     }
     .proj-row.is-working .proj-working-bar::before {
       content: '';
@@ -718,6 +730,20 @@
     /* Fallback for browsers without color-mix */
     @supports not (background: color-mix(in oklab, red, blue)) {
       .agent-card.active { background: rgba(52,211,153,0.10); border-color: rgba(52,211,153,0.45); }
+    }
+    /* V45 — Pending-review ring. Composes with .active / .working, so an
+       active agent that finished a task shows both the stripe AND the
+       yellow dashed outline; opening its chat consumes the marker and
+       the outline disappears. Drawn as a ::after overlay (1 px outset)
+       so it doesn't shift the card layout. */
+    .agent-card.is-pending-review { position: relative; }
+    .agent-card.is-pending-review::after {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      border: 1px dashed #fbbf24;
+      border-radius: 7px;
+      pointer-events: none;
     }
     /* V30.1 — avatar column removed. The .agent-card-id chip is the
        identifier (see below). Keeping a no-op rule so any stray markup
@@ -3207,6 +3233,17 @@ python3 .meshkore/scripts/daemon.py</pre>
         case 'chat.assistant.final':
         case 'task.completed':
           setAgentStatus(id, { state: 'done', lastText: (ev.text || '').slice(-180) });
+          // V45 — mark the agent as needing review unless its conv is
+          // currently in focus (operator was already watching). Without
+          // the focus exemption every completed dispatch would flag the
+          // agent the operator is staring at.
+          try {
+            if (typeof ReviewStore !== 'undefined' && id) {
+              const conv = ev.conv;
+              const focused = (typeof activeConv !== 'undefined' && conv && conv === activeConv);
+              if (!focused) ReviewStore.markPending(id);
+            }
+          } catch {}
           break;
         case 'task.failed':
           setAgentStatus(id, { state: 'failed', lastText: (ev.error || '').slice(-180) });
@@ -3582,6 +3619,89 @@ python3 .meshkore/scripts/daemon.py</pre>
     // which folder/port it was.
     const KNOWN_PROJECTS_KEY = 'mc-known-projects-v1';
     const KNOWN_PROJECTS_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+    // V45 — ReviewStore. Per-cluster "needs review" flag for agents.
+    //
+    // Lifecycle:
+    //   - markPending(agentId)  → an agent finished a task; surfaces in UI
+    //   - consume(agentId)      → operator opened the agent's chat; clears
+    //   - isPending(agentId)    → render agent card with yellow dashed ring
+    //   - anyPending()          → render project bar in yellow dashed
+    //   - setCluster(clusterId) → swap which project's pending set is active
+    //   - onChange(fn)          → re-render hook (rails subscribe at boot)
+    //
+    // State is keyed by cluster_id and persisted to localStorage so a
+    // page reload doesn't lose review markers. Fully isolated: no
+    // dependencies on AGENT_STATUS, no side effects beyond emit() →
+    // listeners. Can be removed entirely without breaking anything else.
+    const ReviewStore = (() => {
+      const KEY_PREFIX = 'mc-review-pending:';
+      const _byCluster = new Map();      // clusterId → Set<agentId>
+      const _listeners = new Set();
+      let _currentCluster = null;
+
+      function load(clusterId) {
+        if (!clusterId) return new Set();
+        try {
+          const raw = localStorage.getItem(KEY_PREFIX + clusterId);
+          const arr = JSON.parse(raw || '[]');
+          return new Set(Array.isArray(arr) ? arr.filter(x => typeof x === 'string') : []);
+        } catch { return new Set(); }
+      }
+      function persist(clusterId) {
+        if (!clusterId) return;
+        try {
+          const set = _byCluster.get(clusterId) || new Set();
+          localStorage.setItem(KEY_PREFIX + clusterId, JSON.stringify([...set]));
+        } catch {}
+      }
+      function emit() { _listeners.forEach(fn => { try { fn(); } catch {} }); }
+      function setFor(clusterId) {
+        if (!_byCluster.has(clusterId)) _byCluster.set(clusterId, load(clusterId));
+        return _byCluster.get(clusterId);
+      }
+
+      return {
+        setCluster(clusterId) {
+          if (clusterId === _currentCluster) return;
+          _currentCluster = clusterId || null;
+          if (_currentCluster) setFor(_currentCluster);
+          emit();
+        },
+        currentCluster() { return _currentCluster; },
+        markPending(agentId) {
+          if (!_currentCluster || !agentId) return;
+          const set = setFor(_currentCluster);
+          if (!set.has(agentId)) {
+            set.add(agentId);
+            persist(_currentCluster);
+            emit();
+          }
+        },
+        consume(agentId) {
+          if (!_currentCluster || !agentId) return;
+          const set = _byCluster.get(_currentCluster);
+          if (set && set.delete(agentId)) {
+            persist(_currentCluster);
+            emit();
+          }
+        },
+        isPending(agentId) {
+          if (!_currentCluster) return false;
+          const set = _byCluster.get(_currentCluster);
+          return !!(set && set.has(agentId));
+        },
+        anyPending(clusterId) {
+          const cid = clusterId || _currentCluster;
+          if (!cid) return false;
+          const set = _byCluster.get(cid) || load(cid);
+          // Cache it so anyPending(cid) for non-active clusters is cheap too.
+          if (!_byCluster.has(cid)) _byCluster.set(cid, set);
+          return set.size > 0;
+        },
+        onChange(fn) { _listeners.add(fn); return () => _listeners.delete(fn); },
+      };
+    })();
+
     const KnownProjects = (() => {
       function load() {
         try {
@@ -3725,6 +3845,10 @@ python3 .meshkore/scripts/daemon.py</pre>
         $('daemon-status').textContent = `online :${candidate.port}`;
         $('daemon-status').className = 'text-emerald-300';
         $('daemon-pill').setAttribute('title', `Daemon ${candidate.base}`);
+        // V45 — bind ReviewStore to this project so markPending/consume
+        // write to the right cluster_id and the rails subscribe to its
+        // changes.
+        try { ReviewStore?.setCluster(candidate.cluster_id || `port:${candidate.port}`); } catch {}
       }
       renderProjectBar();
       renderProjectsRail();
@@ -3789,16 +3913,21 @@ python3 .meshkore/scripts/daemon.py</pre>
         const active   = p.port === ACTIVE_PROJECT_PORT && !p._stopped;
         const stopped  = !!p._stopped;
         const working  = !stopped && (p._busy || (active && hasInFlightWork()));
+        // V45 — Pending review state. Per-cluster set in ReviewStore;
+        // mutually exclusive with working at render time (working wins).
+        const clusterId = p.cluster_id || `port:${p.port}`;
+        const pending = !working && !stopped && (typeof ReviewStore !== 'undefined' && ReviewStore.anyPending(clusterId));
         const displayName = projectAlias(p) || p.cluster_name || p.cluster_id || `:${p.port}`;
         const initials = projectInitials(displayName);
         const name     = esc(displayName);
         const portText = esc(String(p.port));
         const title    = stopped
           ? `${displayName} · stopped · :${p.port}${p.repo_path ? ' · ' + p.repo_path : ''} — click to see start command`
-          : `${displayName} · :${p.port}${p.cluster_id ? ' · ' + p.cluster_id : ''}`;
+          : `${displayName} · :${p.port}${p.cluster_id ? ' · ' + p.cluster_id : ''}${pending ? ' · review pending' : ''}`;
         const cls = ['proj-row'];
         if (active)  cls.push('active');
         if (working) cls.push('is-working');
+        if (pending) cls.push('is-pending-review');
         return `<div class="proj-row-wrap${active ? ' active' : ''}${stopped ? ' is-stopped' : ''}" data-port="${p.port}">
           <button type="button" class="${cls.join(' ')}"
             data-port="${p.port}" data-action="${stopped ? 'start' : 'switch'}"
@@ -4085,11 +4214,22 @@ python3 .meshkore/scripts/daemon.py</pre>
     // the roadmap — they don't mean a runner is doing anything THIS
     // second, so we deliberately ignore them. This keeps the rail
     // calm when nothing's actually happening.
+    // V45 — Stale-filter applied. AGENT_STATUS can keep a "thinking"
+    // entry indefinitely if a runner died without emitting done/failed.
+    // We treat any thinking/working entry older than 60 s as stale so
+    // a fresh page load (or a clean idle moment) doesn't leave the
+    // project row stuck in the bouncing-loader state.
+    const IN_FLIGHT_MAX_AGE_MS = 60_000;
     function hasInFlightWork() {
       try {
         if (typeof AGENT_STATUS !== 'undefined') {
+          const now = Date.now();
           for (const v of AGENT_STATUS.values()) {
-            if (v.state === 'thinking' || v.state === 'working') return true;
+            if (v.state !== 'thinking' && v.state !== 'working') continue;
+            // Treat missing `since` as stale; honour fresh timestamps.
+            const since = typeof v.since === 'number' ? v.since
+                        : (v.since ? new Date(v.since).getTime() : 0);
+            if (!since || (now - since) < IN_FLIGHT_MAX_AGE_MS) return true;
           }
         }
       } catch {}
@@ -4140,6 +4280,14 @@ python3 .meshkore/scripts/daemon.py</pre>
       const host = $('projects-rail');
       if (!host) return;
       host.dataset.mode = projectsRailMode();
+      // V45 — re-render the rail whenever a review marker is added or
+      // consumed. Idempotent: ReviewStore guarantees no emit on no-op.
+      try {
+        ReviewStore?.onChange(() => {
+          renderProjectsRail();
+          try { renderChatRail && renderChatRail(); } catch {}
+        });
+      } catch {}
       // Apply saved manual width if any (overrides preset on first paint).
       try {
         const saved = parseInt(localStorage.getItem(PROJECTS_RAIL_WIDTH_KEY) || '0', 10);
@@ -6361,11 +6509,14 @@ python3 .meshkore/scripts/daemon.py</pre>
         const locChip = loc.type === 'remote'
           ? `<span class="agent-card-loc is-remote" title="remote · ${esc(loc.host || loc.provider || '')}"><span class="agent-card-loc-dot"></span>remote</span>`
           : `<span class="agent-card-loc" title="running on this machine"><span class="agent-card-loc-dot"></span>local</span>`;
-        return `<button type="button" class="agent-card${isActive ? ' active' : ''}${state === 'working' ? ' working' : ''}"
+        // V45 — pending review ring (yellow dashed) when this agent
+        // finished a task and the operator hasn't opened the chat yet.
+        const pendingReview = (typeof ReviewStore !== 'undefined' && m.agentId && ReviewStore.isPending(m.agentId)) ? ' is-pending-review' : '';
+        return `<button type="button" class="agent-card${isActive ? ' active' : ''}${state === 'working' ? ' working' : ''}${pendingReview}"
           data-conv="${esc(c)}" data-type="${esc(m.type)}"
           style="--stripe:${stripe}"
           draggable="true"
-          title="${esc(title)} · ${esc(m.agentId)} · ${loc.type}">
+          title="${esc(title)} · ${esc(m.agentId)} · ${loc.type}${pendingReview ? ' · review pending' : ''}">
           <span class="agent-card-body">
             <span class="agent-card-head">
               <span class="agent-card-id">${esc(m.agentId)}</span>
@@ -6386,6 +6537,13 @@ python3 .meshkore/scripts/daemon.py</pre>
           const c = b.dataset.conv;
           if (!c) return;
           activeConv = c;
+          // V45 — opening an agent's chat consumes any pending review
+          // marker for that agent. anyPending() on the rail will update
+          // automatically via the ReviewStore.onChange subscription.
+          try {
+            const m = ensureConvMeta(c);
+            if (typeof ReviewStore !== 'undefined' && m?.agentId) ReviewStore.consume(m.agentId);
+          } catch {}
           if ($('conv-switcher')) $('conv-switcher').value = c;
           closeHistoryPanel();
           renderChatRail();
