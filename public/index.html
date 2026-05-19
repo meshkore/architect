@@ -4338,7 +4338,32 @@ python3 .meshkore/scripts/daemon.py</pre>
           if (btn) btn.disabled = false;
         }
       });
-      $('projects-rail-add')?.addEventListener('click', openAddProjectModal);
+      // V46 — Belt-and-braces wiring for the Add button. We attach a
+      // direct listener AND a document-level delegate, both pointing at
+      // the same safe handler. If anything in the modal body throws we
+      // surface it as an alert instead of dying silently.
+      const safeOpenAddProject = (e) => {
+        try { e?.stopPropagation?.(); e?.preventDefault?.(); } catch {}
+        try {
+          openAddProjectModal();
+        } catch (err) {
+          console.error('openAddProjectModal threw:', err);
+          alert('Add project — open failed: ' + (err?.message || err));
+        }
+      };
+      const directAdd = $('projects-rail-add');
+      if (directAdd && !directAdd._mcAddBound) {
+        directAdd.addEventListener('click', safeOpenAddProject);
+        directAdd._mcAddBound = true;
+      }
+      if (!document._mcAddDelegateBound) {
+        document.addEventListener('click', (e) => {
+          const t = e.target;
+          if (!t || !(t instanceof Element)) return;
+          if (t.closest && t.closest('#projects-rail-add')) safeOpenAddProject(e);
+        });
+        document._mcAddDelegateBound = true;
+      }
     }
 
     // Open the "Add a project" modal — explains how to spin up another
