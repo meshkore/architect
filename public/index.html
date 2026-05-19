@@ -166,6 +166,22 @@
        state pill — the row IS the indicator. */
     .projects-rail[data-mode="full"]  { --projects-w: 180px; }
     .projects-rail[data-mode="short"] { --projects-w: 56px; }
+    /* V44 — Drag handle on the right edge of the rail. A 4 px strip,
+       invisible at rest, lights up on hover. While dragging, body gets
+       .col-reordering and pointer-events are forced grabbing. */
+    .projects-rail-resize {
+      position: absolute;
+      top: 0; bottom: 0; right: -2px;
+      width: 4px;
+      cursor: col-resize;
+      z-index: 4;
+      background: transparent;
+      transition: background 120ms;
+    }
+    .projects-rail-resize:hover,
+    body.col-reordering .projects-rail-resize {
+      background: rgba(52,211,153,0.35);
+    }
 
     .projects-rail-head {
       display: flex; align-items: center; justify-content: space-between;
@@ -2376,6 +2392,7 @@ python3 .meshkore/scripts/daemon.py</pre>
 
     <!-- ── Projects rail (leftmost, pinned, non-draggable) ── -->
     <aside id="projects-rail" class="projects-rail" data-mode="full" aria-label="Open projects on this machine">
+      <div id="projects-rail-resize" class="projects-rail-resize" title="Drag to resize"></div>
       <div class="projects-rail-head">
         <span class="projects-rail-title">Projects</span>
         <button id="projects-rail-toggle" class="projects-rail-btn" title="Toggle rail width">
@@ -3810,6 +3827,8 @@ python3 .meshkore/scripts/daemon.py</pre>
       }).join('');
       list.querySelectorAll('[data-action="switch"]').forEach(btn => {
         btn.addEventListener('click', (e) => {
+          // Suppress if an inline rename is in flight on this very row.
+          if (btn.dataset.action === 'editing') return;
           e.stopPropagation();
           switchProject(parseInt(btn.dataset.port, 10));
         });
@@ -3823,42 +3842,13 @@ python3 .meshkore/scripts/daemon.py</pre>
         });
       });
       list.querySelectorAll('[data-action="edit"]').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
+        btn.addEventListener('click', (e) => {
           e.stopPropagation();
+          e.preventDefault();
           const port = parseInt(btn.dataset.port, 10);
           const p = PROJECTS.find(x => x.port === port);
           if (!p) return;
-          const current = projectAlias(p) || p.cluster_name || p.cluster_id || `:${p.port}`;
-          const next = await mcPromptText('Rename this project', {
-            title: 'Project alias',
-            subtitle: 'Stored on this browser. When you connect to the cluster cloud the rename will sync to other architects automatically.',
-            default: current,
-            placeholder: 'e.g. Personal · Side-project · API-prod',
-            okLabel: 'Save',
-          });
-          if (next === null) return;
-          const key  = p.cluster_id || `port:${p.port}`;
-          const val  = next.trim() || null;
-          // 1) Always write the alias locally so the rail flips immediately.
-          KnownProjects.setAlias(key, val);
-          renderProjectsRail();
-          // 2) Best-effort: tell the active daemon so it can persist the
-          //    new label and (once cluster-cloud lands) broadcast it.
-          //    The Python daemon already exposes a no-auth /name on the
-          //    next phase; until then this is a no-op the daemon will
-          //    ignore (404), and we don't surface the failure to the UI.
-          if (port === ACTIVE_PROJECT_PORT && p.base) {
-            try {
-              await fetch(`${p.base}/name`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(DAEMON_TOKEN ? { 'Authorization': `Bearer ${DAEMON_TOKEN}` } : {}),
-                },
-                body: JSON.stringify({ alias: val }),
-              });
-            } catch {}
-          }
+          startInlineRename(p);
         });
       });
       list.querySelectorAll('[data-action="stop"]').forEach(btn => {
@@ -4011,6 +4001,80 @@ python3 .meshkore/scripts/daemon.py</pre>
     }
     // Per-project alias is operator-only text stored in localStorage.
     // Falls back to cluster_name from cluster.yaml when not set.
+    // V44 — In-situ rename. Swap the .proj-row-name span for an <input>,
+    // autofocus + select, commit on Enter / blur, cancel on Esc. The
+    // input lives inside the row so the operator never leaves the rail
+    // and the row itself stays interactive otherwise. The row's
+    // click→switch listener is suppressed while editing via a flag.
+    let _renameInFlight = null; // port currently being edited, or null
+    function startInlineRename(p) {
+      if (_renameInFlight !== null) return;
+      _renameInFlight = p.port;
+      const host = $('projects-rail-list');
+      if (!host) return;
+      const rowWrap = host.querySelector(`.proj-row-wrap[data-port="${p.port}"]`);
+      const rowBtn  = rowWrap?.querySelector('.proj-row');
+      const nameEl  = rowWrap?.querySelector('.proj-row-name');
+      if (!rowWrap || !rowBtn || !nameEl) { _renameInFlight = null; return; }
+      const original = projectAlias(p) || p.cluster_name || p.cluster_id || `:${p.port}`;
+
+      const input = document.createElement('input');
+      input.type  = 'text';
+      input.value = original;
+      input.spellcheck = false;
+      input.className = 'proj-row-name proj-row-name-edit';
+      Object.assign(input.style, {
+        flex: '1', minWidth: '0',
+        background: 'rgba(2,4,12,0.95)',
+        border: '1px solid rgba(96,165,250,0.55)',
+        borderRadius: '4px',
+        color: '#ffffff',
+        font: 'inherit',
+        padding: '1px 6px',
+        margin: '-2px 0',
+        outline: 'none',
+      });
+
+      // Replace the visible name and disable the row's switch action
+      // while editing.
+      nameEl.replaceWith(input);
+      const prevAction = rowBtn.dataset.action;
+      rowBtn.dataset.action = 'editing';
+      input.focus();
+      input.select();
+
+      const finish = (commit) => {
+        if (_renameInFlight !== p.port) return;
+        _renameInFlight = null;
+        rowBtn.dataset.action = prevAction;
+        if (commit) {
+          const val = (input.value || '').trim() || null;
+          KnownProjects.setAlias(p.cluster_id || `port:${p.port}`, val);
+          // Best-effort remote write — daemon may 404 today; cluster-cloud
+          // will pick it up later. We don't surface failures.
+          if (p.port === ACTIVE_PROJECT_PORT && p.base) {
+            fetch(`${p.base}/name`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(DAEMON_TOKEN ? { 'Authorization': `Bearer ${DAEMON_TOKEN}` } : {}),
+              },
+              body: JSON.stringify({ alias: val }),
+            }).catch(() => {});
+          }
+        }
+        renderProjectsRail();
+      };
+
+      input.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      });
+      input.addEventListener('click',  (e) => e.stopPropagation());
+      input.addEventListener('blur',   () => finish(true));
+    }
+
     function projectAlias(p) {
       const key = p.cluster_id || `port:${p.port}`;
       return KnownProjects.alias(key) || null;
@@ -4045,12 +4109,80 @@ python3 .meshkore/scripts/daemon.py</pre>
       return out.toUpperCase().padEnd(3, '·').slice(0, 3);
     }
 
+    // V44 — Manual drag-to-resize handle on the rail's right edge.
+    // Width persists to localStorage as mc-projects-rail-width-v1. The
+    // toggle button still works: clicking it snaps to a preset width
+    // (full=180, short=56) and clears the manual override. Dragging
+    // sets a manual width AND auto-flips data-mode based on a 100 px
+    // threshold so labels/initials swap smoothly mid-drag.
+    const PROJECTS_RAIL_WIDTH_KEY = 'mc-projects-rail-width-v1';
+    function setRailWidth(px, opts = {}) {
+      const host = $('projects-rail');
+      if (!host) return;
+      const w = Math.max(40, Math.min(360, Math.round(px)));
+      host.style.setProperty('--projects-w', w + 'px');
+      host.style.flex = `0 0 ${w}px`;
+      host.style.width = w + 'px';
+      // Auto-mode: short below 100 px, full above. Doesn't write to the
+      // mode preference key (so the toggle button is still the source
+      // of truth for the preset choice).
+      host.dataset.mode = w < 100 ? 'short' : 'full';
+      if (opts.persist !== false) {
+        try { localStorage.setItem(PROJECTS_RAIL_WIDTH_KEY, String(w)); } catch {}
+      }
+    }
+    function clearRailManualWidth() {
+      try { localStorage.removeItem(PROJECTS_RAIL_WIDTH_KEY); } catch {}
+    }
+
     // Initial mode + wire toggle/refresh once the DOM is up.
     function initProjectsRail() {
       const host = $('projects-rail');
       if (!host) return;
       host.dataset.mode = projectsRailMode();
-      $('projects-rail-toggle')?.addEventListener('click', cycleProjectsRailMode);
+      // Apply saved manual width if any (overrides preset on first paint).
+      try {
+        const saved = parseInt(localStorage.getItem(PROJECTS_RAIL_WIDTH_KEY) || '0', 10);
+        if (saved >= 40 && saved <= 360) setRailWidth(saved, { persist: false });
+      } catch {}
+
+      $('projects-rail-toggle')?.addEventListener('click', () => {
+        // Toggle snaps to the OTHER preset and wipes the manual width.
+        const next = (projectsRailMode() === 'full') ? 'short' : 'full';
+        clearRailManualWidth();
+        try { localStorage.setItem(PROJECTS_RAIL_KEY, next); } catch {}
+        host.style.removeProperty('flex');
+        host.style.removeProperty('width');
+        host.style.removeProperty('--projects-w');
+        host.dataset.mode = next;
+        renderProjectsRail();
+      });
+
+      // Drag handle
+      const handle = $('projects-rail-resize');
+      if (handle) {
+        handle.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          const startX = e.clientX;
+          const startW = host.getBoundingClientRect().width;
+          document.body.classList.add('col-reordering');
+          const onMove = (ev) => {
+            const dx = ev.clientX - startX;
+            setRailWidth(startW + dx, { persist: false });
+            renderProjectsRail();
+          };
+          const onUp = (ev) => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            document.body.classList.remove('col-reordering');
+            const w = host.getBoundingClientRect().width;
+            setRailWidth(w);  // persists
+          };
+          window.addEventListener('pointermove', onMove);
+          window.addEventListener('pointerup', onUp);
+        });
+      }
       $('projects-rail-refresh')?.addEventListener('click', async () => {
         const btn = $('projects-rail-refresh');
         if (btn) btn.disabled = true;
@@ -5817,13 +5949,19 @@ python3 .meshkore/scripts/daemon.py</pre>
         }
       });
     }
+    // V44 — Self-disabling poller. The /v1/tasks/live endpoint exists on
+    // some daemon builds but not the canonical Python daemon. If the
+    // daemon answers 404, we stop polling for the lifetime of this
+    // session — no point spraying the console with 404s every 2.5 s.
+    let _liveUnsupported = false;
     async function fetchLiveTaskState() {
-      if (!DAEMON_BASE) return;
+      if (!DAEMON_BASE || _liveUnsupported) return;
       try {
         const r = await fetch(`${DAEMON_BASE}/v1/tasks/live`, {
           headers: DAEMON_TOKEN ? { Authorization: `Bearer ${DAEMON_TOKEN}` } : {},
           signal: AbortSignal.timeout(3000)
         });
+        if (r.status === 404) { _liveUnsupported = true; stopLivePolling(); return; }
         if (!r.ok) return;
         const data = await r.json();
         let changed = false;
@@ -5837,7 +5975,7 @@ python3 .meshkore/scripts/daemon.py</pre>
       } catch {}
     }
     function startLivePolling() {
-      if (_livePoller) return;
+      if (_livePoller || _liveUnsupported) return;
       _livePoller = setInterval(fetchLiveTaskState, 2500);
     }
     function stopLivePolling() {
