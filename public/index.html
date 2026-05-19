@@ -155,10 +155,11 @@
       box-sizing: border-box;
       transition: flex-basis 160ms, width 160ms;
     }
-    .projects-rail[data-mode="full"] { --projects-w: 180px; }
-    .projects-rail[data-mode="id"]   { --projects-w: 88px; }
-    .projects-rail[data-mode="num"]  { --projects-w: 48px; }
-    .projects-rail[data-mode="mini"] { --projects-w: 28px; }
+    /* V36 — Two modes only: full (project name) + short (3-letter pill).
+       Edit/Stop buttons fly in on hover over each row, overlayed on top,
+       so the rail keeps the same row width regardless of action state. */
+    .projects-rail[data-mode="full"]  { --projects-w: 180px; }
+    .projects-rail[data-mode="short"] { --projects-w: 64px; }
 
     .projects-rail-head {
       display: flex; align-items: center; justify-content: space-between;
@@ -172,8 +173,7 @@
       text-transform: uppercase;
       color: #9ca3af; font-weight: 600;
     }
-    .projects-rail[data-mode="num"]  .projects-rail-title,
-    .projects-rail[data-mode="mini"] .projects-rail-title { display: none; }
+    .projects-rail[data-mode="short"] .projects-rail-title { display: none; }
     .projects-rail-btn {
       width: 20px; height: 20px;
       display: inline-flex; align-items: center; justify-content: center;
@@ -187,56 +187,36 @@
       border-color: rgba(52,211,153,0.45);
       background: rgba(16,185,129,0.08);
     }
-    .projects-rail[data-mode="mini"] .projects-rail-head {
-      padding: 6px 4px;
+    .projects-rail[data-mode="short"] .projects-rail-head {
+      padding: 8px 4px;
       justify-content: center;
-    }
-    .projects-rail[data-mode="mini"] .projects-rail-btn {
-      width: 18px; height: 18px;
     }
 
     .projects-rail-list {
       flex: 1; min-height: 0;
       overflow-y: auto; overflow-x: hidden;
       display: flex; flex-direction: column;
-      gap: 4px; padding: 8px;
+      gap: 6px; padding: 8px;
       scrollbar-width: thin;
     }
-    .projects-rail[data-mode="num"]  .projects-rail-list,
-    .projects-rail[data-mode="mini"] .projects-rail-list {
-      padding: 6px 4px;
-      align-items: center;
+    .projects-rail[data-mode="short"] .projects-rail-list {
+      padding: 8px 6px;
+      align-items: stretch;
+      gap: 5px;
     }
     .projects-rail-list::-webkit-scrollbar { width: 0; }
 
+    /* ── Row wrapper holds the row + the hover-overlay actions. ── */
     .proj-row-wrap {
-      display: flex; align-items: stretch; gap: 4px;
+      position: relative;
+      display: flex; align-items: stretch;
       width: 100%; min-width: 0;
     }
-    .proj-row-stop {
-      flex-shrink: 0;
-      display: inline-flex; align-items: center; justify-content: center;
-      width: 24px;
-      border-radius: 6px;
-      border: 1px solid rgba(75,85,99,0.30);
-      background: rgba(11,18,32,0.55);
-      color: #6b7280;
-      cursor: pointer;
-      transition: color 120ms, border-color 120ms, background 120ms;
-    }
-    .proj-row-stop:hover {
-      color: #f87171;
-      border-color: rgba(248,113,113,0.45);
-      background: rgba(248,113,113,0.08);
-    }
-    /* Hide stop button in compact modes — the wrap stays clickable. */
-    .projects-rail[data-mode="num"]  .proj-row-stop,
-    .projects-rail[data-mode="mini"] .proj-row-stop { display: none; }
 
     .proj-row {
       display: flex; align-items: center; gap: 8px;
-      padding: 7px 9px;
-      border-radius: 7px;
+      padding: 7px 10px;
+      border-radius: 8px;
       border: 1px solid rgba(75,85,99,0.30);
       background: rgba(11,18,32,0.55);
       cursor: pointer;
@@ -255,26 +235,66 @@
       color: #ecfdf5;
       box-shadow: inset 3px 0 0 0 #34d399;
     }
-    .proj-dot {
-      flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%;
-      background: #6b7280;
+
+    /* ── State indicator (replaces the plain dot) — char-sized,
+       breathes when working, static dot otherwise. ── */
+    .proj-state {
+      flex-shrink: 0;
+      position: relative;
+      width: 14px; height: 14px;
+      display: inline-flex; align-items: center; justify-content: center;
     }
-    .proj-dot.up    { background: #34d399; box-shadow: 0 0 0 3px rgba(52,211,153,0.18); }
-    .proj-dot.busy  { background: #fbbf24; box-shadow: 0 0 0 3px rgba(251,191,36,0.18); }
-    .proj-dot.err   { background: #f87171; box-shadow: 0 0 0 3px rgba(248,113,113,0.18); }
-    .proj-dot.stopped { background: #4b5563; box-shadow: 0 0 0 3px rgba(75,85,99,0.18); }
-    /* Stopped rows: muted so they don't compete with live ones, but
-       still clickable so the operator can reach the Start command. */
+    .proj-state::before {
+      /* outer halo — only animates in `up` (working) state */
+      content: ''; position: absolute; inset: 0;
+      border-radius: 50%;
+      background: transparent;
+    }
+    .proj-state::after {
+      /* inner solid core */
+      content: ''; width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #6b7280;
+      box-shadow: 0 0 0 2px rgba(75,85,99,0.18);
+      transition: background 160ms, box-shadow 160ms, transform 160ms;
+    }
+    .proj-state.up::after {
+      background: #34d399;
+      box-shadow: 0 0 0 2px rgba(52,211,153,0.18);
+    }
+    .proj-state.up::before {
+      background: rgba(52,211,153,0.45);
+      animation: proj-pulse 1.8s cubic-bezier(0.16,1,0.3,1) infinite;
+    }
+    .proj-state.busy::after {
+      background: #fbbf24;
+      box-shadow: 0 0 0 2px rgba(251,191,36,0.18);
+    }
+    .proj-state.busy::before {
+      background: rgba(251,191,36,0.50);
+      animation: proj-pulse 1.4s cubic-bezier(0.16,1,0.3,1) infinite;
+    }
+    .proj-state.err::after {
+      background: #f87171;
+      box-shadow: 0 0 0 2px rgba(248,113,113,0.18);
+    }
+    .proj-state.stopped::after {
+      background: #4b5563;
+      box-shadow: 0 0 0 2px rgba(75,85,99,0.18);
+    }
+    @keyframes proj-pulse {
+      0%   { transform: scale(0.45); opacity: 0.85; }
+      80%  { transform: scale(1.45); opacity: 0;    }
+      100% { transform: scale(1.45); opacity: 0;    }
+    }
+
+    /* Stopped rows: muted so they don't compete with live ones. */
     .proj-row-wrap.is-stopped .proj-row {
       opacity: 0.55;
       background: rgba(11,18,32,0.30);
       color: #9ca3af;
     }
     .proj-row-wrap.is-stopped .proj-row:hover { opacity: 0.9; border-color: rgba(96,165,250,0.45); color: #cbd5e1; }
-    .proj-row-wrap.is-stopped .proj-row-port { color: #6b7280; }
-    /* The Stop button doesn't make sense on a stopped row — hide it. */
-    .proj-row-wrap.is-stopped .proj-row-stop { display: none; }
-    /* Replace it with a "Start" cue label in the row itself */
     .proj-row .proj-row-start {
       display: none;
       margin-left: auto;
@@ -285,47 +305,75 @@
       color: #60a5fa;
     }
     .proj-row-wrap.is-stopped .proj-row .proj-row-start { display: inline; }
-    .proj-row-wrap.is-stopped .proj-row .proj-row-port  { display: none; }
-    .proj-row-name  { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-    .proj-row-id    {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 10px; color: #6b7280;
+
+    .proj-row-name {
+      flex: 1; min-width: 0;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-weight: 500;
     }
-    .proj-row-port {
+
+    /* ── Short mode: render the row as a chip with a 3-initial pill. */
+    .proj-row-initials {
+      display: none;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 10px; color: #9ca3af; opacity: 0.7;
-      flex-shrink: 0;
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 0.04em;
+      color: #cbd5e1;
     }
-    /* Mode-specific row layout */
-    .projects-rail[data-mode="full"] .proj-row-id,
-    .projects-rail[data-mode="full"] .proj-row-port { display: none; }
-    .projects-rail[data-mode="id"]  .proj-row-name { display: none; }
-    .projects-rail[data-mode="id"]  .proj-row-port { display: none; }
-    .projects-rail[data-mode="id"]  .proj-row { padding: 6px 8px; gap: 6px; }
-    .projects-rail[data-mode="num"] .proj-row {
-      padding: 0; gap: 0;
-      width: 36px; height: 36px;
+    .projects-rail[data-mode="short"] .proj-row {
+      padding: 7px 6px;
+      gap: 4px;
       justify-content: center;
-      border-radius: 8px;
     }
-    .projects-rail[data-mode="num"] .proj-row-name,
-    .projects-rail[data-mode="num"] .proj-row-id { display: none; }
-    .projects-rail[data-mode="num"] .proj-row-port {
-      font-size: 11px; font-weight: 600; color: #d1d5db; opacity: 1;
+    .projects-rail[data-mode="short"] .proj-row-name { display: none; }
+    .projects-rail[data-mode="short"] .proj-row-initials { display: inline-block; }
+
+    /* ── Hover-overlay action buttons. Right-aligned, fade in on
+       row hover. Buttons sit ABOVE the row's content with z-index so
+       they don't change the row's width. ── */
+    .proj-actions {
+      position: absolute;
+      top: 50%; right: 6px;
+      transform: translateY(-50%);
+      display: flex; gap: 3px;
+      opacity: 0; pointer-events: none;
+      transition: opacity 120ms;
+      z-index: 2;
     }
-    .projects-rail[data-mode="num"] .proj-dot { display: none; }
-    .projects-rail[data-mode="mini"] .proj-row {
-      padding: 0; gap: 0;
-      width: 20px; height: 20px;
-      justify-content: center;
-      border-radius: 50%;
+    .proj-row-wrap:hover .proj-actions {
+      opacity: 1; pointer-events: auto;
     }
-    .projects-rail[data-mode="mini"] .proj-row-name,
-    .projects-rail[data-mode="mini"] .proj-row-id,
-    .projects-rail[data-mode="mini"] .proj-row-port { display: none; }
-    .projects-rail[data-mode="mini"] .proj-row { border: none; }
-    .projects-rail[data-mode="mini"] .proj-row.active .proj-dot { transform: scale(1.4); }
+    .proj-action {
+      width: 22px; height: 22px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 5px;
+      background: rgba(2,6,23,0.85);
+      border: 1px solid rgba(75,85,99,0.50);
+      backdrop-filter: blur(4px);
+      color: #9ca3af;
+      cursor: pointer;
+      transition: color 120ms, border-color 120ms, background 120ms;
+      padding: 0;
+    }
+    .proj-action:hover {
+      color: #e5e7eb;
+      border-color: rgba(148,163,184,0.70);
+      background: rgba(15,23,42,0.95);
+    }
+    .proj-action.is-stop:hover {
+      color: #f87171;
+      border-color: rgba(248,113,113,0.55);
+      background: rgba(248,113,113,0.10);
+    }
+    .proj-action.is-edit:hover {
+      color: #93c5fd;
+      border-color: rgba(96,165,250,0.55);
+      background: rgba(96,165,250,0.10);
+    }
+    /* Hide actions in short mode and on stopped rows (stop = N/A there;
+       edit is still possible — keep it but reposition). */
+    .projects-rail[data-mode="short"] .proj-actions { display: none; }
+    .proj-row-wrap.is-stopped .proj-action.is-stop { display: none; }
 
     .projects-rail-empty {
       padding: 16px 12px;
@@ -333,8 +381,7 @@
       color: #6b7280;
       line-height: 1.5;
     }
-    .projects-rail[data-mode="num"]  .projects-rail-empty,
-    .projects-rail[data-mode="mini"] .projects-rail-empty { display: none; }
+    .projects-rail[data-mode="short"] .projects-rail-empty { display: none; }
 
     .projects-rail-foot {
       padding: 6px 8px;
@@ -342,6 +389,7 @@
       flex-shrink: 0;
       display: flex; flex-direction: column; gap: 4px;
     }
+    .projects-rail[data-mode="short"] .projects-rail-foot { padding: 6px 6px; }
     .projects-rail-foot-btn.is-primary {
       background: rgba(16,185,129,0.10);
       border-color: rgba(52,211,153,0.35);
@@ -366,6 +414,9 @@
       cursor: pointer;
       transition: color 120ms, border-color 120ms, background 120ms;
     }
+    /* In short mode, the label hides; only the icon stays. */
+    .projects-rail[data-mode="short"] .projects-rail-foot-label { display: none; }
+    .projects-rail[data-mode="short"] .projects-rail-foot-btn { padding: 6px 0; }
     .projects-rail-foot-btn:hover {
       color: #34d399;
       border-color: rgba(52,211,153,0.40);
@@ -3513,6 +3564,24 @@ python3 .meshkore/scripts/daemon.py</pre>
             x.port !== portOrId && x.cluster_id !== portOrId);
           save(items);
         },
+        // V36 — per-project alias for the rail. Keyed by cluster_id when
+        // we have one, else by `port:<n>`. Pass null to clear.
+        alias(key) {
+          if (!key) return null;
+          try {
+            const aliases = JSON.parse(localStorage.getItem('mc-project-aliases-v1') || '{}');
+            return typeof aliases[key] === 'string' ? aliases[key] : null;
+          } catch { return null; }
+        },
+        setAlias(key, value) {
+          if (!key) return;
+          try {
+            const aliases = JSON.parse(localStorage.getItem('mc-project-aliases-v1') || '{}');
+            if (value && value.length) aliases[key] = value;
+            else delete aliases[key];
+            localStorage.setItem('mc-project-aliases-v1', JSON.stringify(aliases));
+          } catch {}
+        },
       };
     })();
 
@@ -3602,13 +3671,18 @@ python3 .meshkore/scripts/daemon.py</pre>
     // NOT part of the reorderable .three-col grid — its position never
     // moves; only its width does (full / id / num / mini), cycled by
     // the toggle button at the top.
+    // V36 — two modes only: full (name) + short (3-letter pill).
     const PROJECTS_RAIL_KEY = 'mc-projects-rail-mode-v1';
-    const RAIL_MODES = ['full', 'id', 'num', 'mini'];
+    const RAIL_MODES = ['full', 'short'];
     function projectsRailMode() {
       try {
         const v = localStorage.getItem(PROJECTS_RAIL_KEY);
-        return RAIL_MODES.includes(v) ? v : 'id'; // default: id (compact)
-      } catch { return 'id'; }
+        if (RAIL_MODES.includes(v)) return v;
+        // Migration from old 4-mode model: id/num/mini → short, anything
+        // else → full.
+        if (v === 'id' || v === 'num' || v === 'mini') return 'short';
+      } catch {}
+      return 'full';
     }
     function setProjectsRailMode(mode) {
       if (!RAIL_MODES.includes(mode)) return;
@@ -3639,29 +3713,39 @@ python3 .meshkore/scripts/daemon.py</pre>
       }
       list.innerHTML = all.map(p => {
         const active   = p.port === ACTIVE_PROJECT_PORT && !p._stopped;
-        const dotCls   = projectDotKind(p);
+        const stateCls = projectStateKind(p);
         const stopped  = !!p._stopped;
-        const name     = esc(p.cluster_name || p.cluster_id || `:${p.port}`);
-        const idText   = esc(p.cluster_id || '');
+        const displayName = projectAlias(p) || p.cluster_name || p.cluster_id || `:${p.port}`;
+        const initials = projectInitials(displayName);
+        const name     = esc(displayName);
         const portText = esc(String(p.port));
         const title    = stopped
-          ? `${p.cluster_name || p.cluster_id || 'cluster'} · stopped · :${p.port}${p.repo_path ? ' · ' + p.repo_path : ''} — click to see start command`
-          : `${p.cluster_name || p.cluster_id || 'cluster'} · :${p.port}${p.cluster_id ? ' · ' + p.cluster_id : ''}`;
+          ? `${displayName} · stopped · :${p.port}${p.repo_path ? ' · ' + p.repo_path : ''} — click to see start command`
+          : `${displayName} · :${p.port}${p.cluster_id ? ' · ' + p.cluster_id : ''}`;
         return `<div class="proj-row-wrap${active ? ' active' : ''}${stopped ? ' is-stopped' : ''}" data-port="${p.port}">
           <button type="button" class="proj-row${active ? ' active' : ''}"
             data-port="${p.port}" data-action="${stopped ? 'start' : 'switch'}"
             title="${esc(title)}" aria-label="${esc(title)}">
-            <span class="proj-dot ${dotCls}"></span>
+            <span class="proj-state ${stateCls}" aria-hidden="true"></span>
             <span class="proj-row-name">${name}</span>
-            <span class="proj-row-id">${idText}</span>
-            <span class="proj-row-port">:${portText}</span>
+            <span class="proj-row-initials" title="${esc(displayName)}">${esc(initials)}</span>
             <span class="proj-row-start">start ↗</span>
           </button>
-          <button type="button" class="proj-row-stop"
-            data-port="${p.port}" data-action="stop"
-            title="Stop this daemon (POST /shutdown)" aria-label="Stop daemon on port ${portText}">
-            <svg viewBox="0 0 24 24" stroke="none" fill="currentColor" width="11" height="11"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
-          </button>
+          <div class="proj-actions" data-port="${p.port}">
+            <button type="button" class="proj-action is-edit" data-port="${p.port}" data-action="edit"
+              title="Rename this project (alias stored in this browser only)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+            <button type="button" class="proj-action is-stop" data-port="${p.port}" data-action="stop"
+              title="Stop this daemon (POST /shutdown)">
+              <svg viewBox="0 0 24 24" stroke="none" fill="currentColor" width="10" height="10">
+                <rect x="6" y="6" width="12" height="12" rx="1.5"/>
+              </svg>
+            </button>
+          </div>
         </div>`;
       }).join('');
       list.querySelectorAll('[data-action="switch"]').forEach(btn => {
@@ -3676,6 +3760,25 @@ python3 .meshkore/scripts/daemon.py</pre>
           const port = parseInt(btn.dataset.port, 10);
           const p = PROJECTS.find(x => x.port === port);
           if (p) openStartProjectModal(p);
+        });
+      });
+      list.querySelectorAll('[data-action="edit"]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const port = parseInt(btn.dataset.port, 10);
+          const p = PROJECTS.find(x => x.port === port);
+          if (!p) return;
+          const current = projectAlias(p) || p.cluster_name || p.cluster_id || `:${p.port}`;
+          const next = await mcPromptText('Rename this project', {
+            title: 'Project alias',
+            subtitle: 'Stored only in this browser. Does not change cluster.yaml.',
+            default: current,
+            placeholder: 'e.g. Personal · Side-project · API-prod',
+            okLabel: 'Save',
+          });
+          if (next === null) return;
+          KnownProjects.setAlias(p.cluster_id || `port:${p.port}`, next.trim() || null);
+          renderProjectsRail();
         });
       });
       list.querySelectorAll('[data-action="stop"]').forEach(btn => {
@@ -3788,6 +3891,33 @@ python3 .meshkore/scripts/daemon.py</pre>
       if (p._error)   return 'err';
       if (p._busy)    return 'busy';
       return 'up';
+    }
+    // V36 — new state classifier for the breathing pill. Same semantics
+    // as projectDotKind but rendered by .proj-state (a pulsing halo
+    // wrapping a solid core) instead of a static .proj-dot.
+    function projectStateKind(p) {
+      if (p._stopped) return 'stopped';
+      if (p._error)   return 'err';
+      if (p._busy)    return 'busy';
+      return 'up';
+    }
+    // Per-project alias is operator-only text stored in localStorage.
+    // Falls back to cluster_name from cluster.yaml when not set.
+    function projectAlias(p) {
+      const key = p.cluster_id || `port:${p.port}`;
+      return KnownProjects.alias(key) || null;
+    }
+    // Compact label for short mode: 3 alphanumeric initials from words.
+    // "MeshKore Core" → "MKC" · "smoke-test" → "SMT" · "api" → "API".
+    function projectInitials(name) {
+      const s = String(name || '').trim();
+      if (!s) return '···';
+      const words = s.replace(/[^A-Za-z0-9\s\-_]/g, ' ').split(/[\s\-_]+/).filter(Boolean);
+      let out;
+      if (words.length >= 3) out = words.slice(0,3).map(w => w[0]).join('');
+      else if (words.length === 2) out = words[0][0] + words[0].slice(1,2) + words[1][0];
+      else out = (words[0] || '').slice(0, 3);
+      return out.toUpperCase().padEnd(3, '·').slice(0, 3);
     }
 
     // Initial mode + wire toggle/refresh once the DOM is up.
