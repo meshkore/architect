@@ -230,18 +230,20 @@
        up/down before the first letter. No fill flashing, no halo, no
        border pulse — nothing that competes with the working area.
     */
-    /* V42 — Replace the full white border with a LEFT accent bar drawn
-       via inset box-shadow. Bar is dim slate for idle rows and a thick
-       bright bar (white) for the active project. The rest of the row
-       has no border at all — fits the minimal panel aesthetic.       */
+    /* V43 — Left accent as a *real* rectangle (::before), not an inset
+       shadow, so it never inherits the row's border-radius (no arcs).
+       Idle = 2 px dim slate. Active = 4 px emerald (project color in
+       our palette). All rows use the same padding-left so the working
+       bar (placed BEFORE the name) lines up across the entire list,
+       regardless of accent width. */
     .proj-row {
       display: flex; align-items: center; gap: 8px;
-      padding: 7px 10px 7px 14px;       /* extra left so content clears the accent bar */
+      padding: 7px 10px 7px 16px;
       border-radius: 8px;
       border: none;
       background: transparent;
       cursor: pointer;
-      transition: background 160ms, color 160ms, box-shadow 160ms;
+      transition: background 160ms, color 160ms;
       color: #cbd5e1;
       text-align: left;
       flex: 1; min-width: 0;
@@ -249,23 +251,29 @@
       font-size: 12px;
       line-height: 1.3;
       position: relative;
-      box-shadow: inset 2px 0 0 0 rgba(75,85,99,0.55);
     }
-    .proj-row:hover {
-      background: rgba(255,255,255,0.04);
-      color: #f3f4f6;
-      box-shadow: inset 2px 0 0 0 rgba(148,163,184,0.85);
+    .proj-row::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 4px; bottom: 4px;
+      width: 2px;
+      background: rgba(75,85,99,0.65);
+      transition: width 140ms, background 140ms, top 140ms, bottom 140ms;
+      border-radius: 0;
     }
+    .proj-row:hover { background: rgba(255,255,255,0.03); color: #f3f4f6; }
+    .proj-row:hover::before { background: rgba(148,163,184,0.85); }
     .proj-row.active {
-      background: rgba(255,255,255,0.05);
+      background: rgba(52,211,153,0.06);
       color: #ffffff;
       font-weight: 600;
-      box-shadow: inset 4px 0 0 0 #f3f4f6;   /* triple-thick white accent */
     }
-    .proj-row.active:hover {
-      background: rgba(255,255,255,0.08);
-      box-shadow: inset 4px 0 0 0 #ffffff;
+    .proj-row.active::before {
+      width: 4px;
+      top: 0; bottom: 0;          /* full row height when active */
+      background: #34d399;        /* emerald — the standard palette green */
     }
+    .proj-row.active:hover { background: rgba(52,211,153,0.10); }
 
     /* ── Working indicator — a 2 px vertical bar that bounces up/down
        inside its own 2×14 track, placed BEFORE the project name. Only
@@ -298,17 +306,17 @@
       50%      { top: calc(100% - 5px); }
     }
 
-    /* Stopped — left accent in dim blue (revival cue). No fill. */
+    /* Stopped — left accent in dim blue (revival cue). Same rectangle
+       pattern as active; just narrower + dimmer + blue. */
     .proj-row-wrap.is-stopped .proj-row {
       background: transparent;
       color: #9ca3af;
-      box-shadow: inset 2px 0 0 0 rgba(96,165,250,0.45);
     }
-    .proj-row-wrap.is-stopped .proj-row:hover {
-      background: rgba(96,165,250,0.05);
-      color: #cbd5e1;
-      box-shadow: inset 2px 0 0 0 rgba(96,165,250,0.75);
+    .proj-row-wrap.is-stopped .proj-row::before {
+      background: rgba(96,165,250,0.50);
     }
+    .proj-row-wrap.is-stopped .proj-row:hover { background: rgba(96,165,250,0.05); color: #cbd5e1; }
+    .proj-row-wrap.is-stopped .proj-row:hover::before { background: rgba(96,165,250,0.80); }
     .proj-row-wrap.is-stopped .proj-row.is-working::before { display: none; }
 
     .proj-row .proj-row-start {
@@ -358,32 +366,34 @@
     .proj-row-wrap:hover .proj-actions {
       opacity: 1; pointer-events: auto;
     }
+    /* V43 — Hover-overlay icons are now coloured AT REST (blue edit,
+       red stop) with an opaque-ish black backdrop so they read clearly
+       even on top of project-name text. The backdrop blur + 92 % black
+       fully masks whatever's behind them. */
     .proj-action {
       width: 22px; height: 22px;
       display: inline-flex; align-items: center; justify-content: center;
       border-radius: 5px;
-      background: rgba(2,6,23,0.85);
-      border: 1px solid rgba(75,85,99,0.50);
-      backdrop-filter: blur(4px);
-      color: #9ca3af;
+      background: rgba(2,4,12,0.92);
+      border: 1px solid rgba(75,85,99,0.55);
+      backdrop-filter: blur(6px);
       cursor: pointer;
-      transition: color 120ms, border-color 120ms, background 120ms;
+      transition: color 120ms, border-color 120ms, background 120ms, transform 120ms;
       padding: 0;
     }
-    .proj-action:hover {
-      color: #e5e7eb;
-      border-color: rgba(148,163,184,0.70);
-      background: rgba(15,23,42,0.95);
+    .proj-action.is-edit { color: #60a5fa; }     /* blue at rest */
+    .proj-action.is-stop { color: #f87171; }     /* red at rest */
+    .proj-action.is-edit:hover {
+      color: #bfdbfe;
+      border-color: rgba(96,165,250,0.85);
+      background: rgba(2,4,12,0.98);
+      transform: scale(1.05);
     }
     .proj-action.is-stop:hover {
-      color: #f87171;
-      border-color: rgba(248,113,113,0.55);
-      background: rgba(248,113,113,0.10);
-    }
-    .proj-action.is-edit:hover {
-      color: #93c5fd;
-      border-color: rgba(96,165,250,0.55);
-      background: rgba(96,165,250,0.10);
+      color: #fecaca;
+      border-color: rgba(248,113,113,0.85);
+      background: rgba(2,4,12,0.98);
+      transform: scale(1.05);
     }
     /* Hide actions in short mode and on stopped rows (stop = N/A there;
        edit is still possible — keep it but reposition). */
@@ -3821,21 +3831,41 @@ python3 .meshkore/scripts/daemon.py</pre>
           const current = projectAlias(p) || p.cluster_name || p.cluster_id || `:${p.port}`;
           const next = await mcPromptText('Rename this project', {
             title: 'Project alias',
-            subtitle: 'Stored only in this browser. Does not change cluster.yaml.',
+            subtitle: 'Stored on this browser. When you connect to the cluster cloud the rename will sync to other architects automatically.',
             default: current,
             placeholder: 'e.g. Personal · Side-project · API-prod',
             okLabel: 'Save',
           });
           if (next === null) return;
-          KnownProjects.setAlias(p.cluster_id || `port:${p.port}`, next.trim() || null);
+          const key  = p.cluster_id || `port:${p.port}`;
+          const val  = next.trim() || null;
+          // 1) Always write the alias locally so the rail flips immediately.
+          KnownProjects.setAlias(key, val);
           renderProjectsRail();
+          // 2) Best-effort: tell the active daemon so it can persist the
+          //    new label and (once cluster-cloud lands) broadcast it.
+          //    The Python daemon already exposes a no-auth /name on the
+          //    next phase; until then this is a no-op the daemon will
+          //    ignore (404), and we don't surface the failure to the UI.
+          if (port === ACTIVE_PROJECT_PORT && p.base) {
+            try {
+              await fetch(`${p.base}/name`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(DAEMON_TOKEN ? { 'Authorization': `Bearer ${DAEMON_TOKEN}` } : {}),
+                },
+                body: JSON.stringify({ alias: val }),
+              });
+            } catch {}
+          }
         });
       });
       list.querySelectorAll('[data-action="stop"]').forEach(btn => {
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
           const port = parseInt(btn.dataset.port, 10);
-          if (!confirm(`Stop the daemon on port ${port}?\nIts cluster will go offline until you start it again.`)) return;
+          if (!confirm(`Stop the project on port ${port}?\n\nThis terminates the local daemon and every agent it spawned ON THIS MACHINE. No signal is sent to the cluster or to other architects.\n\nThe project comes back the moment you restart its daemon.`)) return;
           await stopProject(port);
         });
       });
@@ -3908,21 +3938,48 @@ python3 .meshkore/scripts/daemon.py</pre>
       });
     }
 
-    // Stop a sibling daemon via POST /shutdown. After it dies, rescan
-    // so the rail updates. If the operator stopped the ACTIVE project,
-    // pick whichever survives (or fall through to onboarding).
+    // T4 (V43) — Stop the daemon for one project.
+    //
+    // SCOPE: strictly local. This terminates the daemon process running
+    // on THIS device at the given port, which in turn terminates every
+    // agent runner that daemon spawned (they're its children). It does
+    // NOT signal the cluster channel, does NOT notify any other
+    // architect connected to the same cluster, does NOT touch remote
+    // members. The cluster identity stays intact; only this machine's
+    // execution stops.
+    //
+    // What gets cleared locally:
+    //   - the daemon process and all its agent subprocesses
+    //   - this browser's AGENT_STATUS map (any "thinking"/"working" pins)
+    //   - the PendingBubble (if any chat dispatch is mid-flight)
+    //   - the active WebSocket (we close it before posting so the
+    //     daemon's shutdown notification arrives cleanly)
     async function stopProject(port) {
       const p = PROJECTS.find(x => x.port === port);
       if (!p) return;
       const headers = { 'Content-Type': 'application/json' };
-      // Use the architect's bearer token if this is the active project
-      // (we know it locally). For other ports, send no token — daemons
-      // built from /standard expose /shutdown behind their own token,
-      // which the operator can provide via a fetch-fail retry. Most
-      // local-only daemons accept any localhost POST.
       if (port === ACTIVE_PROJECT_PORT && DAEMON_TOKEN) {
         headers['Authorization'] = `Bearer ${DAEMON_TOKEN}`;
       }
+
+      // 1) Tear down local in-flight state BEFORE the daemon dies so we
+      //    don't leave stale "working" pins in the UI.
+      try {
+        if (typeof PendingBubble !== 'undefined') PendingBubble.destroy();
+        if (typeof AGENT_STATUS !== 'undefined') AGENT_STATUS.clear();
+        if (typeof notifyAgentStatus === 'function') notifyAgentStatus();
+      } catch {}
+
+      // 2) Close the WS on the active connection so the daemon doesn't
+      //    have to enumerate clients to disconnect.
+      if (port === ACTIVE_PROJECT_PORT && typeof DAEMON_WS !== 'undefined' && DAEMON_WS) {
+        try { DAEMON_WS.close(); } catch {}
+        DAEMON_WS = null;
+      }
+
+      // 3) Ask the daemon to exit. /shutdown is local-loopback only;
+      //    the Python daemon emits `daemon.shutdown` over its OWN WS
+      //    (already closed above) and exits. No cluster broadcast.
       try {
         const r = await fetch(`${p.base}/shutdown`, { method: 'POST', headers });
         if (r.status === 401) {
@@ -3930,9 +3987,10 @@ python3 .meshkore/scripts/daemon.py</pre>
           return;
         }
       } catch (e) {
-        // Connection refused = it shut down before responding, which is fine.
+        // Connection refused = daemon already exiting; that's a success.
       }
-      // Give it a beat, then rescan.
+
+      // 4) Re-probe so the rail flips this project to the stopped state.
       setTimeout(() => discoverProjects(), 600);
     }
 
