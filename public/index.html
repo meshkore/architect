@@ -962,7 +962,28 @@
     }
 
     .subtab-bar      { display: flex; align-items: stretch; border-bottom: 1px solid var(--border-bar); padding: 0 var(--col-pad-x); flex-shrink: 0; height: 38px; background: var(--bg-bar); box-shadow: var(--shadow-bar); position: relative; z-index: 2; }
-    .subtab          { position: relative; display: flex; align-items: center; padding: 0 14px; font-size: 12.5px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; transition: color 120ms, background 120ms; }
+    .subtab          { position: relative; display: flex; align-items: center; padding: 0 14px; font-size: 12.5px; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; transition: color 120ms, background 120ms; }
+    .subtab:hover    { color: #f3f4f6; }
+
+    /* V41 — Bump readability of small uppercase section labels across
+       the architect. Selector matches any element that is BOTH
+       `uppercase` and `tracking-wider` (Tailwind utility combo used
+       everywhere for "MODULES", "PROJECTS", "ROADMAP SNAPSHOT", etc.)
+       AND currently carries a dim gray utility. The new color is
+       slate-300 — clearly readable on the near-black panel surfaces
+       while still feeling secondary to white body text. Inactive
+       label-buttons get the same treatment via `.text-gray-500` /
+       `.text-gray-600` so the change is single-class general. */
+    .uppercase.tracking-wider.text-gray-500,
+    .uppercase.tracking-wider.text-gray-600,
+    .uppercase.tracking-wider.text-gray-700 {
+      color: #cbd5e1 !important;     /* slate-300 */
+      font-weight: 600;
+    }
+    .uppercase.tracking-wider.text-gray-500:hover,
+    .uppercase.tracking-wider.text-gray-600:hover {
+      color: #f3f4f6 !important;
+    }
     /* V30.7 — Roadmap is the project-level overview, always visible.
        The chevron after it reads as "and below this level, the scoped
        tabs". Subtle so it doesn't compete with the active indicator. */
