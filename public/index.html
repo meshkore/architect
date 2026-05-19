@@ -262,6 +262,30 @@
     .proj-dot.up    { background: #34d399; box-shadow: 0 0 0 3px rgba(52,211,153,0.18); }
     .proj-dot.busy  { background: #fbbf24; box-shadow: 0 0 0 3px rgba(251,191,36,0.18); }
     .proj-dot.err   { background: #f87171; box-shadow: 0 0 0 3px rgba(248,113,113,0.18); }
+    .proj-dot.stopped { background: #4b5563; box-shadow: 0 0 0 3px rgba(75,85,99,0.18); }
+    /* Stopped rows: muted so they don't compete with live ones, but
+       still clickable so the operator can reach the Start command. */
+    .proj-row-wrap.is-stopped .proj-row {
+      opacity: 0.55;
+      background: rgba(11,18,32,0.30);
+      color: #9ca3af;
+    }
+    .proj-row-wrap.is-stopped .proj-row:hover { opacity: 0.9; border-color: rgba(96,165,250,0.45); color: #cbd5e1; }
+    .proj-row-wrap.is-stopped .proj-row-port { color: #6b7280; }
+    /* The Stop button doesn't make sense on a stopped row — hide it. */
+    .proj-row-wrap.is-stopped .proj-row-stop { display: none; }
+    /* Replace it with a "Start" cue label in the row itself */
+    .proj-row .proj-row-start {
+      display: none;
+      margin-left: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #60a5fa;
+    }
+    .proj-row-wrap.is-stopped .proj-row .proj-row-start { display: inline; }
+    .proj-row-wrap.is-stopped .proj-row .proj-row-port  { display: none; }
     .proj-row-name  { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
     .proj-row-id    {
       font-family: 'JetBrains Mono', monospace;
@@ -767,48 +791,40 @@
     .chat-scope-sub .scope-chip.is-local  { color: #9ca3af; }
     .chat-scope-sub .scope-chip.is-remote { color: #93c5fd; border-color: rgba(147,197,253,0.35); }
     .chat-scope-actions { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
-    .chat-action-btn { background: transparent; color: #6b7280; border: 0; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 13px; line-height: 1; transition: color 120ms, background 120ms; }
-    .chat-action-btn:hover { color: #f87171; background: rgba(248,113,113,0.08); }
+    /* Chat action buttons — archive (✕) and history (≡).
+       Both stay subtle at rest, visible on hover of the strip. */
+    .chat-action-btn { background: transparent; border: 0; padding: 5px 7px; border-radius: 4px; cursor: pointer; font-size: 13px; line-height: 1; transition: color 120ms, background 120ms, opacity 120ms; color: #4b5563; opacity: 0.4; }
+    .chat-scope-strip:hover .chat-action-btn { opacity: 1; }
+    #chat-archive-btn:hover { color: #f87171; background: rgba(248,113,113,0.08); opacity: 1; }
+    #chat-history-btn { color: #6b7280; }
+    #chat-history-btn:hover { color: #93c5fd; background: rgba(147,197,253,0.08); opacity: 1; }
 
-    /* Inline archive confirm — surfaces right under the title, in the
-       same component as the X button. Replaces the central mc-modal for
-       this flow so the action happens where the user clicked. */
-    .chat-scope-confirm {
-      margin-top: 6px;
-      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-      font-family: 'JetBrains Mono', monospace; font-size: 11px;
-      color: #fca5a5;
-      animation: scopeConfirmIn 140ms ease-out;
+    /* History panel — replaces chat-msgs when open */
+    .chat-history-panel { display: none; flex-direction: column; flex: 1; min-height: 0; }
+    .chat-history-panel.is-open { display: flex; }
+    .chat-history-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px 8px;
+      border-bottom: 1px solid rgba(55,65,81,0.5);
+      flex-shrink: 0;
     }
-    .chat-scope-confirm-msg { flex: 1; min-width: 0; }
-    .chat-scope-confirm-actions { display: flex; gap: 6px; flex-shrink: 0; }
-    .chat-scope-confirm-btn {
-      padding: 3px 10px; border-radius: 4px;
-      font-size: 11px; cursor: pointer;
-      border: 1px solid rgba(75,85,99,0.4);
-      background: rgba(11,18,32,0.6);
-      color: #d1d5db;
-      transition: background 120ms, color 120ms, border-color 120ms;
+    .chat-history-header-title { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #9ca3af; letter-spacing: 0.04em; text-transform: uppercase; }
+    .chat-history-close-btn { background: transparent; border: 0; color: #6b7280; cursor: pointer; padding: 3px 7px; border-radius: 4px; font-size: 12px; font-family: 'JetBrains Mono', monospace; transition: color 120ms, background 120ms; }
+    .chat-history-close-btn:hover { color: #e5e7eb; background: rgba(55,65,81,0.4); }
+    .chat-history-list { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+    .chat-history-empty { color: #4b5563; font-size: 12px; font-family: 'JetBrains Mono', monospace; text-align: center; padding: 40px 0; }
+    .chat-history-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: 6px;
+      border: 1px solid rgba(55,65,81,0.4);
+      background: rgba(17,24,39,0.4);
+      transition: border-color 120ms, background 120ms;
     }
-    .chat-scope-confirm-btn:hover { background: rgba(31,41,55,0.7); color: #f3f4f6; }
-    .chat-scope-confirm-btn.is-primary {
-      background: rgba(248,113,113,0.14);
-      color: #fca5a5;
-      border-color: rgba(248,113,113,0.40);
-    }
-    .chat-scope-confirm-btn.is-primary:hover {
-      background: rgba(248,113,113,0.24);
-      color: #fecaca;
-      border-color: rgba(248,113,113,0.60);
-    }
-    .chat-scope-strip.is-confirming .chat-scope-sub { display: none; }
-    .chat-scope-strip.is-confirming .chat-action-btn {
-      color: #f87171; background: rgba(248,113,113,0.12);
-    }
-    @keyframes scopeConfirmIn {
-      from { opacity: 0; transform: translateY(-3px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
+    .chat-history-item:hover { border-color: rgba(75,85,99,0.6); background: rgba(31,41,55,0.5); }
+    .chat-history-item-name { flex: 1; font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #d1d5db; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chat-history-item-time { font-size: 10px; font-family: 'JetBrains Mono', monospace; color: #4b5563; flex-shrink: 0; }
+    .chat-history-restore-btn { padding: 3px 9px; border-radius: 4px; font-size: 11px; font-family: 'JetBrains Mono', monospace; border: 1px solid rgba(52,211,153,0.3); color: #34d399; background: rgba(52,211,153,0.06); cursor: pointer; transition: background 120ms, border-color 120ms; flex-shrink: 0; }
+    .chat-history-restore-btn:hover { background: rgba(52,211,153,0.14); border-color: rgba(52,211,153,0.5); }
 
     /* Modules nav (narrow leftmost column) — tree-shaped, L-connectors */
     .nav-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px 6px 8px; font-size: 13px; color: #9ca3af; cursor: pointer; border-left: 2px solid transparent; transition: background 120ms, color 120ms, border-color 120ms; position: relative; }
@@ -1296,6 +1312,10 @@
     }
     .chat-msg--right .chat-name-dot { background: #34d399; box-shadow: 0 0 0 2px rgba(52,211,153,0.18); }
     .chat-msg--left  .chat-name-dot { background: #fb923c; box-shadow: 0 0 0 2px rgba(251,146,60,0.18); }
+    /* Coordinator — violet accent, visually elevated above dev agents */
+    .chat-msg--coordinator .chat-bubble--agent { border-left-color: rgba(167,139,250,0.7); }
+    .chat-msg--coordinator .chat-msg-header .chat-name { color: #a78bfa; }
+    .chat-msg--coordinator .chat-name-dot { background: #8b5cf6; box-shadow: 0 0 0 2px rgba(139,92,246,0.22); }
 
     /* Tab indicator */
     .tab-active { color:#f3f4f6; }
@@ -2098,56 +2118,61 @@
 
   <!-- ────────────── Header ────────────── -->
   <header class="z-40 backdrop-blur-xl" style="background: var(--bg-bar); border-bottom: 1px solid var(--border-bar); box-shadow: var(--bar-shadow); position: relative;">
-    <!-- Single-row header: brand + main tabs + (when Cluster active)
-         the cluster sub-tabs inline + project switcher + search + daemon
-         status. Maximises the vertical room for the working area. -->
-    <div class="h-11 flex items-center gap-3" style="padding-left: var(--panel-gap); padding-right: var(--panel-gap);">
-      <div class="flex items-center gap-2 min-w-0 flex-shrink-0">
+    <!-- Header layout:
+         LEFT  — logo + Architect tab
+         CENTER — project title (flex-1, centered)
+         RIGHT  — local daemon pill · cluster pill · Cluster settings tab -->
+    <div class="h-12 flex items-center gap-2" style="padding-left: var(--panel-gap); padding-right: var(--panel-gap);">
+
+      <!-- LEFT: logo + Architect nav -->
+      <div class="flex items-center gap-1 flex-shrink-0">
         <div class="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0" title="MeshKore Architect">
           <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
         </div>
-      </div>
-
-      <!-- Main tabs (Workspace · Cluster) inline. The Cluster sub-tabs
-           (Overview · Network · Config) appear right after them when
-           the Cluster tab is active, so the user always reads
-           "Workspace | Cluster › Overview" in one continuous strip. -->
-      <nav class="flex items-center flex-shrink-0">
         <button data-tab="roadmap" class="tab-btn relative px-3 py-2 text-[13px] text-gray-400 hover:text-gray-200 transition flex items-center gap-1.5">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h13"/></svg>
-          Workspace
+          Architect
         </button>
-        <button data-tab="manage" class="tab-btn relative px-3 py-2 text-[13px] text-gray-400 hover:text-gray-200 transition flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M5 12a7 7 0 0114 0M19 12l3 3M5 12l-3 3M12 5V2M12 19v3"/></svg>
+      </div>
+
+      <!-- CENTER: project title — filled by renderProjectBar() -->
+      <div id="project-bar-primary" class="flex-1 flex items-center justify-center gap-1.5 overflow-x-auto min-w-0"></div>
+
+      <!-- hidden legacy holders -->
+      <button id="search-trigger" class="hidden"></button>
+      <span id="generated-pill" class="hidden"></span>
+
+      <!-- RIGHT: connection indicators + Cluster settings -->
+      <div class="flex items-center gap-1.5 flex-shrink-0">
+
+        <!-- Local daemon pill -->
+        <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-900/40 border border-gray-800/60 text-[11px] mono" id="daemon-pill">
+          <span class="dot bg-gray-600" id="daemon-dot"></span>
+          <span class="text-gray-300" id="daemon-status">offline</span>
+        </div>
+
+        <!-- Cluster connection pill — shown when daemon is connected to a remote cluster -->
+        <div id="cluster-conn-pill" class="hidden items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-900/40 border border-gray-800/60 text-[11px] mono">
+          <span class="dot bg-gray-600" id="cluster-conn-dot"></span>
+          <span class="text-gray-300" id="cluster-conn-label">cluster</span>
+        </div>
+
+        <!-- Cluster settings tab — compact, right-aligned -->
+        <button data-tab="manage" class="tab-btn relative px-2.5 py-1.5 text-[12px] mono text-gray-500 hover:text-gray-200 transition flex items-center gap-1 rounded border border-transparent hover:border-gray-800/60">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M5 12a7 7 0 0114 0M19 12l3 3M5 12l-3 3M12 5V2M12 19v3"/></svg>
           Cluster
         </button>
-
-        <!-- Cluster sub-tabs in the same row, only visible when the
-             Cluster tab is active (toggled by switchTab via .hidden). -->
-        <div id="cluster-subtabs-header" class="hidden items-center gap-0 ml-2 pl-2 border-l border-gray-800/60">
-          <span class="text-[11px] mono text-gray-700 mr-1">›</span>
-          <button data-cltab="overview" class="cl-subtab cl-subtab-header px-2 py-1 text-[12px] mono text-gray-400 hover:text-gray-200 transition active">Overview</button>
-          <button data-cltab="network"  class="cl-subtab cl-subtab-header px-2 py-1 text-[12px] mono text-gray-400 hover:text-gray-200 transition">Network</button>
-          <button data-cltab="config"   class="cl-subtab cl-subtab-header px-2 py-1 text-[12px] mono text-gray-400 hover:text-gray-200 transition">Config</button>
-        </div>
-      </nav>
-
-      <!-- Project switcher (one tile per running daemon, 5570-5589). -->
-      <div id="project-bar-primary" class="flex-1 flex items-center gap-1.5 overflow-x-auto min-w-0"></div>
-
-      <button id="search-trigger" class="hidden">
-      </button>
-
-      <!-- Daemon status — connection dot + status label. -->
-      <div class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-900/40 border border-gray-800/60 flex-shrink-0 text-[11px] mono" id="daemon-pill">
-        <span class="dot bg-gray-600" id="daemon-dot"></span>
-        <span class="text-gray-300" id="daemon-status">offline</span>
       </div>
-      <!-- hidden legacy holder so hydrateHeader doesn't crash -->
-      <span id="generated-pill" class="hidden"></span>
     </div>
 
-    <!-- Secondary project bar (kept as a thin overflow row when ≥6 daemons). -->
+    <!-- Cluster sub-tabs — secondary row, only when Cluster tab is active -->
+    <div id="cluster-subtabs-header" class="hidden border-t border-gray-800/40 bg-ink-950/60 items-center gap-0 px-3 py-1">
+      <button data-cltab="overview" class="cl-subtab cl-subtab-header px-2 py-1 text-[12px] mono text-gray-400 hover:text-gray-200 transition active">Overview</button>
+      <button data-cltab="network"  class="cl-subtab cl-subtab-header px-2 py-1 text-[12px] mono text-gray-400 hover:text-gray-200 transition">Network</button>
+      <button data-cltab="config"   class="cl-subtab cl-subtab-header px-2 py-1 text-[12px] mono text-gray-400 hover:text-gray-200 transition">Config</button>
+    </div>
+
+    <!-- Secondary project bar (overflow row when ≥6 daemons). -->
     <div id="project-bar-secondary" class="hidden border-t border-gray-800/40 bg-ink-950/60 px-3 py-1 flex items-center gap-1 overflow-x-auto"></div>
 
     <!-- Hidden legacy holder so cluster-type-pill JS lookups don't crash. -->
@@ -2448,22 +2473,31 @@ python3 .meshkore/scripts/daemon.py</pre>
                   </button>
                 </div>
                 <div class="chat-scope-sub" id="chat-scope-sub"></div>
-                <div class="chat-scope-confirm hidden" id="chat-scope-confirm" role="alertdialog" aria-live="polite">
-                  <span class="chat-scope-confirm-msg" id="chat-scope-confirm-msg">Archive this conversation?</span>
-                  <div class="chat-scope-confirm-actions">
-                    <button class="chat-scope-confirm-btn" data-confirm="no">Cancel</button>
-                    <button class="chat-scope-confirm-btn is-primary" data-confirm="yes">Archive</button>
-                  </div>
-                </div>
               </div>
               <div class="chat-scope-actions">
-                <button id="chat-archive" class="chat-action-btn" title="Archive this conversation">✕</button>
+                <!-- History ≡ — browse archived conversations -->
+                <button id="chat-history-btn" class="chat-action-btn" title="Archived conversations">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="15" y2="18"/></svg>
+                </button>
+                <!-- Archive — one click, no confirm -->
+                <button id="chat-archive-btn" class="chat-action-btn" title="Archive this conversation">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                </button>
               </div>
             </div>
             <!-- Hidden select kept for legacy reads (sendChatMessage etc.) -->
             <select id="conv-switcher" class="hidden"></select>
 
             <div id="chat-msgs" class="chat-msgs space-y-3"></div>
+
+            <!-- History panel — shown in place of chat-msgs when ≡ is clicked -->
+            <div id="chat-history-panel" class="chat-history-panel">
+              <div class="chat-history-header">
+                <span class="chat-history-header-title">Archived conversations</span>
+                <button id="chat-history-close-btn" class="chat-history-close-btn">← Back</button>
+              </div>
+              <div id="chat-history-list" class="chat-history-list"></div>
+            </div>
 
           <div class="chat-input-footer border-t border-gray-800/60 flex-shrink-0">
             <!-- Identity is fixed to "architect" — operator is always the
@@ -3087,7 +3121,14 @@ python3 .meshkore/scripts/daemon.py</pre>
     //   col-chat  → chat width (pixels, top-level grid)
     // All three persist to localStorage as `mc-layout-v1`. Defaults below
     // are restored if storage is empty or invalid.
-    const LAYOUT_DEFAULTS = { 'col-nav': 200, 'pane-list': 540, 'col-chat': 380, 'chat-rail': 170 };
+    // V30.19 — fresh-install split favours roughly equal workspace ↔
+    // chat. Old default `col-chat: 380` left the chat too narrow on
+    // wide displays. A one-time migration in `loadLayout` bumps stored
+    // values from the old default to the new one so existing users
+    // also feel the improvement on first refresh.
+    const LAYOUT_DEFAULTS = { 'col-nav': 200, 'pane-list': 540, 'col-chat': 600, 'chat-rail': 170 };
+    const LAYOUT_DEFAULTS_VERSION = 2;  // bump when changing defaults to retro-apply
+    const LAYOUT_DEFAULTS_VERSION_KEY = 'mc-layout-defaults-version';
     // V30.12 — min/max limits live per-PANEL, not per-SLOT. The slot
     // limits (col-nav / col-chat) lookup which panel currently occupies
     // that slot via ColumnReorder.getOrder() and uses that panel's
@@ -3120,6 +3161,19 @@ python3 .meshkore/scripts/daemon.py</pre>
     function loadLayout() {
       let saved = {};
       try { saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}'); } catch {}
+      // V30.19 — retro-migrate stored defaults so existing operators
+      // pick up new sensible widths on next refresh. We only override
+      // a stored value when it was the old default (operator never
+      // dragged it manually). If they dragged it, we keep their pick.
+      let storedVersion = 0;
+      try { storedVersion = parseInt(localStorage.getItem(LAYOUT_DEFAULTS_VERSION_KEY) || '0', 10) || 0; } catch {}
+      if (storedVersion < LAYOUT_DEFAULTS_VERSION) {
+        const OLD_DEFAULTS = { 'col-chat': 380 };  // values that changed in v2
+        for (const [k, oldDefault] of Object.entries(OLD_DEFAULTS)) {
+          if (saved[k] === oldDefault) delete saved[k];   // fall back to new default
+        }
+        try { localStorage.setItem(LAYOUT_DEFAULTS_VERSION_KEY, String(LAYOUT_DEFAULTS_VERSION)); } catch {}
+      }
       return { ...LAYOUT_DEFAULTS, ...saved };
     }
 
@@ -3403,6 +3457,65 @@ python3 .meshkore/scripts/daemon.py</pre>
     // parallel and lists all detected daemons in the header switcher.
     const PROJECT_PORT_RANGE = [5570, 5589];
 
+    // ─── KnownProjects — persistent metadata about projects we've seen
+    // Keyed by cluster_id (preferred) or port. Each entry remembers what
+    // we knew last time the daemon answered: cluster_id, name, type,
+    // port, identity, repo_path (from /info), last_seen.  When discovery
+    // can't reach the daemon, the rail still shows the project in a
+    // "stopped" state so the operator can revive it without guessing
+    // which folder/port it was.
+    const KNOWN_PROJECTS_KEY = 'mc-known-projects-v1';
+    const KNOWN_PROJECTS_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+    const KnownProjects = (() => {
+      function load() {
+        try {
+          const raw = JSON.parse(localStorage.getItem(KNOWN_PROJECTS_KEY) || '[]');
+          if (!Array.isArray(raw)) return [];
+          const now = Date.now();
+          return raw.filter(p =>
+            p && typeof p === 'object'
+            && typeof p.port === 'number'
+            && (!p.last_seen || (now - new Date(p.last_seen).getTime()) < KNOWN_PROJECTS_MAX_AGE_MS)
+          );
+        } catch { return []; }
+      }
+      function save(items) {
+        try { localStorage.setItem(KNOWN_PROJECTS_KEY, JSON.stringify(items)); } catch {}
+      }
+      function key(p) { return p.cluster_id || `port:${p.port}`; }
+      return {
+        list() { return load(); },
+        upsert(p) {
+          const items = load();
+          const k = key(p);
+          const i = items.findIndex(x => key(x) === k);
+          const updated = {
+            ...(i >= 0 ? items[i] : {}),
+            ...p,
+            last_seen: new Date().toISOString(),
+          };
+          if (i >= 0) items[i] = updated;
+          else items.push(updated);
+          save(items);
+          return updated;
+        },
+        attachRepoPath(port, repo_path) {
+          // Called after a /info round-trip that reveals the on-disk path.
+          if (!repo_path) return;
+          const items = load();
+          const i = items.findIndex(x => x.port === port);
+          if (i < 0) return;
+          items[i] = { ...items[i], repo_path, last_seen: new Date().toISOString() };
+          save(items);
+        },
+        forget(portOrId) {
+          const items = load().filter(x =>
+            x.port !== portOrId && x.cluster_id !== portOrId);
+          save(items);
+        },
+      };
+    })();
+
     async function discoverProjects() {
       const params = new URLSearchParams(location.search);
       const explicitHost = params.get('host'); // legacy ?host= override
@@ -3451,12 +3564,26 @@ python3 .meshkore/scripts/daemon.py</pre>
       if (!results.length) {
         results = (await Promise.all(rest.map(probe))).filter(Boolean);
       }
-      PROJECTS = results;
-      // Pick the active project: explicit ?host=, last-used, or the first.
+      // V35 — Merge live probes with the KnownProjects store so the rail
+      // also surfaces projects whose daemon is currently stopped. Each
+      // live result also updates the store (last_seen + any metadata).
+      for (const r of results) KnownProjects.upsert(r);
+      const known = KnownProjects.list();
+      // Build the merged rail list: live results first, then any known
+      // project whose port didn't answer (status = "stopped").
+      const livePorts = new Set(results.map(p => p.port));
+      const merged = results.slice();
+      for (const k of known) {
+        if (livePorts.has(k.port)) continue;
+        merged.push({ ...k, status: 'stopped', _stopped: true });
+      }
+      PROJECTS = merged;
+      // Pick the active project: explicit ?host=, last-used (only if up),
+      // or the first up one.
       const candidate =
-        (explicitPort && PROJECTS.find(p => p.port === explicitPort)) ||
-        (lastPort && PROJECTS.find(p => p.port === lastPort)) ||
-        PROJECTS[0];
+        (explicitPort && results.find(p => p.port === explicitPort)) ||
+        (lastPort && results.find(p => p.port === lastPort)) ||
+        results[0];
       if (candidate) {
         ACTIVE_PROJECT_PORT = candidate.port;
         DAEMON_BASE = candidate.base;
@@ -3511,20 +3638,24 @@ python3 .meshkore/scripts/daemon.py</pre>
         return;
       }
       list.innerHTML = all.map(p => {
-        const active   = p.port === ACTIVE_PROJECT_PORT;
+        const active   = p.port === ACTIVE_PROJECT_PORT && !p._stopped;
         const dotCls   = projectDotKind(p);
+        const stopped  = !!p._stopped;
         const name     = esc(p.cluster_name || p.cluster_id || `:${p.port}`);
         const idText   = esc(p.cluster_id || '');
         const portText = esc(String(p.port));
-        const title    = `${p.cluster_name || p.cluster_id || 'cluster'} · :${p.port}${p.cluster_id ? ' · ' + p.cluster_id : ''}`;
-        return `<div class="proj-row-wrap${active ? ' active' : ''}" data-port="${p.port}">
+        const title    = stopped
+          ? `${p.cluster_name || p.cluster_id || 'cluster'} · stopped · :${p.port}${p.repo_path ? ' · ' + p.repo_path : ''} — click to see start command`
+          : `${p.cluster_name || p.cluster_id || 'cluster'} · :${p.port}${p.cluster_id ? ' · ' + p.cluster_id : ''}`;
+        return `<div class="proj-row-wrap${active ? ' active' : ''}${stopped ? ' is-stopped' : ''}" data-port="${p.port}">
           <button type="button" class="proj-row${active ? ' active' : ''}"
-            data-port="${p.port}" data-action="switch"
+            data-port="${p.port}" data-action="${stopped ? 'start' : 'switch'}"
             title="${esc(title)}" aria-label="${esc(title)}">
             <span class="proj-dot ${dotCls}"></span>
             <span class="proj-row-name">${name}</span>
             <span class="proj-row-id">${idText}</span>
             <span class="proj-row-port">:${portText}</span>
+            <span class="proj-row-start">start ↗</span>
           </button>
           <button type="button" class="proj-row-stop"
             data-port="${p.port}" data-action="stop"
@@ -3539,6 +3670,14 @@ python3 .meshkore/scripts/daemon.py</pre>
           switchProject(parseInt(btn.dataset.port, 10));
         });
       });
+      list.querySelectorAll('[data-action="start"]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const port = parseInt(btn.dataset.port, 10);
+          const p = PROJECTS.find(x => x.port === port);
+          if (p) openStartProjectModal(p);
+        });
+      });
       list.querySelectorAll('[data-action="stop"]').forEach(btn => {
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
@@ -3546,6 +3685,73 @@ python3 .meshkore/scripts/daemon.py</pre>
           if (!confirm(`Stop the daemon on port ${port}?\nIts cluster will go offline until you start it again.`)) return;
           await stopProject(port);
         });
+      });
+    }
+
+    // Modal for a single stopped project — gives the operator the exact
+    // folder + command to run, taken from KnownProjects metadata. No
+    // generic instructions; this is "your X project at /path/to/X, run
+    // python3 .meshkore/scripts/daemon.py in that folder".
+    async function openStartProjectModal(p) {
+      const name = p.cluster_name || p.cluster_id || `:${p.port}`;
+      const repo = p.repo_path || null;
+      const cmd  = repo
+        ? `cd "${repo}"\npython3 .meshkore/scripts/daemon.py`
+        : `# (repo path unknown — open the folder where this project lives)\npython3 .meshkore/scripts/daemon.py`;
+      const promptForAgent = repo
+        ? `Start the meshcore Python daemon for the project in ${repo}. Run:\n\n    cd "${repo}"\n    python3 .meshkore/scripts/daemon.py\n\nThe daemon will pick a free port in 5570-5589 and the architect on architect.meshkore.com will auto-detect it.`
+        : `Start the meshcore Python daemon for the "${name}" project. Open the repo where its .meshkore/ folder lives and run:\n\n    python3 .meshkore/scripts/daemon.py\n\nThe daemon will pick a free port in 5570-5589 and the architect on architect.meshkore.com will auto-detect it.`;
+
+      await mcModal({
+        title: `Start ${name}`,
+        subtitle: `This project is in your local memory but its daemon isn't running.`,
+        body: `
+          <style>
+            .start-block { background:rgba(11,18,32,0.55); border:1px solid rgba(75,85,99,0.30); border-radius:8px; padding:12px 14px; margin-bottom:12px; }
+            .start-block h4 { margin:0 0 6px; font-size:12px; color:#9ca3af; font-family:'JetBrains Mono',monospace; letter-spacing:0.10em; text-transform:uppercase; }
+            .start-block code { font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#6ee7b7; }
+            .start-cmd { position:relative; background:#020617; border:1px solid rgba(75,85,99,0.40); border-radius:6px; padding:10px 44px 10px 12px; font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#cbd5e1; white-space:pre-wrap; word-break:break-word; }
+            .start-cmd .copy { position:absolute; top:6px; right:6px; padding:3px 8px; border-radius:4px; background:rgba(16,185,129,0.15); color:#6ee7b7; border:1px solid rgba(52,211,153,0.35); font-family:'JetBrains Mono',monospace; font-size:10px; cursor:pointer; }
+            .start-meta { font-size:11px; color:#6b7280; margin:6px 0 0; }
+          </style>
+          <div class="start-block">
+            <h4>option a — run it yourself</h4>
+            <div class="start-cmd">${esc(cmd)}<button type="button" class="copy" data-copy="cmd">copy</button></div>
+            <p class="start-meta">${repo ? 'Folder remembered from a previous architect connection.' : 'We don\'t have the folder on record — you\'ll need to <code>cd</code> to it yourself.'}</p>
+          </div>
+          <div class="start-block">
+            <h4>option b — ask your local AI agent to run it</h4>
+            <div class="start-cmd">${esc(promptForAgent)}<button type="button" class="copy" data-copy="prompt">copy</button></div>
+            <p class="start-meta">Paste this in Claude Code, Cursor, Windsurf, … inside the project.</p>
+          </div>
+          <div class="start-block">
+            <h4>about this project</h4>
+            <p style="margin:0;font-size:11.5px;color:#cbd5e1;">
+              <strong>${esc(name)}</strong>${p.cluster_id ? ` <span class="mono" style="color:#9ca3af">(${esc(p.cluster_id)})</span>` : ''}<br>
+              <span style="color:#6b7280">last seen ${p.last_seen ? new Date(p.last_seen).toLocaleString() : '—'} · last port :${p.port}</span>
+            </p>
+            <p class="start-meta">If this project doesn't exist anymore, <a href="#" id="forget-project" style="color:#f87171;">forget it</a> to remove it from the rail.</p>
+          </div>
+        `,
+        buttons: [{ id: 'close', label: 'Close' }],
+        onMount: (body, close) => {
+          body.querySelectorAll('[data-copy]').forEach(btn => {
+            btn.addEventListener('click', () => {
+              const which = btn.dataset.copy;
+              const text = which === 'cmd' ? cmd : promptForAgent;
+              navigator.clipboard.writeText(text);
+              btn.textContent = 'copied ✓';
+              setTimeout(() => { btn.textContent = 'copy'; }, 1500);
+            });
+          });
+          body.querySelector('#forget-project')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (!confirm(`Forget "${name}"? It will disappear from the Projects rail.`)) return;
+            KnownProjects.forget(p.cluster_id || p.port);
+            close('forgot');
+            setTimeout(() => discoverProjects(), 100);
+          });
+        },
       });
     }
 
@@ -3578,8 +3784,9 @@ python3 .meshkore/scripts/daemon.py</pre>
     }
 
     function projectDotKind(p) {
-      if (p._error) return 'err';
-      if (p._busy) return 'busy';
+      if (p._stopped) return 'stopped';
+      if (p._error)   return 'err';
+      if (p._busy)    return 'busy';
       return 'up';
     }
 
@@ -3604,105 +3811,192 @@ python3 .meshkore/scripts/daemon.py</pre>
     // repo) and points to the public docs for the cloud option (which
     // the cloud-team agent is wiring up separately).
     async function openAddProjectModal() {
-      const STD = 'https://meshkore.com/standard';
-      const DAEMON_URL = 'https://meshkore.com/reference/cluster/scripts/daemon.py';
-      const promptText =
-`Apply the MeshKore Standard to this repo so it shows up in my architect.
+      const STD          = 'https://meshkore.com/standard';
+      const STD_103_1    = STD + '#10-3-1-the-canonical-apply-standard-prompt';
+      const STD_103_4    = STD + '#10-3-4-bootstrap-a-new-repo';
+      const STD_103_5    = STD + '#10-3-5-start-a-stopped-daemon';
+      const DAEMON_URL   = 'https://meshkore.com/reference/cluster/scripts/daemon.py';
 
-1. Read the canonical standard at ${STD}.
-2. Create the .meshkore/ tree per §2 of the standard.
-   Use ${STD.replace('/standard', '/reference/cluster/templates/cluster.yaml.dev')}
-   as the starter for .meshkore/public/cluster.yaml.
-3. Drop the editor boot block from §8 at the repo root (CLAUDE.md / .cursorrules / .windsurfrules — pick whichever your editor needs).
-4. Download the Python daemon into .meshkore/scripts/daemon.py:
-       mkdir -p .meshkore/scripts
-       curl -fsSL ${DAEMON_URL} -o .meshkore/scripts/daemon.py
-5. Start it:
-       python3 .meshkore/scripts/daemon.py
-   It will bind the first free port in 5570-5589, mint a bearer token at
-   .meshkore/credentials/portal-token, and rebuild state.json from the
-   markdown filesystem.
-6. Print the chosen port + bearer token so I can verify the architect
-   picks it up.
+      // What stopped projects do we know about? Surfaced as tab A so the
+      // most common "I have everything, just turn it back on" case is the
+      // first choice the operator sees.
+      const stopped = KnownProjects.list().filter(k =>
+        !PROJECTS.find(p => p.port === k.port && !p._stopped)
+      );
 
-When the daemon is running, my architect at https://architect.meshkore.com
-will auto-detect it and add it to the Projects rail. No further steps.`;
+      // Prompts — these mirror /standard §10.3.1 / .4 / .5 verbatim so a
+      // reader can copy from here OR from the standard URL without drift.
+      const promptB = (
+'Apply the MeshKore Standard to this repo so it shows up in my architect.\n' +
+'\n' +
+'1. Read the canonical standard at ' + STD + '.\n' +
+'2. Create the .meshkore/ tree per §2 of the standard.\n' +
+'   Use ' + STD.replace('/standard', '/reference/cluster/templates/cluster.yaml.dev') + '\n' +
+'   as the starter for .meshkore/public/cluster.yaml.\n' +
+'3. Drop the editor boot block from §8 at the repo root (CLAUDE.md /\n' +
+'   .cursorrules / .windsurfrules — pick whichever your editor needs).\n' +
+'4. Download the Python daemon into .meshkore/scripts/daemon.py:\n' +
+'       mkdir -p .meshkore/scripts\n' +
+'       curl -fsSL ' + DAEMON_URL + ' -o .meshkore/scripts/daemon.py\n' +
+'5. Start it:\n' +
+'       python3 .meshkore/scripts/daemon.py\n' +
+'   It will bind the first free port in 5570-5589, mint a bearer token at\n' +
+'   .meshkore/credentials/portal-token, and rebuild state.json from the\n' +
+'   markdown filesystem.\n' +
+'6. Print the chosen port + bearer token so I can verify the architect\n' +
+'   picks it up.\n' +
+'\n' +
+'When the daemon is running, my architect at https://architect.meshkore.com\n' +
+'will auto-detect it and add it to the Projects rail.'
+      );
+
+      const promptC_dev = (
+'Bootstrap a brand-new MeshKore project in this empty folder.\n' +
+'\n' +
+'1. Read the canonical standard at ' + STD + '.\n' +
+'2. Initialise a git repo here (`git init`) if there isn\'t one already.\n' +
+'3. Create the .meshkore/ tree per §2 of the standard.\n' +
+'4. Write .meshkore/public/cluster.yaml from the dev template:\n' +
+'       curl -fsSL https://meshkore.com/reference/cluster/templates/cluster.yaml.dev\n' +
+'   …filling in {{cluster_id}} / {{cluster_name}} / {{cluster_description}}\n' +
+'   based on the folder name and ask me to confirm.\n' +
+'5. Drop the editor boot block from §8 at the repo root.\n' +
+'6. Add a top-level README.md describing the project (2-3 sentences).\n' +
+'7. Download the Python daemon:\n' +
+'       mkdir -p .meshkore/scripts\n' +
+'       curl -fsSL ' + DAEMON_URL + ' -o .meshkore/scripts/daemon.py\n' +
+'8. Start it: python3 .meshkore/scripts/daemon.py\n' +
+'9. Make a first task at .meshkore/modules/general/tasks/T1-hello.md\n' +
+'   with status: next, owner: me, category: general.\n' +
+'10. Print the chosen port + the bearer token so I can verify the\n' +
+'    architect picks it up.\n' +
+'\n' +
+'Stop after step 10 — let me drive the rest from the architect.'
+      );
+
+      const stoppedRowsHtml = stopped.length === 0
+        ? '<p style="font-size:12px;color:#6b7280;margin:6px 0;">No previously-connected projects on this browser. Pick option B or C below to add your first one — or come back here once you\'ve had a project running.</p>'
+        : stopped.map(s => {
+            const name = s.cluster_name || s.cluster_id || (':' + s.port);
+            return '<div class="wiz-stopped-row" data-port="' + s.port + '">' +
+              '<div class="wiz-stopped-name">' + esc(name) +
+                (s.cluster_id ? ' <span style="color:#6b7280;font-size:11px;" class="mono">(' + esc(s.cluster_id) + ')</span>' : '') +
+              '</div>' +
+              (s.repo_path ? '<div class="wiz-stopped-path mono">' + esc(s.repo_path) + '</div>' : '') +
+              '<div class="wiz-stopped-meta">last seen ' + (s.last_seen ? new Date(s.last_seen).toLocaleString() : '—') + ' · :' + s.port + '</div>' +
+              '<button type="button" class="wiz-stopped-btn" data-action="open-start" data-port="' + s.port + '">Show start command →</button>' +
+            '</div>';
+          }).join('');
 
       await mcModal({
-        title: 'Add another project to this architect',
-        subtitle: 'Each project = its own .meshkore/ folder with its own daemon. Architect lists them in the left rail.',
-        body: `
-          <style>
-            .add-proj-body { display: flex; flex-direction: column; gap: 14px; }
-            .add-proj-section { background: rgba(11,18,32,0.5); border: 1px solid rgba(75,85,99,0.30); border-radius: 10px; padding: 14px 16px; }
-            .add-proj-section h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #e5e7eb; display: flex; align-items: center; gap: 8px; }
-            .add-proj-section h4 .pill { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; background: rgba(52,211,153,0.10); color: #6ee7b7; border: 1px solid rgba(52,211,153,0.30); }
-            .add-proj-section h4 .pill.is-cloud { background: rgba(96,165,250,0.10); color: #93c5fd; border-color: rgba(96,165,250,0.30); }
-            .add-proj-section h4 .pill.is-soon { background: rgba(251,191,36,0.10); color: #fbbf24; border-color: rgba(251,191,36,0.30); }
-            .add-proj-section p { font-size: 12.5px; color: #d1d5db; line-height: 1.55; margin: 4px 0; }
-            .add-proj-prompt {
-              position: relative;
-              background: #020617; border: 1px solid rgba(75,85,99,0.40);
-              border-radius: 8px; padding: 10px 44px 10px 12px;
-              font-family: 'JetBrains Mono', monospace; font-size: 11.5px;
-              color: #cbd5e1; line-height: 1.55;
-              white-space: pre-wrap; word-break: break-word;
-              max-height: 240px; overflow-y: auto;
-            }
-            .add-proj-copy {
-              position: absolute; top: 8px; right: 8px;
-              padding: 4px 8px; border-radius: 5px;
-              background: rgba(16,185,129,0.15);
-              color: #6ee7b7;
-              border: 1px solid rgba(52,211,153,0.40);
-              font-family: 'JetBrains Mono', monospace; font-size: 10px;
-              cursor: pointer; transition: background 120ms;
-            }
-            .add-proj-copy:hover { background: rgba(16,185,129,0.30); }
-            .add-proj-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-            .add-proj-link {
-              padding: 4px 9px; border-radius: 5px;
-              background: rgba(11,18,32,0.5);
-              border: 1px solid rgba(75,85,99,0.30);
-              font-family: 'JetBrains Mono', monospace; font-size: 11px;
-              color: #cbd5e1; text-decoration: none;
-              transition: border-color 120ms, color 120ms;
-            }
-            .add-proj-link:hover { border-color: rgba(52,211,153,0.45); color: #34d399; }
-          </style>
-          <div class="add-proj-body">
+        title: 'Add a project',
+        subtitle: 'Three paths depending on where you are: revive a stopped one, apply the standard to an existing repo, or bootstrap a brand-new repo.',
+        body:
+          '<style>' +
+            '.wiz-tabs { display: flex; gap: 2px; border-bottom: 1px solid rgba(75,85,99,0.30); margin-bottom: 14px; }' +
+            '.wiz-tab { flex: 1; padding: 8px 10px; background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; text-align: left; transition: color 120ms, border-color 120ms; }' +
+            '.wiz-tab:hover { color: #e5e7eb; }' +
+            '.wiz-tab.active { color: #34d399; border-bottom-color: #34d399; }' +
+            '.wiz-tab-pill { display:inline-block; padding:1px 6px; border-radius:4px; background:rgba(75,85,99,0.20); font-family:JetBrains Mono,monospace; font-size:9.5px; letter-spacing:0.08em; margin-right:6px; color:#9ca3af; }' +
+            '.wiz-tab.active .wiz-tab-pill { background:rgba(52,211,153,0.20); color:#34d399; }' +
+            '.wiz-tab-title { font-size: 13px; color: #d1d5db; font-weight: 600; line-height:1.2; }' +
+            '.wiz-tab.active .wiz-tab-title { color: #e5e7eb; }' +
+            '.wiz-tab-sub { font-size: 10.5px; color: #6b7280; margin-top: 2px; }' +
+            '.wiz-tab.active .wiz-tab-sub { color: #9ca3af; }' +
+            '.wiz-panel { display: none; }' +
+            '.wiz-panel.active { display: block; }' +
+            '.wiz-section { background: rgba(11,18,32,0.5); border: 1px solid rgba(75,85,99,0.30); border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; }' +
+            '.wiz-section h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #e5e7eb; }' +
+            '.wiz-section p { font-size: 12.5px; color: #d1d5db; line-height: 1.55; margin: 4px 0; }' +
+            '.wiz-prompt { position: relative; background: #020617; border: 1px solid rgba(75,85,99,0.40); border-radius: 8px; padding: 10px 44px 10px 12px; font-family: JetBrains Mono,monospace; font-size: 11.5px; color: #cbd5e1; line-height: 1.55; white-space: pre-wrap; word-break: break-word; max-height: 280px; overflow-y: auto; margin: 6px 0; }' +
+            '.wiz-copy { position: absolute; top: 8px; right: 8px; padding: 4px 8px; border-radius: 5px; background: rgba(16,185,129,0.15); color: #6ee7b7; border: 1px solid rgba(52,211,153,0.40); font-family: JetBrains Mono,monospace; font-size: 10px; cursor: pointer; }' +
+            '.wiz-copy:hover { background: rgba(16,185,129,0.30); }' +
+            '.wiz-stopped-row { background: rgba(11,18,32,0.5); border: 1px solid rgba(75,85,99,0.30); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }' +
+            '.wiz-stopped-name { font-size: 13px; font-weight: 600; color: #e5e7eb; }' +
+            '.wiz-stopped-path { font-size: 11px; color: #93c5fd; margin: 2px 0; word-break: break-all; }' +
+            '.wiz-stopped-meta { font-size: 10.5px; color: #6b7280; margin-bottom: 6px; }' +
+            '.wiz-stopped-btn { font-family: JetBrains Mono,monospace; font-size: 10.5px; padding: 5px 9px; border-radius: 5px; background: rgba(96,165,250,0.15); color: #93c5fd; border: 1px solid rgba(96,165,250,0.40); cursor: pointer; }' +
+            '.wiz-stopped-btn:hover { background: rgba(96,165,250,0.25); }' +
+            '.wiz-cloud { opacity: 0.85; background: rgba(96,165,250,0.04); border-color: rgba(96,165,250,0.25); }' +
+          '</style>' +
 
-            <div class="add-proj-section">
-              <h4>Local — your machine right now <span class="pill">available</span></h4>
-              <p>Open your AI agent (Claude Code, Cursor, Windsurf, …) in the repo you want to add and paste this prompt. It applies the standard, starts the Python daemon, and the architect picks it up automatically:</p>
-              <div class="add-proj-prompt"><button type="button" class="add-proj-copy" id="add-proj-copy-btn">copy</button><span id="add-proj-prompt-text">${esc(promptText)}</span></div>
-              <p style="margin-top:8px; font-size:11.5px; color:#9ca3af;">
-                The daemon binds the first free port in 5570–5589, so multiple projects on the same machine never clash. Stop any of them later from the rail's Stop button (▢).
-              </p>
-              <div class="add-proj-links">
-                <a class="add-proj-link" href="${STD}" target="_blank">/standard ↗</a>
-                <a class="add-proj-link" href="${STD}#10-3-adding-more-projects-to-your-architect" target="_blank">§10.3 details ↗</a>
-                <a class="add-proj-link" href="${DAEMON_URL}" target="_blank">daemon.py source ↗</a>
-              </div>
-            </div>
+          '<div class="wiz-tabs">' +
+            '<button type="button" class="wiz-tab" data-tab="A">' +
+              '<div><span class="wiz-tab-pill">A</span><span class="wiz-tab-title">Start a stopped project</span></div>' +
+              '<div class="wiz-tab-sub">' + (stopped.length > 0 ? stopped.length + ' known · daemon offline' : 'none on record yet') + '</div>' +
+            '</button>' +
+            '<button type="button" class="wiz-tab" data-tab="B">' +
+              '<div><span class="wiz-tab-pill">B</span><span class="wiz-tab-title">Apply standard to an existing repo</span></div>' +
+              '<div class="wiz-tab-sub">have a repo, no .meshkore/ yet</div>' +
+            '</button>' +
+            '<button type="button" class="wiz-tab" data-tab="C">' +
+              '<div><span class="wiz-tab-pill">C</span><span class="wiz-tab-title">Bootstrap a new repo from scratch</span></div>' +
+              '<div class="wiz-tab-sub">empty folder, start from zero</div>' +
+            '</button>' +
+          '</div>' +
 
-            <div class="add-proj-section" style="opacity: 0.85;">
-              <h4>Cloud — projects on other machines or your phone <span class="pill is-cloud">cloud</span> <span class="pill is-soon">in progress</span></h4>
-              <p>To work with repositories that don't live on this machine (a teammate's laptop, a remote VM, your phone), the architect will connect to a cloud relay instead of a local daemon. Each remote daemon stays the canonical Python script — it just registers itself with the relay so the architect can reach it through the cloud.</p>
-              <p>A separate work-stream is wiring the cloud relay, the local-to-cloud bridge daemon, and the mobile-friendly architect-cloud mode. When it ships you'll see a <em>Cloud</em> tab in this dialog with the registration prompt.</p>
-              <p style="font-size:11.5px; color:#9ca3af;">Track the work and see the design at <a href="https://meshkore.com/standard#10-3-adding-more-projects-to-your-architect" target="_blank" class="add-proj-link" style="padding:0; border:0; background:transparent;">standard §10.3</a> (Cloud mode subsection).</p>
-            </div>
+          '<div class="wiz-panel" data-panel="A">' +
+            '<div class="wiz-section">' +
+              '<h4>Resume a project the architect has seen before</h4>' +
+              '<p>These are projects in this browser\'s memory whose daemon isn\'t currently answering. Pick one and the architect will show you the exact folder + command to bring it back up.</p>' +
+              stoppedRowsHtml +
+              '<p style="font-size:11px;color:#6b7280;margin-top:8px;">Full spec at <a href="' + STD_103_5 + '" target="_blank" style="color:#34d399;">/standard §10.3.5</a>.</p>' +
+            '</div>' +
+          '</div>' +
 
-          </div>`,
+          '<div class="wiz-panel" data-panel="B">' +
+            '<div class="wiz-section">' +
+              '<h4>Apply the MeshKore Standard to an existing repo</h4>' +
+              '<p>Open your AI agent (Claude Code, Cursor, Windsurf, …) inside the repo and paste this prompt. It applies the standard, downloads the Python daemon, and starts it — the architect picks it up automatically on its next probe.</p>' +
+              '<div class="wiz-prompt"><button type="button" class="wiz-copy" data-copy="B">copy</button><span data-prompt="B">' + esc(promptB) + '</span></div>' +
+              '<p style="font-size:11px;color:#6b7280;">Full spec at <a href="' + STD_103_1 + '" target="_blank" style="color:#34d399;">/standard §10.3.1</a>.</p>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="wiz-panel" data-panel="C">' +
+            '<div class="wiz-section">' +
+              '<h4>Bootstrap a brand-new repo</h4>' +
+              '<p>You have an empty folder (or no folder yet). Create it, open an AI agent inside, and paste this prompt. It will initialise git, scaffold .meshkore/, drop the editor boot block, start the Python daemon, and pre-create a first task so the architect lights up immediately.</p>' +
+              '<div class="wiz-prompt"><button type="button" class="wiz-copy" data-copy="C">copy</button><span data-prompt="C">' + esc(promptC_dev) + '</span></div>' +
+              '<p style="font-size:11px;color:#6b7280;">Full spec at <a href="' + STD_103_4 + '" target="_blank" style="color:#34d399;">/standard §10.3.4</a>.</p>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="wiz-section wiz-cloud" style="margin-top:14px;">' +
+            '<h4>Cloud — projects on other machines or your phone <span style="font-family:JetBrains Mono,monospace;font-size:9.5px;background:rgba(251,191,36,0.10);color:#fbbf24;border:1px solid rgba(251,191,36,0.30);padding:2px 7px;border-radius:999px;margin-left:6px;">in progress</span></h4>' +
+            '<p>Working in a remote VM or from your phone? A separate work-stream is wiring the cloud relay + bridge daemon so the same architect URL can manage projects that don\'t live on this machine. When it ships you\'ll see Cloud sub-tabs here. Track the design at <a href="' + STD + '#10-3-adding-more-projects-to-your-architect" target="_blank" style="color:#34d399;">/standard §10.3</a>.</p>' +
+          '</div>',
+
         buttons: [{ id: 'close', label: 'Close' }],
-        onMount: (body) => {
-          const copy = body.querySelector('#add-proj-copy-btn');
-          const txt  = body.querySelector('#add-proj-prompt-text');
-          copy?.addEventListener('click', () => {
-            const t = txt?.textContent || '';
-            navigator.clipboard.writeText(t);
-            copy.textContent = 'copied ✓';
-            setTimeout(() => { copy.textContent = 'copy'; }, 1500);
+        onMount: (body, close) => {
+          // Pick the smartest default tab: A if there's anything stopped,
+          // else B (the most-used path), else C.
+          const defaultTab = stopped.length > 0 ? 'A' : 'B';
+          function activate(tab) {
+            body.querySelectorAll('.wiz-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+            body.querySelectorAll('.wiz-panel').forEach(b => b.classList.toggle('active', b.dataset.panel === tab));
+          }
+          activate(defaultTab);
+          body.querySelectorAll('.wiz-tab').forEach(b => {
+            b.addEventListener('click', () => activate(b.dataset.tab));
+          });
+          body.querySelectorAll('[data-copy]').forEach(b => {
+            b.addEventListener('click', () => {
+              const which = b.dataset.copy;
+              const span  = body.querySelector('[data-prompt="' + which + '"]');
+              navigator.clipboard.writeText(span?.textContent || '');
+              b.textContent = 'copied ✓';
+              setTimeout(() => { b.textContent = 'copy'; }, 1500);
+            });
+          });
+          body.querySelectorAll('[data-action="open-start"]').forEach(b => {
+            b.addEventListener('click', () => {
+              const port = parseInt(b.dataset.port, 10);
+              const p = stopped.find(s => s.port === port);
+              if (!p) return;
+              close('chose-start');
+              setTimeout(() => openStartProjectModal({ ...p, _stopped: true }), 50);
+            });
           });
         },
       });
@@ -3711,12 +4005,25 @@ will auto-detect it and add it to the Projects rail. No further steps.`;
     async function tryDaemon() {
       await discoverProjects();
       if (!DAEMON_BASE) return;
-      // Try authenticated /state — if 401, prompt for token
+      // V35 — try /state with whatever token we have (possibly none).
+      // The Python daemon answers without auth, so the common case is
+      // "no prompt". Only ask if the daemon returns 401.
       if (!await fetchDaemonState()) {
         await promptForToken();
       }
-      if (DAEMON_TOKEN) connectDaemonWs();
-      // Compute and paint the active project's status dot once we have STATE
+      // After connecting, ask /info for the on-disk repo path so the
+      // KnownProjects store remembers it for stopped-state revival.
+      try {
+        const r = await fetch(DAEMON_BASE + '/info', {
+          headers: DAEMON_TOKEN ? { 'Authorization': `Bearer ${DAEMON_TOKEN}` } : {},
+        });
+        if (r.ok) {
+          const info = await r.json();
+          const repo = info?.paths?.root || info?.repo_path || null;
+          if (repo) KnownProjects.attachRepoPath(ACTIVE_PROJECT_PORT, repo);
+        }
+      } catch {}
+      connectDaemonWs();
       refreshProjectStatuses();
     }
 
@@ -3748,40 +4055,49 @@ will auto-detect it and add it to the Projects rail. No further steps.`;
       const secondary = $('project-bar-secondary');
       if (!primary) return;
       const all = PROJECTS.slice().sort((a, b) => a.port - b.port);
-      // No daemons detected → static read-only stub. Shows the cluster
-      // name from the snapshot if any, with a grey dot.
+      secondary.innerHTML = '';
+      secondary.classList.add('hidden');
+
+      // No daemons detected → project name from snapshot, offline indicator.
       if (all.length === 0) {
-        const name = STATE?.cluster?.name || STATE?.cluster?.id || 'no daemon';
+        const name = STATE?.cluster?.name || STATE?.cluster?.id || 'no project';
         primary.innerHTML = `
-          <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] mono bg-gray-900/40 border border-gray-800 text-gray-500" title="No local daemon detected on ports ${PROJECT_PORT_RANGE[0]}-${PROJECT_PORT_RANGE[1]}">
-            <span class="dot bg-gray-600"></span>
-            <span class="truncate max-w-[200px]">${esc(name)} · read-only</span>
-          </span>`;
-        secondary.innerHTML = '';
-        secondary.classList.add('hidden');
+          <div class="flex flex-col items-center min-w-0">
+            <span class="text-[13px] font-semibold text-gray-500 truncate max-w-[260px] tracking-wide" title="No daemon · read-only">${esc(name)}</span>
+            <span class="text-[10px] mono text-gray-700 mt-0.5">offline · read-only</span>
+          </div>`;
         return;
       }
-      // Primary row: up to 6 projects + a "+" that opens the secondary row
-      const PRIMARY_MAX = 6;
-      const top = all.slice(0, PRIMARY_MAX);
-      const overflow = all.slice(PRIMARY_MAX);
 
-      primary.innerHTML = top.map(p => projectTile(p)).join('') +
-        (overflow.length ? `
-          <button id="project-overflow-toggle" class="flex-shrink-0 px-2 py-1.5 rounded-lg bg-gray-900/40 border border-gray-800 text-[11px] mono text-gray-400 hover:text-emerald-300 hover:border-emerald-500/30 transition" title="Show ${overflow.length} more projects">+${overflow.length}</button>` : '');
+      // Active project — show name prominently in the centre.
+      const active = all.find(p => p.port === ACTIVE_PROJECT_PORT) || all[0];
+      const name = active.cluster_name || active.cluster_id || `:${active.port}`;
+      const dot  = projectStatusColor(active);
 
-      if (overflow.length) {
-        secondary.innerHTML = all.map(p => projectTile(p, true)).join('');
+      if (all.length === 1) {
+        // Single project — clean centred title, no switcher chrome.
+        primary.innerHTML = `
+          <div class="flex flex-col items-center min-w-0">
+            <span class="text-[14px] font-semibold text-gray-100 truncate max-w-[300px] tracking-wide">${esc(name)}</span>
+            <span class="text-[10px] mono text-gray-500 mt-0.5 flex items-center gap-1"><span class="dot ${dot} w-1.5 h-1.5"></span>${esc(active.cluster_id || `:${active.port}`)}</span>
+          </div>`;
       } else {
-        secondary.innerHTML = '';
-        secondary.classList.add('hidden');
+        // Multiple projects — active name + compact switcher pills below.
+        primary.innerHTML = `
+          <div class="flex flex-col items-center min-w-0 gap-1">
+            <span class="text-[14px] font-semibold text-gray-100 truncate max-w-[260px] tracking-wide flex items-center gap-1.5">
+              <span class="dot ${dot} w-2 h-2 flex-shrink-0"></span>${esc(name)}
+            </span>
+            <div class="flex items-center gap-1">
+              ${all.map(p => {
+                const isAct = p.port === ACTIVE_PROJECT_PORT;
+                const lbl = p.cluster_name || `:${p.port}`;
+                return `<button class="proj-tile flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] mono border transition ${isAct ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' : 'bg-transparent border-gray-800 text-gray-500 hover:border-gray-700 hover:text-gray-300'}" data-port="${p.port}" title="${esc(lbl)}">${esc(lbl)}</button>`;
+              }).join('')}
+            </div>
+          </div>`;
+        $$('.proj-tile', primary).forEach(b => b.addEventListener('click', () => switchProject(parseInt(b.dataset.port, 10))));
       }
-
-      $$('.proj-tile', primary).forEach(b => b.addEventListener('click', () => switchProject(parseInt(b.dataset.port, 10))));
-      $$('.proj-tile', secondary).forEach(b => b.addEventListener('click', () => switchProject(parseInt(b.dataset.port, 10))));
-      $('project-overflow-toggle')?.addEventListener('click', () => {
-        secondary.classList.toggle('hidden');
-      });
     }
 
     function projectTile(p, compact = false) {
@@ -3888,6 +4204,7 @@ will auto-detect it and add it to the Projects rail. No further steps.`;
           $('daemon-dot').className = 'dot bg-gray-600';
           $('daemon-status').textContent = 'offline';
           $('daemon-status').className = 'text-gray-400';
+          hydrateHeader();
           div.remove();
           resolve();
         });
@@ -4230,8 +4547,8 @@ will auto-detect it and add it to the Projects rail. No further steps.`;
         if (ev.conv) (convMap[ev.conv] ||= []).push(ev);
         if (ev.id)   (taskMap[ev.id] ||= []).push(ev);
       }
-      // Remove archived convs so they never resurface after refresh
-      for (const id of archivedConvs) delete convMap[id];
+      // Archived convs stay in convMap so they can be restored;
+      // render functions filter by !archivedConvs.has(id).
 
       // Re-attach carry-over events. For each, drop if the snapshot now
       // contains a final for its stream (meaning the WS event we
@@ -4294,11 +4611,24 @@ will auto-detect it and add it to the Projects rail. No further steps.`;
     // ─── Header ─────────────────────────────────────────────────────────
     function hydrateHeader() {
       const c = STATE.cluster || {};
-      // cluster id moved out of header — repo/cluster name will live elsewhere
-      // (footer or sidebar, TBD). The "beta" pill replaces it for now.
       $('cluster-type-pill').textContent = (c.type || '?').toUpperCase();
       const gen = STATE.generated_at ? new Date(STATE.generated_at) : null;
       if (gen) $('generated-pill').innerHTML = `<span class="dot bg-gray-700"></span>state · ${timeAgo(gen)}`;
+      // Cluster connection pill — show when we have a cluster name and daemon is up
+      const pill = $('cluster-conn-pill');
+      if (pill) {
+        const daemonOnline = $('daemon-dot')?.className?.includes('emerald');
+        const clusterName = c.name || c.id;
+        if (clusterName && daemonOnline) {
+          $('cluster-conn-dot').className = 'dot bg-blue-400';
+          $('cluster-conn-label').textContent = clusterName;
+          pill.classList.remove('hidden');
+          pill.classList.add('flex');
+        } else {
+          pill.classList.add('hidden');
+          pill.classList.remove('flex');
+        }
+      }
     }
 
     // ─── Modules nav (col 1) ────────────────────────────────────────────
@@ -5403,12 +5733,79 @@ will auto-detect it and add it to the Projects rail. No further steps.`;
       try { localStorage.setItem('meshcore-conv-titles', JSON.stringify(convTitleOverrides)); } catch {}
     }
 
-    // V29 — archived/deleted convs persist across refreshes
+    // V29 — archived convs: set of IDs for fast filtering
     const archivedConvs = (() => {
       try { return new Set(JSON.parse(localStorage.getItem('meshcore-archived-convs') || '[]')); } catch { return new Set(); }
     })();
     function _saveArchivedConvs() {
       try { localStorage.setItem('meshcore-archived-convs', JSON.stringify([...archivedConvs])); } catch {}
+    }
+    // Archive metadata: {[convId]: {label, archivedAt}} — for history panel display
+    let archivedMeta = (() => {
+      try { return JSON.parse(localStorage.getItem('meshcore-archived-meta') || '{}'); } catch { return {}; }
+    })();
+    function _saveArchivedMeta() {
+      try { localStorage.setItem('meshcore-archived-meta', JSON.stringify(archivedMeta)); } catch {}
+    }
+
+    // Archive a conv — one shot, no confirm. Hides from rail, preserves data for restore.
+    function archiveConv(convId) {
+      if (!convId || archivedConvs.has(convId)) return;
+      archivedMeta[convId] = { label: convLabel(convId), archivedAt: Date.now() };
+      _saveArchivedMeta();
+      archivedConvs.add(convId);
+      _saveArchivedConvs();
+      const remaining = Object.keys(convMap).filter(id => !archivedConvs.has(id));
+      activeConv = remaining[0] || null;
+      renderConvSwitcher();
+      renderChatRail();
+      renderChat();
+    }
+
+    // Restore a conv from archive — removes from archivedConvs, selects it, closes history panel
+    function restoreConv(convId) {
+      archivedConvs.delete(convId);
+      delete archivedMeta[convId];
+      _saveArchivedConvs();
+      _saveArchivedMeta();
+      activeConv = convId;
+      closeHistoryPanel();
+      renderConvSwitcher();
+      renderChatRail();
+      renderChatScopeStrip();
+      renderChat();
+    }
+
+    // History panel — shows in place of chat-msgs
+    function openHistoryPanel() {
+      $('chat-msgs').classList.add('hidden');
+      $('chat-history-panel').classList.add('is-open');
+      renderHistoryPanel();
+    }
+    function closeHistoryPanel() {
+      $('chat-history-panel').classList.remove('is-open');
+      $('chat-msgs').classList.remove('hidden');
+    }
+    function renderHistoryPanel() {
+      const list = $('chat-history-list');
+      if (!list) return;
+      const items = [...archivedConvs]
+        .map(id => ({ id, ...(archivedMeta[id] || { label: id, archivedAt: 0 }) }))
+        .sort((a, b) => b.archivedAt - a.archivedAt);
+      if (!items.length) {
+        list.innerHTML = '<p class="chat-history-empty">No archived conversations yet.</p>';
+        return;
+      }
+      list.innerHTML = items.map(item => `
+        <div class="chat-history-item">
+          <span class="chat-history-item-name" title="${esc(item.id)}">${esc(item.label || item.id)}</span>
+          <span class="chat-history-item-time">${item.archivedAt ? timeAgo(new Date(item.archivedAt)) : ''}</span>
+          <button class="chat-history-restore-btn" data-restore="${esc(item.id)}">Restore</button>
+        </div>
+      `).join('');
+      list.querySelectorAll('[data-restore]').forEach(btn =>
+        btn.addEventListener('click', () => restoreConv(btn.dataset.restore))
+      );
     }
 
     // V30 — user-controlled rail order, persists across refreshes
@@ -5597,6 +5994,7 @@ will auto-detect it and add it to the Projects rail. No further steps.`;
           if (!c) return;
           activeConv = c;
           if ($('conv-switcher')) $('conv-switcher').value = c;
+          closeHistoryPanel();
           renderChatRail();
           renderChatScopeStrip();
           renderChat();
@@ -6228,7 +6626,7 @@ will auto-detect it and add it to the Projects rail. No further steps.`;
           ${scope.taskId ? `<a class="msg-soft-link is-task text-[10px] mono" data-scope-task="${esc(scope.taskId)}" title="open task ${esc(scope.taskId)}">${esc(scope.taskId)}</a>` : ''}
         ` : '';
         return `
-          <div class="chat-msg group ${isUser ? 'chat-msg--right' : 'chat-msg--left'}" data-msg-ts="${esc(ev.ts)}">
+          <div class="chat-msg group ${isUser ? 'chat-msg--right' : 'chat-msg--left'}${!isUser && ev.author === 'coordinator' ? ' chat-msg--coordinator' : ''}" data-msg-ts="${esc(ev.ts)}">
             <div class="chat-msg-header flex items-baseline gap-2 mb-1 flex-wrap ${isUser ? 'justify-end' : ''}">
               <span class="chat-name text-[12px]"><span class="chat-name-dot"></span>${esc(ev.author || (isUser?'user':'agent'))}</span>
               ${modelChip}
@@ -8594,56 +8992,15 @@ credentials.`;
       // V27 — new conv from rail "+" button
       $('chat-rail-new')?.addEventListener('click', () => createAgentFlow());
 
-      // V27 — archive current conv (soft delete; events stay in timeline).
-      // V30 — confirmation surfaces inline in the chat header (right under
-      // the title, beside the X the user just clicked) instead of a
-      // centred modal. The action happens where the eye already is.
-      const closeArchiveConfirm = () => {
-        const strip = $('chat-scope-strip');
-        const confirmEl = $('chat-scope-confirm');
-        if (!strip || !confirmEl) return;
-        confirmEl.classList.add('hidden');
-        strip.classList.remove('is-confirming');
-        document.removeEventListener('keydown', onArchiveKey);
-      };
-      function onArchiveKey(e) {
-        if (e.key === 'Escape') closeArchiveConfirm();
-        else if (e.key === 'Enter') {
-          const yes = document.querySelector('#chat-scope-confirm [data-confirm="yes"]');
-          if (yes) yes.click();
-        }
-      }
-      $('chat-archive')?.addEventListener('click', () => {
-        if (!activeConv) return;
-        const strip = $('chat-scope-strip');
-        const confirmEl = $('chat-scope-confirm');
-        const msgEl = $('chat-scope-confirm-msg');
-        if (!strip || !confirmEl || !msgEl) return;
-        // Toggle off if already armed
-        if (!confirmEl.classList.contains('hidden')) {
-          closeArchiveConfirm();
-          return;
-        }
-        msgEl.textContent = `Archive "${convLabel(activeConv)}"? Messages stay; only the rail entry goes.`;
-        confirmEl.classList.remove('hidden');
-        strip.classList.add('is-confirming');
-        document.addEventListener('keydown', onArchiveKey);
+      // Archive — one click, no confirm
+      $('chat-archive-btn')?.addEventListener('click', () => archiveConv(activeConv));
+
+      // History panel — toggle + close
+      $('chat-history-btn')?.addEventListener('click', () => {
+        if ($('chat-history-panel').classList.contains('is-open')) closeHistoryPanel();
+        else openHistoryPanel();
       });
-      // Wire up Cancel / Archive buttons once (delegated on the confirm el)
-      $('chat-scope-confirm')?.addEventListener('click', (e) => {
-        const btn = e.target.closest('[data-confirm]');
-        if (!btn) return;
-        const choice = btn.dataset.confirm;
-        closeArchiveConfirm();
-        if (choice !== 'yes' || !activeConv) return;
-        archivedConvs.add(activeConv);
-        _saveArchivedConvs();
-        delete convMap[activeConv];
-        const remaining = Object.keys(convMap).filter(id => !archivedConvs.has(id));
-        activeConv = remaining[0] || null;
-        renderConvSwitcher();
-        renderChat();
-      });
+      $('chat-history-close-btn')?.addEventListener('click', () => closeHistoryPanel());
 
       // V27/V29 — inline rename: click pencil (or dbl-click title) to edit in place.
       const startInlineRename = () => {
