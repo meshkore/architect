@@ -149,22 +149,16 @@
       width: var(--projects-w, 180px);
       display: flex;
       flex-direction: column;
-      /* V39 — Rail blends into the app bg; only a thin hairline on the
-         right tells the eye where the rail ends. No subzone, no glow. */
-      background: transparent;
+      /* V40 — Rail uses the same dark panel surface as the workspace
+         columns (#02040c, --bg-panel) instead of the slate-blue
+         "desk" canvas. No sub-zone, no hairline, no border. The rail
+         simply IS another part of the panel ecosystem. */
+      background: var(--bg-panel);
       border-right: none;
       overflow: hidden;
       box-sizing: border-box;
       transition: flex-basis 160ms, width 160ms;
       position: relative;
-    }
-    .projects-rail::after {
-      content: '';
-      position: absolute;
-      top: 14px; bottom: 14px; right: 0;
-      width: 1px;
-      background: rgba(75,85,99,0.28);
-      pointer-events: none;
     }
     /* V37 — Two modes only: full (project name) + short (3-letter pill).
        Active is a filled background with inverted text; "working but not
@@ -175,9 +169,9 @@
 
     .projects-rail-head {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 10px 8px;
-      border-bottom: 1px solid rgba(75,85,99,0.20);
+      padding: 12px 10px 10px;
       flex-shrink: 0;
+      /* V40 — no border-bottom; the rail flows seamlessly into the list. */
     }
     .projects-rail-title {
       font-family: 'JetBrains Mono', monospace;
@@ -187,18 +181,16 @@
     }
     .projects-rail[data-mode="short"] .projects-rail-title { display: none; }
     .projects-rail-btn {
-      width: 20px; height: 20px;
+      width: 22px; height: 22px;
       display: inline-flex; align-items: center; justify-content: center;
-      color: #6b7280; background: transparent;
-      border: 1px solid rgba(75,85,99,0.30);
+      color: #4b5563;
+      background: transparent;
+      border: none;
       border-radius: 4px; cursor: pointer;
-      transition: color 120ms, border-color 120ms, background 120ms;
+      padding: 0;
+      transition: color 120ms;
     }
-    .projects-rail-btn:hover {
-      color: #34d399;
-      border-color: rgba(52,211,153,0.45);
-      background: rgba(16,185,129,0.08);
-    }
+    .projects-rail-btn:hover { color: #d1d5db; }
     /* Toggle icon swap: collapse arrows in full, expand arrows in short. */
     .rail-icon-collapse, .rail-icon-expand { display: none; }
     .projects-rail[data-mode="full"]  .rail-icon-collapse { display: inline; }
@@ -3693,12 +3685,21 @@ python3 .meshkore/scripts/daemon.py</pre>
     const PROJECTS_RAIL_KEY = 'mc-projects-rail-mode-v1';
     const RAIL_MODES = ['full', 'short'];
     function projectsRailMode() {
+      // V40 — auto-collapse to short when there's a single project AND
+      // the operator hasn't explicitly chosen a mode yet. Once they
+      // toggle, the preference sticks. Most users start with one project
+      // and shouldn't waste 124 px of horizontal on a single name.
       try {
         const v = localStorage.getItem(PROJECTS_RAIL_KEY);
         if (RAIL_MODES.includes(v)) return v;
-        // Migration from old 4-mode model: id/num/mini → short, anything
-        // else → full.
         if (v === 'id' || v === 'num' || v === 'mini') return 'short';
+        // No saved preference: pick based on how many projects we know.
+        try {
+          const known = JSON.parse(localStorage.getItem(KNOWN_PROJECTS_KEY) || '[]');
+          const liveCount = (typeof PROJECTS !== 'undefined' ? PROJECTS.length : 0);
+          const totalKnown = Array.isArray(known) ? known.length : 0;
+          if (Math.max(liveCount, totalKnown) <= 1) return 'short';
+        } catch {}
       } catch {}
       return 'full';
     }
