@@ -4406,25 +4406,15 @@ python3 .meshkore/scripts/daemon.py</pre>
         document._mcAddDelegateBound = true;
       }
     }
-
-    // V52 — Add Project wizard. Strict 2-box-per-screen flow that asks the
-    // user a few questions, then hands them a *tailored* prompt to paste
-    // into their local coding agent. No manual paths: by design the
-    // system requires a coding agent, so we don't pretend it doesn't.
-    //
-    // Screens:
-    //   START          Revive | Create new            (skipped if no stopped)
-    //   REVIVE         pick a stopped project         (existing flow)
-    //   NEW_NAME       input: project name
-    //   NEW_DEVICES    Single device | Multi device   (devices=single|multi)
-    //   NEW_DATA       Local only    | Cloud sync     (data=local|cloud)
-    //   NEW_PROMPT     copy-prompt + scan-now button
+    // V55 — Wizard with footer-based navigation + compact prompt.
+    // UX pattern: header has title + close X, body has only step content,
+    // footer has ALL navigation (Back left, Skip/Continue/Finish right).
+    // Prompt is now ~12 lines (URL to spec + parameters block) so the
+    // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V54 open');
+      console.log('[Add Project] wizard V55 open');
       const STD          = 'https://meshkore.com/standard';
-      const STD_HASH     = STD + '#10-3-adding-more-projects-to-your-architect';
-      const TPL_DEV      = 'https://meshkore.com/reference/cluster/templates/cluster.yaml.dev';
-      const DAEMON_URL   = 'https://meshkore.com/reference/cluster/scripts/daemon.py';
+      const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
 
       const stopped = KnownProjects.list().filter(k =>
@@ -4435,127 +4425,60 @@ python3 .meshkore/scripts/daemon.py</pre>
       // path semantics:
       //   startKind=existing → absolute path of THE folder itself
       //   startKind=new      → absolute path of the PARENT folder
-      //                        (we create ./<projectName>/ inside it)
       const answers = {
-        startKind: null,  // 'new' (create folder) | 'existing' (apply to folder already on disk)
+        startKind: null,
         projectName: '',
-        path: '',         // absolute path; empty = let the agent ask the user
-        devices: null,    // 'single' | 'multi'
-        data: null,       // 'local' | 'cloud'
+        path: '',
+        devices: null,
+        data: null,
       };
 
-      // basename(p) → last segment, no trailing slash. Pre-fills the
-      // project name from a chosen existing folder.
       function basename(p) {
         return (p || '').replace(/[\/\\]+$/, '').split(/[\/\\]/).pop() || '';
       }
 
-      // ── Prompt generator (uses answers) ───────────────────────────────
+      // ── Prompt generator — short, URL-first ───────────────────────────
       function genPrompt() {
         const name = answers.projectName.trim() || 'my-project';
         const isMulti = answers.devices === 'multi';
         const isCloud = answers.data === 'cloud';
-        const lines = [];
-        lines.push('Set up a new MeshKore project called "' + name + '".');
-        lines.push('');
-        lines.push('Full setup spec lives at ' + STD + '.');
-        lines.push('Read it before acting. Project parameters this user picked:');
-        lines.push('');
-        const userPath = (answers.path || '').trim();
-        lines.push('  · name:    ' + name);
-        lines.push('  · kind:    ' + (answers.startKind === 'existing' ? 'apply to existing folder on disk' : 'create new folder from scratch'));
-        if (userPath) {
-          lines.push('  · path:    ' + userPath + (answers.startKind === 'new' ? ' (parent — create ./' + name + '/ inside it)' : ' (the project folder itself)'));
-        } else {
-          lines.push('  · path:    (not provided — ask the user)');
-        }
-        lines.push('  · devices: ' + (isMulti ? 'multi (device admission will be set up)' : 'single (this machine only)'));
-        lines.push('  · data:    ' + (isCloud ? 'cloud sync via cluster.meshkore.com (free in v1, may become paid later)' : 'local-only (no cloud)'));
-        lines.push('');
-        lines.push('STEP 1 — Get to the right folder.');
-        if (answers.startKind === 'existing') {
-          if (userPath) {
-            lines.push('The user pointed at: ' + userPath);
-            lines.push('cd into it. DO NOT create a new folder. DO NOT touch files');
-            lines.push('outside it. Run `git init` if it is not already a git repo.');
-          } else {
-            lines.push('No path was given. ASK the user for the absolute path of the');
-            lines.push('existing project folder and cd into it. DO NOT create a new');
-            lines.push('folder. DO NOT touch files outside it. Run `git init` if it');
-            lines.push('is not already a git repo (recommended).');
-          }
-        } else {
-          if (userPath) {
-            lines.push('Create ./' + name + '/ inside the user\'s parent folder:');
-            lines.push('  cd ' + userPath);
-            lines.push('  mkdir -p ' + name);
-            lines.push('  cd ' + name);
-            lines.push('Run `git init` if it is not already a git repo.');
-          } else {
-            lines.push('No parent path was given. ASK the user where to create');
-            lines.push('the project folder, then create ./' + name + '/ inside it.');
-            lines.push('cd into it. Run `git init` if it is not already a git repo.');
-          }
-        }
-        lines.push('');
-        lines.push('STEP 2 — Apply the MeshKore standard (§2).');
-        lines.push('Create the .meshkore/ tree. Start cluster.yaml from the template:');
-        lines.push('  curl -fsSL ' + TPL_DEV + ' -o .meshkore/public/cluster.yaml');
-        lines.push('Fill in:');
-        lines.push('  cluster_id:          ' + name);
-        lines.push('  cluster_name:        "' + name + '"');
-        lines.push('  cluster_description: ask the user for one sentence');
-        lines.push('');
-        lines.push('STEP 3 — Drop the editor boot block (§8).');
-        lines.push('Add CLAUDE.md / .cursorrules / .windsurfrules at the repo root');
-        lines.push('— pick whichever your editor needs.');
-        lines.push('');
-        lines.push('STEP 4 — Data sync.');
-        if (isCloud) {
-          lines.push('Set `storage.mode: remote` in cluster.yaml.');
-          lines.push('Walk me through signing up at ' + STD + ' §10.3 — first device');
-          lines.push('to sign up claims the tenant. Free in v1; may become paid later.');
-        } else {
-          lines.push('Keep `storage.mode: local` (the default). All data stays on this');
-          lines.push('machine. No cloud signup needed.');
-        }
-        lines.push('');
-        lines.push('STEP 5 — Multi-device authentication.');
-        if (isMulti) {
-          lines.push('Set up device admission per ' + STD + ' §10.3.2. After the daemon');
-          lines.push('starts, generate an invite token I will share with my other');
-          lines.push('devices so they can join this cluster securely.');
-        } else {
-          lines.push('Single device — no admission setup needed.');
-        }
-        lines.push('');
-        lines.push('STEP 6 — Start the local Python daemon.');
-        lines.push('  mkdir -p .meshkore/scripts');
-        lines.push('  curl -fsSL ' + DAEMON_URL + ' \\');
-        lines.push('    -o .meshkore/scripts/daemon.py');
-        lines.push('  python3 .meshkore/scripts/daemon.py');
-        lines.push('');
-        lines.push('STEP 7 — Confirm.');
-        lines.push('Print:');
-        lines.push('  · the chosen port (5570-5589)');
-        lines.push('  · the bearer token from .meshkore/credentials/portal-token');
-        if (isMulti) {
-          lines.push('  · the device-admission invite token from Step 6');
-        }
-        lines.push('');
-        lines.push('Once the daemon is up, I will click "Scan for daemon" in my');
-        lines.push('architect at ' + ARCHITECT + ' and the project appears in the rail.');
-        return lines.join('\n');
+        const path = (answers.path || '').trim();
+        const kindLabel = answers.startKind === 'existing'
+          ? 'apply to existing folder on disk'
+          : 'create new folder from scratch';
+        const pathLabel = path
+          ? path + (answers.startKind === 'new' ? '  (parent — create ./' + name + '/ inside)' : '  (the project folder itself)')
+          : '(not provided — ask me)';
+        const devicesLabel = isMulti
+          ? 'multi · set up device admission per §10.3.2'
+          : 'single · no admission setup needed';
+        const dataLabel = isCloud
+          ? 'cloud · sign up at cluster.meshkore.com (free in v1, may become paid later)'
+          : 'local-only · architect talks to localhost daemon';
+
+        return ''
+          + 'Set up a new MeshKore project. Read the spec end-to-end at:\n'
+          + STD_SETUP + '\n'
+          + '\n'
+          + 'Apply it with these parameters:\n'
+          + '\n'
+          + '  · name:    ' + name + '\n'
+          + '  · kind:    ' + kindLabel + '\n'
+          + '  · path:    ' + pathLabel + '\n'
+          + '  · devices: ' + devicesLabel + '\n'
+          + '  · data:    ' + dataLabel + '\n'
+          + '\n'
+          + 'When the local daemon is up, print the chosen port + bearer\n'
+          + 'token. I\'ll click "Scan for daemon" at ' + ARCHITECT + '.';
       }
 
-      // ── Styles (kept minimal — only 2-box pattern + input + prompt) ───
+      // ── Styles ────────────────────────────────────────────────────────
       const css = (
         '<style>' +
-        '.wiz-step { padding: 2px 0; }' +
-        '.wiz-back { display: inline-flex; align-items: center; gap: 4px; background: transparent; border: none; color: #9ca3af; font-size: 11.5px; cursor: pointer; padding: 4px 8px; margin-bottom: 14px; border-radius: 5px; font-family: inherit; }' +
-        '.wiz-back:hover { color: #e5e7eb; background: rgba(75,85,99,0.20); }' +
+        '.wiz-step { padding: 4px 0 8px; }' +
         '.wiz-h { font-size: 18px; font-weight: 600; color: #f3f4f6; margin: 0 0 6px; line-height: 1.3; }' +
         '.wiz-sub { font-size: 12.5px; color: #9ca3af; margin: 0 0 18px; line-height: 1.55; }' +
+        '.wiz-sub strong { color: #d1d5db; font-weight: 600; }' +
         '.wiz-choice { display: flex; align-items: center; gap: 14px; width: 100%; background: rgba(11,18,32,0.6); border: 1px solid rgba(75,85,99,0.35); border-radius: 12px; padding: 18px 20px; margin-bottom: 10px; cursor: pointer; text-align: left; transition: all 140ms ease; font-family: inherit; color: inherit; }' +
         '.wiz-choice:hover { background: rgba(11,18,32,0.95); border-color: rgba(52,211,153,0.50); transform: translateX(2px); }' +
         '.wiz-choice-body { flex: 1; min-width: 0; }' +
@@ -4564,31 +4487,33 @@ python3 .meshkore/scripts/daemon.py</pre>
         '.wiz-choice-arrow { color: #6b7280; font-size: 18px; flex-shrink: 0; }' +
         '.wiz-choice:hover .wiz-choice-arrow { color: #34d399; }' +
         '.wiz-input-wrap { margin-bottom: 14px; }' +
-        '.wiz-input { width: 100%; background: rgba(11,18,32,0.6); border: 1px solid rgba(75,85,99,0.50); border-radius: 8px; padding: 12px 14px; font-size: 14px; color: #f3f4f6; font-family: JetBrains Mono,monospace; outline: none; transition: border-color 120ms; }' +
+        '.wiz-input { width: 100%; background: rgba(11,18,32,0.6); border: 1px solid rgba(75,85,99,0.50); border-radius: 8px; padding: 12px 14px; font-size: 14px; color: #f3f4f6; font-family: JetBrains Mono,monospace; outline: none; transition: border-color 120ms; box-sizing: border-box; }' +
         '.wiz-input:focus { border-color: rgba(52,211,153,0.60); background: rgba(11,18,32,0.85); }' +
         '.wiz-input::placeholder { color: #6b7280; }' +
-        '.wiz-actions { display: flex; gap: 8px; justify-content: flex-end; }' +
-        '.wiz-btn { padding: 9px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid transparent; font-family: inherit; transition: all 120ms; }' +
-        '.wiz-btn.wiz-primary { background: #34d399; color: #02040c; border-color: #34d399; }' +
-        '.wiz-btn.wiz-primary:hover:not([disabled]) { background: #6ee7b7; border-color: #6ee7b7; }' +
-        '.wiz-btn.wiz-primary[disabled] { opacity: 0.4; cursor: not-allowed; }' +
-        '.wiz-prompt-box { position: relative; background: #020617; border: 1px solid rgba(52,211,153,0.35); border-radius: 10px; padding: 14px 60px 14px 16px; font-family: JetBrains Mono,monospace; font-size: 11.5px; color: #cbd5e1; line-height: 1.55; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow-y: auto; margin-bottom: 14px; }' +
+        '.wiz-tip { background: rgba(96,165,250,0.08); border: 1px solid rgba(96,165,250,0.25); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 12px; color: #cbd5e1; line-height: 1.6; }' +
+        '.wiz-tip strong { color: #e5e7eb; }' +
+        '.wiz-tip em { font-style: normal; color: #93c5fd; }' +
+        '.wiz-cmd { display: inline-block; background: #020617; border: 1px solid rgba(75,85,99,0.40); border-radius: 4px; padding: 2px 7px; font-family: JetBrains Mono,monospace; font-size: 11.5px; color: #6ee7b7; word-break: break-all; }' +
+        '.wiz-prompt-box { position: relative; background: #020617; border: 1px solid rgba(52,211,153,0.35); border-radius: 10px; padding: 14px 60px 14px 16px; font-family: JetBrains Mono,monospace; font-size: 11.5px; color: #cbd5e1; line-height: 1.55; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow-y: auto; margin-bottom: 6px; }' +
         '.wiz-copy { position: absolute; top: 10px; right: 10px; padding: 6px 11px; border-radius: 6px; background: rgba(16,185,129,0.20); color: #6ee7b7; border: 1px solid rgba(52,211,153,0.45); font-family: JetBrains Mono,monospace; font-size: 10.5px; cursor: pointer; }' +
         '.wiz-copy:hover { background: rgba(16,185,129,0.32); }' +
-        '.wiz-tip { background: rgba(96,165,250,0.08); border: 1px solid rgba(96,165,250,0.25); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 12px; color: #cbd5e1; line-height: 1.55; }' +
         '.wiz-stopped-row { display: flex; align-items: center; gap: 10px; background: rgba(11,18,32,0.6); border: 1px solid rgba(75,85,99,0.35); border-radius: 10px; padding: 12px 14px; margin-bottom: 6px; cursor: pointer; transition: all 120ms; width: 100%; text-align: left; font-family: inherit; color: inherit; }' +
         '.wiz-stopped-row:hover { background: rgba(11,18,32,0.95); border-color: rgba(96,165,250,0.45); }' +
         '.wiz-stopped-name { flex: 1; min-width: 0; }' +
         '.wiz-stopped-title { font-size: 13.5px; font-weight: 600; color: #e5e7eb; }' +
         '.wiz-stopped-meta { font-size: 11px; color: #6b7280; margin-top: 2px; }' +
         '.wiz-stopped-port { font-family: JetBrains Mono,monospace; color: #93c5fd; }' +
+        // Footer-area buttons (rendered inside mc-modal-footer)
+        '.wiz-foot-btn { padding: 9px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid transparent; font-family: inherit; transition: all 120ms; background: transparent; color: #cbd5e1; }' +
+        '.wiz-foot-btn:hover:not([disabled]) { background: rgba(75,85,99,0.20); color: #f3f4f6; }' +
+        '.wiz-foot-btn.is-primary { background: #34d399; color: #02040c; border-color: #34d399; }' +
+        '.wiz-foot-btn.is-primary:hover:not([disabled]) { background: #6ee7b7; border-color: #6ee7b7; }' +
+        '.wiz-foot-btn[disabled] { opacity: 0.4; cursor: not-allowed; }' +
+        '.wiz-foot-step-tag { font-family: JetBrains Mono,monospace; font-size: 10.5px; color: #6b7280; letter-spacing: 0.08em; text-transform: uppercase; }' +
         '</style>'
       );
 
       // ── State ─────────────────────────────────────────────────────────
-      // Always show START — the user picks between 3 distinct intents
-      // (revive a known project, add an existing folder, brand new).
-      // If no stopped projects, START shows just 2 boxes (existing | new).
       let step = 'START';
       const history = [];
 
@@ -4596,20 +4521,20 @@ python3 .meshkore/scripts/daemon.py</pre>
         title: 'Add a project',
         subtitle: '',
         body: css + '<div id="wiz-root"></div>',
-        buttons: [{ id: 'close', label: 'Close' }],
+        // Empty footer — the wizard takes over and renders it per step
+        buttons: [],
         onMount: (body, close) => {
           const root = body.querySelector('#wiz-root');
+          // mcModal renders the footer at #mc-modal-footer. We hijack it.
+          const footEl = document.getElementById('mc-modal-footer');
 
           function go(next) { history.push(step); step = next; render(); }
-          function back()    { if (history.length) { step = history.pop(); render(); } }
+          function back()   { if (history.length) { step = history.pop(); render(); } }
 
+          // ── Body content per step ─────────────────────────────────────
           function renderStep(s) {
             switch (s) {
               case 'START': {
-                // Build the boxes for this screen. Up to 3:
-                //   1. Revive a known project   (only if stopped > 0)
-                //   2. Add an existing folder   (always)
-                //   3. Brand-new project        (always)
                 let html = '<h3 class="wiz-h">What do you want to do?</h3>';
                 if (stopped.length > 0) {
                   html += ''
@@ -4625,7 +4550,7 @@ python3 .meshkore/scripts/daemon.py</pre>
                   + '<button type="button" class="wiz-choice" data-answer-startkind="existing">'
                   +   '<div class="wiz-choice-body">'
                   +     '<div class="wiz-choice-title">Add an existing folder</div>'
-                  +     '<div class="wiz-choice-sub">I already have a folder with code on disk — no <span style="font-family:JetBrains Mono,monospace;color:#6ee7b7;">.meshkore/</span> yet</div>'
+                  +     '<div class="wiz-choice-sub">I already have a folder with code on disk — no <span class="wiz-cmd">.meshkore/</span> yet</div>'
                   +   '</div>'
                   +   '<span class="wiz-choice-arrow">→</span>'
                   + '</button>'
@@ -4668,38 +4593,27 @@ python3 .meshkore/scripts/daemon.py</pre>
                   + '<p class="wiz-sub">' + subtitle + '</p>'
                   + '<div class="wiz-input-wrap">'
                   +   '<input type="text" id="wiz-name-input" class="wiz-input" placeholder="my-project" value="' + esc(answers.projectName) + '" autocomplete="off" spellcheck="false">'
-                  + '</div>'
-                  + '<div class="wiz-actions">'
-                  +   '<button type="button" class="wiz-btn wiz-primary" id="wiz-name-continue" ' + (answers.projectName.trim() ? '' : 'disabled') + '>Continue →</button>'
                   + '</div>';
               }
 
               case 'NEW_PATH': {
                 const isExisting = answers.startKind === 'existing';
-                const title = isExisting
-                  ? 'Where is the folder?'
-                  : 'Where do we put the new folder?';
+                const title = isExisting ? 'Where is the folder?' : 'Where do we put the new folder?';
                 const subtitle = isExisting
                   ? 'Absolute path to the existing project folder. We can pre-fill the project name from its folder name on the next step.'
-                  : 'Absolute path to the PARENT folder. We create <span style="font-family:JetBrains Mono,monospace;color:#6ee7b7;">./' + esc(answers.projectName || 'my-project') + '/</span> inside it.';
-                const placeholder = isExisting
-                  ? '/Users/me/projects/my-app'
-                  : '/Users/me/projects';
+                  : 'Absolute path to the PARENT folder. We create <span class="wiz-cmd">./' + esc(answers.projectName || 'my-project') + '/</span> inside it.';
+                const placeholder = isExisting ? '/Users/me/projects/my-app' : '/Users/me/projects';
                 return ''
                   + '<h3 class="wiz-h">' + title + '</h3>'
                   + '<p class="wiz-sub">' + subtitle + '</p>'
                   + '<div class="wiz-input-wrap">'
                   +   '<input type="text" id="wiz-path-input" class="wiz-input" placeholder="' + placeholder + '" value="' + esc(answers.path) + '" autocomplete="off" spellcheck="false">'
                   + '</div>'
-                  + '<div class="wiz-tip" style="font-size:11.5px;">'
-                  +   '<strong>How to get the absolute path</strong><br>'
+                  + '<div class="wiz-tip">'
+                  +   '<strong>How to copy the absolute path</strong><br>'
                   +   '· macOS: in Finder, ⌘+click the folder → <em>"Copy &lt;name&gt; as Pathname"</em><br>'
                   +   '· Windows: Shift+right-click the folder → <em>"Copy as path"</em><br>'
-                  +   '· Linux / terminal: <span class="wiz-cmd" style="display:inline-block;padding:1px 6px;background:#020617;border:1px solid rgba(75,85,99,0.40);border-radius:3px;font-family:JetBrains Mono,monospace;font-size:11px;color:#6ee7b7;">pwd</span> inside the folder'
-                  + '</div>'
-                  + '<div class="wiz-actions">'
-                  +   '<button type="button" class="wiz-btn" id="wiz-path-skip" style="background:transparent;color:#9ca3af;border-color:rgba(75,85,99,0.40);">Skip — let the agent ask</button>'
-                  +   '<button type="button" class="wiz-btn wiz-primary" id="wiz-path-continue">Continue →</button>'
+                  +   '· Linux / terminal: <span class="wiz-cmd">pwd</span> inside the folder'
                   + '</div>';
               }
 
@@ -4744,38 +4658,53 @@ python3 .meshkore/scripts/daemon.py</pre>
               case 'NEW_PROMPT':
                 return ''
                   + '<h3 class="wiz-h">Paste this in your coding agent</h3>'
-                  + '<div class="wiz-tip">Open <strong>Claude Code</strong> / <strong>Cursor</strong> / <strong>Windsurf</strong> at the <strong>root of your projects folder</strong>, then paste the block below. The agent will ask for the path if it can\'t tell where it is.</div>'
+                  + '<p class="wiz-sub">Open <strong>Claude Code</strong> / <strong>Cursor</strong> / <strong>Windsurf</strong> at the root of your projects folder, paste, hit enter.</p>'
                   + '<div class="wiz-prompt-box">'
                   +   '<button type="button" class="wiz-copy" data-copy-target="wiz-prompt">copy</button>'
                   +   '<span id="wiz-prompt">' + esc(genPrompt()) + '</span>'
-                  + '</div>'
-                  + '<div class="wiz-actions">'
-                  +   '<button type="button" class="wiz-btn wiz-primary" id="wiz-scan-now">Scan for daemon now →</button>'
                   + '</div>';
             }
             return '<p class="wiz-sub">Unknown step.</p>';
           }
 
-          function render() {
-            let html = '';
-            if (history.length > 0) {
-              html += '<button type="button" class="wiz-back" id="wiz-back-btn">← Back</button>';
+          // ── Footer (navigation only) — depends on step ────────────────
+          function renderFooter(s) {
+            // Step counter (best-effort UX nicety)
+            const stepIdx = { START: 1, REVIVE: 2, NEW_NAME: 2, NEW_PATH: 3, NEW_DEVICES: 4, NEW_DATA: 5, NEW_PROMPT: 6 }[s];
+            const stepTag = stepIdx ? ('<span class="wiz-foot-step-tag">step ' + stepIdx + '</span>') : '<span></span>';
+
+            // Left side: Back (if not first)
+            const left = history.length > 0
+              ? '<button type="button" class="wiz-foot-btn" id="wiz-foot-back">← Back</button>'
+              : stepTag;
+
+            // Right side: depends on step
+            let right = '<span></span>';
+            if (s === 'NEW_NAME') {
+              right = '<button type="button" class="wiz-foot-btn is-primary" id="wiz-foot-continue"' + (answers.projectName.trim() ? '' : ' disabled') + '>Continue →</button>';
+            } else if (s === 'NEW_PATH') {
+              right = ''
+                + '<div style="display:flex; gap:10px; align-items:center;">'
+                +   '<button type="button" class="wiz-foot-btn" id="wiz-foot-skip">Skip — let the agent ask</button>'
+                +   '<button type="button" class="wiz-foot-btn is-primary" id="wiz-foot-continue">Continue →</button>'
+                + '</div>';
+            } else if (s === 'NEW_PROMPT') {
+              right = '<button type="button" class="wiz-foot-btn is-primary" id="wiz-foot-scan">Scan for daemon →</button>';
             }
-            html += '<div class="wiz-step">' + renderStep(step) + '</div>';
-            root.innerHTML = html;
 
-            const backBtn = root.querySelector('#wiz-back-btn');
-            if (backBtn) backBtn.onclick = back;
+            return left + right;
+          }
 
+          // ── Wiring ────────────────────────────────────────────────────
+          function wireBody() {
+            // Choice boxes that go to a named step
             root.querySelectorAll('[data-go]').forEach(b => {
               b.onclick = () => go(b.dataset.go);
             });
-
+            // Choice boxes that set an answer + advance
             root.querySelectorAll('[data-answer-startkind]').forEach(b => {
               b.onclick = () => {
                 answers.startKind = b.dataset.answerStartkind;
-                // existing → ask folder path first (so we can pre-fill name)
-                // new      → ask name first, then parent path
                 go(answers.startKind === 'existing' ? 'NEW_PATH' : 'NEW_NAME');
               };
             });
@@ -4785,7 +4714,7 @@ python3 .meshkore/scripts/daemon.py</pre>
             root.querySelectorAll('[data-answer-data]').forEach(b => {
               b.onclick = () => { answers.data = b.dataset.answerData; go('NEW_PROMPT'); };
             });
-
+            // Stopped-project rows
             root.querySelectorAll('[data-revive-port]').forEach(b => {
               b.onclick = () => {
                 const port = parseInt(b.dataset.revivePort, 10);
@@ -4795,63 +4724,39 @@ python3 .meshkore/scripts/daemon.py</pre>
                 setTimeout(() => openStartProjectModal({ ...p, _stopped: true }), 50);
               };
             });
-
-            // NAME screen wiring — next step depends on startKind:
-            //   existing → PATH already collected, NAME is the last input → NEW_DEVICES
-            //   new      → NAME first, still need to ask PATH → NEW_PATH
+            // NAME input
             const nameInput = root.querySelector('#wiz-name-input');
-            const nameContinue = root.querySelector('#wiz-name-continue');
-            if (nameInput && nameContinue) {
+            if (nameInput) {
+              const continueBtn = () => document.getElementById('wiz-foot-continue');
               const sync = () => {
                 answers.projectName = nameInput.value;
-                const ok = !!answers.projectName.trim();
-                if (ok) nameContinue.removeAttribute('disabled');
-                else    nameContinue.setAttribute('disabled', '');
+                const btn = continueBtn();
+                if (!btn) return;
+                if (answers.projectName.trim()) btn.removeAttribute('disabled');
+                else                            btn.setAttribute('disabled', '');
               };
-              const nameNext = () => answers.startKind === 'existing' ? 'NEW_DEVICES' : 'NEW_PATH';
               nameInput.oninput = sync;
               nameInput.onkeydown = (e) => {
                 if (e.key === 'Enter' && answers.projectName.trim()) {
                   e.preventDefault();
-                  go(nameNext());
+                  go(answers.startKind === 'existing' ? 'NEW_DEVICES' : 'NEW_PATH');
                 }
-              };
-              nameContinue.onclick = () => {
-                if (answers.projectName.trim()) go(nameNext());
               };
               setTimeout(() => nameInput.focus(), 0);
             }
-
-            // PATH screen wiring — next step depends on startKind:
-            //   existing → derive name from basename, then NAME (pre-filled, editable)
-            //   new      → continue to NEW_DEVICES
+            // PATH input
             const pathInput = root.querySelector('#wiz-path-input');
-            const pathContinue = root.querySelector('#wiz-path-continue');
-            const pathSkip = root.querySelector('#wiz-path-skip');
-            if (pathInput && pathContinue && pathSkip) {
-              const advance = () => {
-                answers.path = pathInput.value.trim();
-                if (answers.startKind === 'existing') {
-                  // Pre-fill projectName from basename(path), only if user
-                  // hasn't already entered one (preserves their input on back-nav).
-                  if (answers.path && !answers.projectName) {
-                    answers.projectName = basename(answers.path);
-                  }
-                  go('NEW_NAME');
-                } else {
-                  go('NEW_DEVICES');
-                }
-              };
+            if (pathInput) {
               pathInput.oninput = () => { answers.path = pathInput.value; };
               pathInput.onkeydown = (e) => {
-                if (e.key === 'Enter') { e.preventDefault(); advance(); }
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  advancePath();
+                }
               };
-              pathContinue.onclick = advance;
-              pathSkip.onclick = () => { answers.path = ''; advance(); };
               setTimeout(() => pathInput.focus(), 0);
             }
-
-            // Copy wiring
+            // Copy
             root.querySelectorAll('.wiz-copy').forEach(b => {
               b.onclick = () => {
                 const target = root.querySelector('#' + b.dataset.copyTarget);
@@ -4861,9 +4766,47 @@ python3 .meshkore/scripts/daemon.py</pre>
                 setTimeout(() => { b.textContent = 'copy'; }, 1500);
               };
             });
+          }
 
-            // Scan now wiring
-            const scanBtn = root.querySelector('#wiz-scan-now');
+          function advancePath() {
+            const pathInput = root.querySelector('#wiz-path-input');
+            if (pathInput) answers.path = pathInput.value.trim();
+            if (answers.startKind === 'existing') {
+              if (answers.path && !answers.projectName) {
+                answers.projectName = basename(answers.path);
+              }
+              go('NEW_NAME');
+            } else {
+              go('NEW_DEVICES');
+            }
+          }
+
+          function wireFooter() {
+            const backBtn = document.getElementById('wiz-foot-back');
+            if (backBtn) backBtn.onclick = back;
+
+            const continueBtn = document.getElementById('wiz-foot-continue');
+            if (continueBtn) {
+              if (step === 'NEW_NAME') {
+                continueBtn.onclick = () => {
+                  if (!answers.projectName.trim()) return;
+                  go(answers.startKind === 'existing' ? 'NEW_DEVICES' : 'NEW_PATH');
+                };
+              } else if (step === 'NEW_PATH') {
+                continueBtn.onclick = advancePath;
+              }
+            }
+
+            const skipBtn = document.getElementById('wiz-foot-skip');
+            if (skipBtn) {
+              skipBtn.onclick = () => {
+                answers.path = '';
+                if (answers.startKind === 'existing') go('NEW_NAME');
+                else go('NEW_DEVICES');
+              };
+            }
+
+            const scanBtn = document.getElementById('wiz-foot-scan');
             if (scanBtn) {
               scanBtn.onclick = () => {
                 close('scan-now');
@@ -4872,6 +4815,13 @@ python3 .meshkore/scripts/daemon.py</pre>
                 }, 50);
               };
             }
+          }
+
+          function render() {
+            root.innerHTML = renderStep(step);
+            if (footEl) footEl.innerHTML = renderFooter(step);
+            wireBody();
+            wireFooter();
           }
 
           render();
