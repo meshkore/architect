@@ -2260,76 +2260,82 @@
 
   <!-- ────────────── Header ────────────── -->
   <header class="z-40 backdrop-blur-xl" style="background: var(--bg-bar); border-bottom: 1px solid var(--border-bar); box-shadow: var(--bar-shadow); position: relative;">
-    <!-- Header layout:
-         LEFT  — logo + Architect tab
-         CENTER — project title (flex-1, centered)
-         RIGHT  — local daemon pill · cluster pill · Cluster settings tab -->
+    <!-- Header layout (redesigned 2026-05-20 — CRON-07):
+         LEFT  — logo + 6 primary nav zones (Architect | Bookmarks |
+                 Crons | Links | Protocols | Diary). "Architect" is the
+                 project dashboard (current modules + roadmap view).
+                 Clicking any other zone replaces modules+roadmap with
+                 the zone panel; the chat column stays and gets scoped
+                 to that zone's specialist agent (V42-V45 pattern).
+         RIGHT — compact project group: bounded title plate + daemon
+                 dot + cluster dot + Cluster cog. Half the width of the
+                 previous strip. -->
     <div class="h-12 flex items-center gap-2" style="padding-left: var(--panel-gap); padding-right: var(--panel-gap);">
 
-      <!-- LEFT: logo + Architect nav -->
-      <div class="flex items-center gap-1 flex-shrink-0">
-        <div class="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0" title="MeshKore Architect">
-          <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-        </div>
-        <button data-tab="roadmap" class="tab-btn relative px-3 py-2 text-[13px] text-gray-400 hover:text-gray-200 transition flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h13"/></svg>
-          Architect
-        </button>
+      <!-- LEFT: logo (icon-only) -->
+      <div class="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0" title="MeshKore Architect">
+        <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
       </div>
 
-      <!-- CENTER: project title — filled by renderProjectBar() -->
-      <div id="project-bar-primary" class="flex-1 flex items-center justify-center gap-1.5 overflow-x-auto min-w-0"></div>
-
-      <!-- Workspace-zone buttons — Bookmarks · Crons · Links · Protocols · Diary.
-           CRON-07 ships the shells; each panel's content arrives with
-           V42–V45 + CRON-01. For now they show a "coming soon" toast
-           and the URL hash persists. -->
-      <div id="header-zone-buttons" class="hidden md:flex items-center gap-0.5 flex-shrink-0 mr-1">
-        <button data-zone="bookmarks" class="zone-btn px-2 py-1.5 text-[12px] mono text-gray-500 hover:text-gray-200 transition flex items-center gap-1 rounded border border-transparent hover:border-gray-800/60" title="Bookmarks — quick-access shelf (V44)">
+      <!-- PRIMARY NAV: 6 zones. Architect is the project dashboard;
+           the other 5 are zone toggles (panel + chat-scoped agent).
+           Icon+label on lg+; icon-only on md. -->
+      <div id="header-zone-buttons" class="hidden md:flex items-center gap-0 flex-shrink-0 ml-1">
+        <button data-zone="architect" class="zone-btn zone-btn-primary px-2 py-1.5 text-[12px] text-gray-400 hover:text-gray-100 transition flex items-center gap-1.5 rounded border border-transparent hover:border-gray-800/60" title="Architect — project dashboard (modules · roadmap · chat)">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h13"/></svg>
+          <span class="hidden lg:inline">Architect</span>
+        </button>
+        <button data-zone="bookmarks" class="zone-btn zone-btn-primary px-2 py-1.5 text-[12px] text-gray-500 hover:text-gray-200 transition flex items-center gap-1.5 rounded border border-transparent hover:border-gray-800/60" title="Bookmarks — quick-access shelf (V44)">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2v16z"/></svg>
           <span class="hidden lg:inline">Bookmarks</span>
         </button>
-        <button data-zone="crons" class="zone-btn px-2 py-1.5 text-[12px] mono text-gray-500 hover:text-gray-200 transition flex items-center gap-1 rounded border border-transparent hover:border-gray-800/60" title="Crons — scheduled jobs (CRON-01)">
+        <button data-zone="crons" class="zone-btn zone-btn-primary px-2 py-1.5 text-[12px] text-gray-500 hover:text-gray-200 transition flex items-center gap-1.5 rounded border border-transparent hover:border-gray-800/60" title="Crons — scheduled jobs (CRON-01)">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
           <span class="hidden lg:inline">Crons</span>
         </button>
-        <button data-zone="links" class="zone-btn px-2 py-1.5 text-[12px] mono text-gray-500 hover:text-gray-200 transition flex items-center gap-1 rounded border border-transparent hover:border-gray-800/60" title="Links — deployment registry (V45)">
+        <button data-zone="links" class="zone-btn zone-btn-primary px-2 py-1.5 text-[12px] text-gray-500 hover:text-gray-200 transition flex items-center gap-1.5 rounded border border-transparent hover:border-gray-800/60" title="Links — deployment registry (V45)">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.07 0l3-3a5 5 0 00-7.07-7.07l-1.5 1.5"/><path d="M14 11a5 5 0 00-7.07 0l-3 3a5 5 0 007.07 7.07l1.5-1.5"/></svg>
           <span class="hidden lg:inline">Links</span>
         </button>
-        <button data-zone="protocols" class="zone-btn px-2 py-1.5 text-[12px] mono text-gray-500 hover:text-gray-200 transition flex items-center gap-1 rounded border border-transparent hover:border-gray-800/60" title="Protocols — reusable runbooks (V42)">
+        <button data-zone="protocols" class="zone-btn zone-btn-primary px-2 py-1.5 text-[12px] text-gray-500 hover:text-gray-200 transition flex items-center gap-1.5 rounded border border-transparent hover:border-gray-800/60" title="Protocols — reusable runbooks (V42)">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
           <span class="hidden lg:inline">Protocols</span>
         </button>
-        <button data-zone="diary" class="zone-btn px-2 py-1.5 text-[12px] mono text-gray-500 hover:text-gray-200 transition flex items-center gap-1 rounded border border-transparent hover:border-gray-800/60" title="Diary — chronological activity blog (V43)">
+        <button data-zone="diary" class="zone-btn zone-btn-primary px-2 py-1.5 text-[12px] text-gray-500 hover:text-gray-200 transition flex items-center gap-1.5 rounded border border-transparent hover:border-gray-800/60" title="Diary — chronological activity blog (V43)">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
           <span class="hidden lg:inline">Diary</span>
         </button>
       </div>
 
+      <!-- SPACER — pushes the project group to the right edge -->
+      <div class="flex-1"></div>
+
       <!-- hidden legacy holders -->
       <button id="search-trigger" class="hidden"></button>
       <span id="generated-pill" class="hidden"></span>
 
-      <!-- RIGHT: connection indicators + Cluster settings -->
-      <div class="flex items-center gap-1.5 flex-shrink-0">
+      <!-- PROJECT GROUP (right, compact). Title plate has fixed width so
+           the operator sees the bounded zone the project name has. -->
+      <div class="flex items-center gap-1 flex-shrink-0">
 
-        <!-- Local daemon pill -->
-        <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-900/40 border border-gray-800/60 text-[11px] mono" id="daemon-pill">
+        <!-- Project title plate — single line, truncated, fixed-width container. -->
+        <div id="project-bar-primary" class="flex items-center px-2.5 py-1 rounded-lg bg-gray-900/40 border border-gray-800/60 overflow-hidden" style="width:180px;"></div>
+
+        <!-- Compact daemon dot pill -->
+        <div class="flex items-center gap-1 px-1.5 py-1 text-[10px] mono" id="daemon-pill" title="local daemon">
           <span class="dot bg-gray-600" id="daemon-dot"></span>
-          <span class="text-gray-300" id="daemon-status">offline</span>
+          <span class="text-gray-400" id="daemon-status">—</span>
         </div>
 
-        <!-- Cluster connection pill — shown when daemon is connected to a remote cluster -->
-        <div id="cluster-conn-pill" class="hidden items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-900/40 border border-gray-800/60 text-[11px] mono">
+        <!-- Compact cluster dot pill (hidden until daemon joins a cluster channel) -->
+        <div id="cluster-conn-pill" class="hidden items-center gap-1 px-1.5 py-1 text-[10px] mono" title="cluster channel">
           <span class="dot bg-gray-600" id="cluster-conn-dot"></span>
-          <span class="text-gray-300" id="cluster-conn-label">cluster</span>
+          <span class="text-gray-400" id="cluster-conn-label"></span>
         </div>
 
-        <!-- Cluster settings tab — compact, right-aligned -->
-        <button data-tab="manage" class="tab-btn relative px-2.5 py-1.5 text-[12px] mono text-gray-500 hover:text-gray-200 transition flex items-center gap-1 rounded border border-transparent hover:border-gray-800/60">
-          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M5 12a7 7 0 0114 0M19 12l3 3M5 12l-3 3M12 5V2M12 19v3"/></svg>
-          Cluster
+        <!-- Cluster settings — icon-only -->
+        <button data-tab="manage" class="tab-btn relative p-1.5 text-gray-500 hover:text-gray-200 transition rounded border border-transparent hover:border-gray-800/60" title="Cluster settings">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1.08-1.5 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1.08 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
         </button>
       </div>
     </div>
@@ -3872,9 +3878,9 @@ python3 .meshkore/scripts/daemon.py</pre>
         ACTIVE_PROJECT_PORT = candidate.port;
         DAEMON_BASE = candidate.base;
         $('daemon-dot').className = 'dot bg-emerald-400';
-        $('daemon-status').textContent = `online :${candidate.port}`;
+        $('daemon-status').textContent = `:${candidate.port}`;
         $('daemon-status').className = 'text-emerald-300';
-        $('daemon-pill').setAttribute('title', `Daemon ${candidate.base}`);
+        $('daemon-pill').setAttribute('title', `Local daemon · online · ${candidate.base}`);
         // V45 — bind ReviewStore to this project so markPending/consume
         // write to the right cluster_id and the rails subscribe to its
         // changes.
@@ -4925,49 +4931,79 @@ python3 .meshkore/scripts/daemon.py</pre>
       const secondary = $('project-bar-secondary');
       if (!primary) return;
       const all = PROJECTS.slice().sort((a, b) => a.port - b.port);
-      secondary.innerHTML = '';
-      secondary.classList.add('hidden');
+      if (secondary) { secondary.innerHTML = ''; secondary.classList.add('hidden'); }
 
       // No daemons detected → project name from snapshot, offline indicator.
+      // Single-line, truncated, fits the fixed 180 px title plate.
       if (all.length === 0) {
         const name = STATE?.cluster?.name || STATE?.cluster?.id || 'no project';
         primary.innerHTML = `
-          <div class="flex flex-col items-center min-w-0">
-            <span class="text-[13px] font-semibold text-gray-500 truncate max-w-[260px] tracking-wide" title="No daemon · read-only">${esc(name)}</span>
-            <span class="text-[10px] mono text-gray-700 mt-0.5">offline · read-only</span>
-          </div>`;
+          <span class="dot bg-gray-600 w-1.5 h-1.5 flex-shrink-0 mr-1.5"></span>
+          <span class="text-[12px] font-semibold text-gray-400 truncate" title="${esc(name)} · offline">${esc(name)}</span>`;
         return;
       }
 
-      // Active project — show name prominently in the centre.
       const active = all.find(p => p.port === ACTIVE_PROJECT_PORT) || all[0];
       const name = active.cluster_name || active.cluster_id || `:${active.port}`;
       const dot  = projectStatusColor(active);
 
       if (all.length === 1) {
-        // Single project — clean centred title, no switcher chrome.
+        // Single project — dot + name, one line, fixed plate.
         primary.innerHTML = `
-          <div class="flex flex-col items-center min-w-0">
-            <span class="text-[14px] font-semibold text-gray-100 truncate max-w-[300px] tracking-wide">${esc(name)}</span>
-            <span class="text-[10px] mono text-gray-500 mt-0.5 flex items-center gap-1"><span class="dot ${dot} w-1.5 h-1.5"></span>${esc(active.cluster_id || `:${active.port}`)}</span>
-          </div>`;
-      } else {
-        // Multiple projects — active name + compact switcher pills below.
-        primary.innerHTML = `
-          <div class="flex flex-col items-center min-w-0 gap-1">
-            <span class="text-[14px] font-semibold text-gray-100 truncate max-w-[260px] tracking-wide flex items-center gap-1.5">
-              <span class="dot ${dot} w-2 h-2 flex-shrink-0"></span>${esc(name)}
-            </span>
-            <div class="flex items-center gap-1">
-              ${all.map(p => {
-                const isAct = p.port === ACTIVE_PROJECT_PORT;
-                const lbl = p.cluster_name || `:${p.port}`;
-                return `<button class="proj-tile flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] mono border transition ${isAct ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' : 'bg-transparent border-gray-800 text-gray-500 hover:border-gray-700 hover:text-gray-300'}" data-port="${p.port}" title="${esc(lbl)}">${esc(lbl)}</button>`;
-              }).join('')}
-            </div>
-          </div>`;
-        $$('.proj-tile', primary).forEach(b => b.addEventListener('click', () => switchProject(parseInt(b.dataset.port, 10))));
+          <span class="dot ${dot} w-1.5 h-1.5 flex-shrink-0 mr-1.5"></span>
+          <span class="text-[12px] font-semibold text-gray-100 truncate" title="${esc(name)} · ${esc(active.cluster_id || `:${active.port}`)}">${esc(name)}</span>`;
+        return;
       }
+
+      // Multiple projects — same single-line plate, but the name becomes a
+      // button with a chevron that opens the switcher menu. We render the
+      // menu lazily on first click.
+      primary.innerHTML = `
+        <button id="project-switcher-btn" class="flex items-center gap-1.5 min-w-0 text-left" title="${esc(name)} — click to switch project">
+          <span class="dot ${dot} w-1.5 h-1.5 flex-shrink-0"></span>
+          <span class="text-[12px] font-semibold text-gray-100 truncate">${esc(name)}</span>
+          <svg class="w-3 h-3 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </button>`;
+      const btn = $('project-switcher-btn');
+      btn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openProjectSwitcher(btn, all);
+      });
+    }
+
+    // Lightweight project switcher — popover anchored under the title plate.
+    function openProjectSwitcher(anchor, projects) {
+      const existing = document.getElementById('project-switcher-pop');
+      if (existing) { existing.remove(); return; }
+      const rect = anchor.getBoundingClientRect();
+      const pop = document.createElement('div');
+      pop.id = 'project-switcher-pop';
+      pop.style.cssText = `position:fixed;top:${rect.bottom + 4}px;right:${window.innerWidth - rect.right}px;z-index:9998;background:#0a0e14;border:1px solid rgba(75,85,99,0.30);border-radius:8px;padding:4px;min-width:200px;max-width:280px;box-shadow:0 6px 20px rgba(0,0,0,0.5);`;
+      pop.innerHTML = projects.map(p => {
+        const isAct = p.port === ACTIVE_PROJECT_PORT;
+        const lbl = p.cluster_name || `:${p.port}`;
+        const id  = p.cluster_id || `:${p.port}`;
+        return `<button class="proj-row flex items-center gap-2 w-full px-2.5 py-1.5 text-left rounded text-[12px] ${isAct ? 'bg-emerald-500/10 text-emerald-300' : 'text-gray-300 hover:bg-gray-800/60'}" data-port="${p.port}">
+          <span class="dot ${projectStatusColor(p)} w-1.5 h-1.5"></span>
+          <span class="font-semibold truncate">${esc(lbl)}</span>
+          <span class="mono text-[10px] text-gray-500 truncate ml-auto">${esc(id)}</span>
+        </button>`;
+      }).join('');
+      document.body.appendChild(pop);
+      pop.querySelectorAll('.proj-row').forEach(b => {
+        b.addEventListener('click', () => {
+          switchProject(parseInt(b.dataset.port, 10));
+          pop.remove();
+        });
+      });
+      // Dismiss on outside click.
+      const dismiss = (e) => {
+        if (!pop.contains(e.target) && e.target !== anchor) {
+          pop.remove();
+          document.removeEventListener('click', dismiss);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', dismiss), 0);
     }
 
     function projectTile(p, compact = false) {
@@ -5072,8 +5108,9 @@ python3 .meshkore/scripts/daemon.py</pre>
           DAEMON_TOKEN = '';
           try { localStorage.removeItem('meshcore-token'); } catch {}
           $('daemon-dot').className = 'dot bg-gray-600';
-          $('daemon-status').textContent = 'offline';
-          $('daemon-status').className = 'text-gray-400';
+          $('daemon-status').textContent = '—';
+          $('daemon-status').className = 'text-gray-500';
+          $('daemon-pill').setAttribute('title', 'Local daemon · offline');
           hydrateHeader();
           div.remove();
           resolve();
@@ -5356,13 +5393,14 @@ python3 .meshkore/scripts/daemon.py</pre>
       renderCluster();
       renderHelp();
       attachEvents();
-      // Activate initial tab — zones (Bookmarks · Crons · Links · Protocols
-      // · Diary) intercept first so #protocols-style deep-links surface
-      // the zone toast + active state even though the panel content
-      // hasn't shipped yet (CRON-07 + V42-V45).
-      const initial = (location.hash || '').replace('#', '') || 'roadmap';
+      // Activate initial tab — zones (Architect · Bookmarks · Crons · Links
+      // · Protocols · Diary) intercept first so #-deep-links open the
+      // right zone. Architect zone routes to the roadmap dashboard; the
+      // others surface the active state + a coming-soon toast until
+      // their panels ship (V42-V45 + CRON-01).
+      const initial = (location.hash || '').replace('#', '') || 'architect';
       if (Object.prototype.hasOwnProperty.call(ZONE_TASKS, initial)) {
-        switchTab('roadmap');
+        // activateZone handles 'architect' → roadmap routing internally
         activateZone(initial);
       } else {
         switchTab(['roadmap','manage'].includes(initial) ? initial : 'roadmap');
@@ -9765,15 +9803,18 @@ credentials.`;
       try { history.replaceState(null, '', `#${name}`); } catch {}
     }
 
-    // ─── Header zone buttons (Bookmarks · Crons · Links · Protocols · Diary)
+    // ─── Header zone buttons (Architect · Bookmarks · Crons · Links · Protocols · Diary)
     //
-    // CRON-07 ships the visual + URL-hash routing. Each panel's full
-    // content arrives with its own V## task:
-    //   bookmarks → V44     crons → CRON-01     links → V45
-    //   protocols → V42     diary → V43
-    // Until those land, clicking a zone button shows a one-line toast
-    // pointing at the tracking task and keeps the active state visible.
+    // Architect is the project dashboard (current modules+roadmap view).
+    // The other 5 zones are toggles: panel replaces modules+roadmap, the
+    // chat column stays and gets scoped to that zone's specialist agent.
+    // CRON-07 ships the visual + URL-hash routing scaffold; each panel's
+    // full content arrives with its own V## task:
+    //   architect → (already wired)   bookmarks → V44
+    //   crons     → CRON-01           links     → V45
+    //   protocols → V42               diary     → V43
     const ZONE_TASKS = {
+      architect: null,        // already wired — opens the roadmap tab
       bookmarks: 'V44',
       crons:     'CRON-01',
       links:     'V45',
@@ -9782,7 +9823,8 @@ credentials.`;
     };
     let _zoneToastTimer = null;
     function showZoneToast(zone) {
-      const task = ZONE_TASKS[zone] || '?';
+      const task = ZONE_TASKS[zone];
+      if (!task) return; // architect (or any wired zone) doesn't need a toast
       let toast = document.getElementById('zone-toast');
       if (!toast) {
         toast = document.createElement('div');
@@ -9790,16 +9832,21 @@ credentials.`;
         toast.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:9999;background:#0a0e14;border:1px solid rgba(52,211,153,0.30);color:#d1d5db;padding:8px 14px;border-radius:8px;font-family:JetBrains Mono,monospace;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,0.5);opacity:0;transition:opacity 150ms;pointer-events:none;';
         document.body.appendChild(toast);
       }
-      toast.innerHTML = `<span style="color:#6ee7b7">${zone}</span> · coming soon — tracked by <span style="color:#fdba74">${task}</span>`;
+      toast.innerHTML = `<span style="color:#6ee7b7">${zone}</span> · panel coming with <span style="color:#fdba74">${task}</span> · chat will become the ${zone}-agent here`;
       toast.style.opacity = '1';
       clearTimeout(_zoneToastTimer);
-      _zoneToastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 2400);
+      _zoneToastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 2800);
     }
     function activateZone(zone) {
       document.querySelectorAll('.zone-btn').forEach(b => {
         b.classList.toggle('zone-btn-active', b.dataset.zone === zone);
       });
       try { history.replaceState(null, '', `#${zone}`); } catch {}
+      // "Architect" is the project dashboard — route to the existing roadmap tab.
+      if (zone === 'architect') {
+        switchTab('roadmap');
+        return;
+      }
       showZoneToast(zone);
     }
 
