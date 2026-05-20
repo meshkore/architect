@@ -1459,6 +1459,9 @@
     /* Tab indicator */
     .tab-active { color:#f3f4f6; }
     .tab-active::after { content:''; position:absolute; bottom:-1px; left:8px; right:8px; height:2px; background:linear-gradient(90deg,#34d399,#6ee7b7); border-radius:1px 1px 0 0; }
+    /* CRON-07 — header zone buttons (Bookmarks · Crons · Links · Protocols · Diary) */
+    .zone-btn { position:relative; }
+    .zone-btn-active { color:#d1d5db; border-color:rgba(52,211,153,0.30) !important; background:rgba(52,211,153,0.06); }
     /* Cluster sub-tabs in the header — same look as the main tabs but
        smaller. Active variant gets emerald text + a thin underline. */
     .cl-subtab-header.active { color: #34d399; background: rgba(16,185,129,0.08); border-radius: 4px; }
@@ -2276,6 +2279,33 @@
 
       <!-- CENTER: project title — filled by renderProjectBar() -->
       <div id="project-bar-primary" class="flex-1 flex items-center justify-center gap-1.5 overflow-x-auto min-w-0"></div>
+
+      <!-- Workspace-zone buttons — Bookmarks · Crons · Links · Protocols · Diary.
+           CRON-07 ships the shells; each panel's content arrives with
+           V42–V45 + CRON-01. For now they show a "coming soon" toast
+           and the URL hash persists. -->
+      <div id="header-zone-buttons" class="hidden md:flex items-center gap-0.5 flex-shrink-0 mr-1">
+        <button data-zone="bookmarks" class="zone-btn px-2 py-1.5 text-[12px] mono text-gray-500 hover:text-gray-200 transition flex items-center gap-1 rounded border border-transparent hover:border-gray-800/60" title="Bookmarks — quick-access shelf (V44)">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2v16z"/></svg>
+          <span class="hidden lg:inline">Bookmarks</span>
+        </button>
+        <button data-zone="crons" class="zone-btn px-2 py-1.5 text-[12px] mono text-gray-500 hover:text-gray-200 transition flex items-center gap-1 rounded border border-transparent hover:border-gray-800/60" title="Crons — scheduled jobs (CRON-01)">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          <span class="hidden lg:inline">Crons</span>
+        </button>
+        <button data-zone="links" class="zone-btn px-2 py-1.5 text-[12px] mono text-gray-500 hover:text-gray-200 transition flex items-center gap-1 rounded border border-transparent hover:border-gray-800/60" title="Links — deployment registry (V45)">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.07 0l3-3a5 5 0 00-7.07-7.07l-1.5 1.5"/><path d="M14 11a5 5 0 00-7.07 0l-3 3a5 5 0 007.07 7.07l1.5-1.5"/></svg>
+          <span class="hidden lg:inline">Links</span>
+        </button>
+        <button data-zone="protocols" class="zone-btn px-2 py-1.5 text-[12px] mono text-gray-500 hover:text-gray-200 transition flex items-center gap-1 rounded border border-transparent hover:border-gray-800/60" title="Protocols — reusable runbooks (V42)">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+          <span class="hidden lg:inline">Protocols</span>
+        </button>
+        <button data-zone="diary" class="zone-btn px-2 py-1.5 text-[12px] mono text-gray-500 hover:text-gray-200 transition flex items-center gap-1 rounded border border-transparent hover:border-gray-800/60" title="Diary — chronological activity blog (V43)">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+          <span class="hidden lg:inline">Diary</span>
+        </button>
+      </div>
 
       <!-- hidden legacy holders -->
       <button id="search-trigger" class="hidden"></button>
@@ -5242,9 +5272,17 @@ python3 .meshkore/scripts/daemon.py</pre>
       renderCluster();
       renderHelp();
       attachEvents();
-      // Activate initial tab
+      // Activate initial tab — zones (Bookmarks · Crons · Links · Protocols
+      // · Diary) intercept first so #protocols-style deep-links surface
+      // the zone toast + active state even though the panel content
+      // hasn't shipped yet (CRON-07 + V42-V45).
       const initial = (location.hash || '').replace('#', '') || 'roadmap';
-      switchTab(['roadmap','manage'].includes(initial) ? initial : 'roadmap');
+      if (Object.prototype.hasOwnProperty.call(ZONE_TASKS, initial)) {
+        switchTab('roadmap');
+        activateZone(initial);
+      } else {
+        switchTab(['roadmap','manage'].includes(initial) ? initial : 'roadmap');
+      }
       $('loader').style.display = 'none';
       $('app').classList.remove('hidden');
       $('app-shell')?.classList.remove('hidden');
@@ -9643,9 +9681,48 @@ credentials.`;
       try { history.replaceState(null, '', `#${name}`); } catch {}
     }
 
+    // ─── Header zone buttons (Bookmarks · Crons · Links · Protocols · Diary)
+    //
+    // CRON-07 ships the visual + URL-hash routing. Each panel's full
+    // content arrives with its own V## task:
+    //   bookmarks → V44     crons → CRON-01     links → V45
+    //   protocols → V42     diary → V43
+    // Until those land, clicking a zone button shows a one-line toast
+    // pointing at the tracking task and keeps the active state visible.
+    const ZONE_TASKS = {
+      bookmarks: 'V44',
+      crons:     'CRON-01',
+      links:     'V45',
+      protocols: 'V42',
+      diary:     'V43',
+    };
+    let _zoneToastTimer = null;
+    function showZoneToast(zone) {
+      const task = ZONE_TASKS[zone] || '?';
+      let toast = document.getElementById('zone-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'zone-toast';
+        toast.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:9999;background:#0a0e14;border:1px solid rgba(52,211,153,0.30);color:#d1d5db;padding:8px 14px;border-radius:8px;font-family:JetBrains Mono,monospace;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,0.5);opacity:0;transition:opacity 150ms;pointer-events:none;';
+        document.body.appendChild(toast);
+      }
+      toast.innerHTML = `<span style="color:#6ee7b7">${zone}</span> · coming soon — tracked by <span style="color:#fdba74">${task}</span>`;
+      toast.style.opacity = '1';
+      clearTimeout(_zoneToastTimer);
+      _zoneToastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 2400);
+    }
+    function activateZone(zone) {
+      document.querySelectorAll('.zone-btn').forEach(b => {
+        b.classList.toggle('zone-btn-active', b.dataset.zone === zone);
+      });
+      try { history.replaceState(null, '', `#${zone}`); } catch {}
+      showZoneToast(zone);
+    }
+
     // ─── Events / wiring ────────────────────────────────────────────────
     function attachEvents() {
       $$('.tab-btn, .mb-tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+      $$('.zone-btn').forEach(b => b.addEventListener('click', () => activateZone(b.dataset.zone)));
 
       // Workspace tab strip. Roadmap is the project-level overview — clicking
       // it from anywhere also resets the scope to the project root, so the
