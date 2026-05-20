@@ -4414,7 +4414,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     //   NEW_DATA       Local only    | Cloud sync     (data=local|cloud)
     //   NEW_PROMPT     copy-prompt + scan-now button
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V53 open');
+      console.log('[Add Project] wizard V54 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_HASH     = STD + '#10-3-adding-more-projects-to-your-architect';
       const TPL_DEV      = 'https://meshkore.com/reference/cluster/templates/cluster.yaml.dev';
@@ -4426,12 +4426,23 @@ python3 .meshkore/scripts/daemon.py</pre>
       );
 
       // ── Answers carried across screens ────────────────────────────────
+      // path semantics:
+      //   startKind=existing → absolute path of THE folder itself
+      //   startKind=new      → absolute path of the PARENT folder
+      //                        (we create ./<projectName>/ inside it)
       const answers = {
         startKind: null,  // 'new' (create folder) | 'existing' (apply to folder already on disk)
         projectName: '',
+        path: '',         // absolute path; empty = let the agent ask the user
         devices: null,    // 'single' | 'multi'
         data: null,       // 'local' | 'cloud'
       };
+
+      // basename(p) → last segment, no trailing slash. Pre-fills the
+      // project name from a chosen existing folder.
+      function basename(p) {
+        return (p || '').replace(/[\/\\]+$/, '').split(/[\/\\]/).pop() || '';
+      }
 
       // ── Prompt generator (uses answers) ───────────────────────────────
       function genPrompt() {
@@ -4444,37 +4455,44 @@ python3 .meshkore/scripts/daemon.py</pre>
         lines.push('Full setup spec lives at ' + STD + '.');
         lines.push('Read it before acting. Project parameters this user picked:');
         lines.push('');
+        const userPath = (answers.path || '').trim();
         lines.push('  · name:    ' + name);
         lines.push('  · kind:    ' + (answers.startKind === 'existing' ? 'apply to existing folder on disk' : 'create new folder from scratch'));
+        if (userPath) {
+          lines.push('  · path:    ' + userPath + (answers.startKind === 'new' ? ' (parent — create ./' + name + '/ inside it)' : ' (the project folder itself)'));
+        } else {
+          lines.push('  · path:    (not provided — ask the user)');
+        }
         lines.push('  · devices: ' + (isMulti ? 'multi (device admission will be set up)' : 'single (this machine only)'));
         lines.push('  · data:    ' + (isCloud ? 'cloud sync via cluster.meshkore.com (free in v1, may become paid later)' : 'local-only (no cloud)'));
         lines.push('');
-        lines.push('STEP 1 — Where are you?');
+        lines.push('STEP 1 — Get to the right folder.');
         if (answers.startKind === 'existing') {
-          lines.push('You should be at the root of the user\'s projects folder, OR');
-          lines.push('already inside the existing project folder. If you can\'t tell,');
-          lines.push('ASK the user for the absolute path of the project folder.');
+          if (userPath) {
+            lines.push('The user pointed at: ' + userPath);
+            lines.push('cd into it. DO NOT create a new folder. DO NOT touch files');
+            lines.push('outside it. Run `git init` if it is not already a git repo.');
+          } else {
+            lines.push('No path was given. ASK the user for the absolute path of the');
+            lines.push('existing project folder and cd into it. DO NOT create a new');
+            lines.push('folder. DO NOT touch files outside it. Run `git init` if it');
+            lines.push('is not already a git repo (recommended).');
+          }
         } else {
-          lines.push('You should be at the root of the user\'s projects folder.');
-          lines.push('If you are NOT, ASK the user for the absolute path before');
-          lines.push('doing anything else. Do not guess. Do not create folders');
-          lines.push('outside the user\'s projects directory.');
+          if (userPath) {
+            lines.push('Create ./' + name + '/ inside the user\'s parent folder:');
+            lines.push('  cd ' + userPath);
+            lines.push('  mkdir -p ' + name);
+            lines.push('  cd ' + name);
+            lines.push('Run `git init` if it is not already a git repo.');
+          } else {
+            lines.push('No parent path was given. ASK the user where to create');
+            lines.push('the project folder, then create ./' + name + '/ inside it.');
+            lines.push('cd into it. Run `git init` if it is not already a git repo.');
+          }
         }
         lines.push('');
-        if (answers.startKind === 'existing') {
-          lines.push('STEP 2 — Locate the existing project folder.');
-          lines.push('The user already has a folder on disk for this project.');
-          lines.push('If you are already INSIDE that folder, stay here.');
-          lines.push('Otherwise ASK the user for the absolute path and cd into it.');
-          lines.push('DO NOT create a new folder. DO NOT touch files outside it.');
-          lines.push('Run `git init` if it is not already a git repo (recommended).');
-        } else {
-          lines.push('STEP 2 — Create the project folder.');
-          lines.push('Create ./' + name + '/ if it does not exist, cd into it.');
-          lines.push('Run `git init` if it is not already a git repo.');
-        }
-        lines.push('');
-        lines.push('STEP 3 — Apply the MeshKore standard (§2).');
+        lines.push('STEP 2 — Apply the MeshKore standard (§2).');
         lines.push('Create the .meshkore/ tree. Start cluster.yaml from the template:');
         lines.push('  curl -fsSL ' + TPL_DEV + ' -o .meshkore/public/cluster.yaml');
         lines.push('Fill in:');
@@ -4482,11 +4500,11 @@ python3 .meshkore/scripts/daemon.py</pre>
         lines.push('  cluster_name:        "' + name + '"');
         lines.push('  cluster_description: ask the user for one sentence');
         lines.push('');
-        lines.push('STEP 4 — Drop the editor boot block (§8).');
+        lines.push('STEP 3 — Drop the editor boot block (§8).');
         lines.push('Add CLAUDE.md / .cursorrules / .windsurfrules at the repo root');
         lines.push('— pick whichever your editor needs.');
         lines.push('');
-        lines.push('STEP 5 — Data sync.');
+        lines.push('STEP 4 — Data sync.');
         if (isCloud) {
           lines.push('Set `storage.mode: remote` in cluster.yaml.');
           lines.push('Walk me through signing up at ' + STD + ' §10.3 — first device');
@@ -4496,7 +4514,7 @@ python3 .meshkore/scripts/daemon.py</pre>
           lines.push('machine. No cloud signup needed.');
         }
         lines.push('');
-        lines.push('STEP 6 — Multi-device authentication.');
+        lines.push('STEP 5 — Multi-device authentication.');
         if (isMulti) {
           lines.push('Set up device admission per ' + STD + ' §10.3.2. After the daemon');
           lines.push('starts, generate an invite token I will share with my other');
@@ -4505,13 +4523,13 @@ python3 .meshkore/scripts/daemon.py</pre>
           lines.push('Single device — no admission setup needed.');
         }
         lines.push('');
-        lines.push('STEP 7 — Start the local Python daemon.');
+        lines.push('STEP 6 — Start the local Python daemon.');
         lines.push('  mkdir -p .meshkore/scripts');
         lines.push('  curl -fsSL ' + DAEMON_URL + ' \\');
         lines.push('    -o .meshkore/scripts/daemon.py');
         lines.push('  python3 .meshkore/scripts/daemon.py');
         lines.push('');
-        lines.push('STEP 8 — Confirm.');
+        lines.push('STEP 7 — Confirm.');
         lines.push('Print:');
         lines.push('  · the chosen port (5570-5589)');
         lines.push('  · the bearer token from .meshkore/credentials/portal-token');
@@ -4650,6 +4668,35 @@ python3 .meshkore/scripts/daemon.py</pre>
                   + '</div>';
               }
 
+              case 'NEW_PATH': {
+                const isExisting = answers.startKind === 'existing';
+                const title = isExisting
+                  ? 'Where is the folder?'
+                  : 'Where do we put the new folder?';
+                const subtitle = isExisting
+                  ? 'Absolute path to the existing project folder. We can pre-fill the project name from its folder name on the next step.'
+                  : 'Absolute path to the PARENT folder. We create <span style="font-family:JetBrains Mono,monospace;color:#6ee7b7;">./' + esc(answers.projectName || 'my-project') + '/</span> inside it.';
+                const placeholder = isExisting
+                  ? '/Users/me/projects/my-app'
+                  : '/Users/me/projects';
+                return ''
+                  + '<h3 class="wiz-h">' + title + '</h3>'
+                  + '<p class="wiz-sub">' + subtitle + '</p>'
+                  + '<div class="wiz-input-wrap">'
+                  +   '<input type="text" id="wiz-path-input" class="wiz-input" placeholder="' + placeholder + '" value="' + esc(answers.path) + '" autocomplete="off" spellcheck="false">'
+                  + '</div>'
+                  + '<div class="wiz-tip" style="font-size:11.5px;">'
+                  +   '<strong>How to get the absolute path</strong><br>'
+                  +   '· macOS: in Finder, ⌘+click the folder → <em>"Copy &lt;name&gt; as Pathname"</em><br>'
+                  +   '· Windows: Shift+right-click the folder → <em>"Copy as path"</em><br>'
+                  +   '· Linux / terminal: <span class="wiz-cmd" style="display:inline-block;padding:1px 6px;background:#020617;border:1px solid rgba(75,85,99,0.40);border-radius:3px;font-family:JetBrains Mono,monospace;font-size:11px;color:#6ee7b7;">pwd</span> inside the folder'
+                  + '</div>'
+                  + '<div class="wiz-actions">'
+                  +   '<button type="button" class="wiz-btn" id="wiz-path-skip" style="background:transparent;color:#9ca3af;border-color:rgba(75,85,99,0.40);">Skip — let the agent ask</button>'
+                  +   '<button type="button" class="wiz-btn wiz-primary" id="wiz-path-continue">Continue →</button>'
+                  + '</div>';
+              }
+
               case 'NEW_DEVICES':
                 return ''
                   + '<h3 class="wiz-h">Will you work from one device or several?</h3>'
@@ -4719,7 +4766,12 @@ python3 .meshkore/scripts/daemon.py</pre>
             });
 
             root.querySelectorAll('[data-answer-startkind]').forEach(b => {
-              b.onclick = () => { answers.startKind = b.dataset.answerStartkind; go('NEW_NAME'); };
+              b.onclick = () => {
+                answers.startKind = b.dataset.answerStartkind;
+                // existing → ask folder path first (so we can pre-fill name)
+                // new      → ask name first, then parent path
+                go(answers.startKind === 'existing' ? 'NEW_PATH' : 'NEW_NAME');
+              };
             });
             root.querySelectorAll('[data-answer-devices]').forEach(b => {
               b.onclick = () => { answers.devices = b.dataset.answerDevices; go('NEW_DATA'); };
@@ -4738,7 +4790,9 @@ python3 .meshkore/scripts/daemon.py</pre>
               };
             });
 
-            // NAME screen wiring
+            // NAME screen wiring — next step depends on startKind:
+            //   existing → PATH already collected, NAME is the last input → NEW_DEVICES
+            //   new      → NAME first, still need to ask PATH → NEW_PATH
             const nameInput = root.querySelector('#wiz-name-input');
             const nameContinue = root.querySelector('#wiz-name-continue');
             if (nameInput && nameContinue) {
@@ -4748,17 +4802,47 @@ python3 .meshkore/scripts/daemon.py</pre>
                 if (ok) nameContinue.removeAttribute('disabled');
                 else    nameContinue.setAttribute('disabled', '');
               };
+              const nameNext = () => answers.startKind === 'existing' ? 'NEW_DEVICES' : 'NEW_PATH';
               nameInput.oninput = sync;
               nameInput.onkeydown = (e) => {
                 if (e.key === 'Enter' && answers.projectName.trim()) {
                   e.preventDefault();
-                  go('NEW_DEVICES');
+                  go(nameNext());
                 }
               };
               nameContinue.onclick = () => {
-                if (answers.projectName.trim()) go('NEW_DEVICES');
+                if (answers.projectName.trim()) go(nameNext());
               };
               setTimeout(() => nameInput.focus(), 0);
+            }
+
+            // PATH screen wiring — next step depends on startKind:
+            //   existing → derive name from basename, then NAME (pre-filled, editable)
+            //   new      → continue to NEW_DEVICES
+            const pathInput = root.querySelector('#wiz-path-input');
+            const pathContinue = root.querySelector('#wiz-path-continue');
+            const pathSkip = root.querySelector('#wiz-path-skip');
+            if (pathInput && pathContinue && pathSkip) {
+              const advance = () => {
+                answers.path = pathInput.value.trim();
+                if (answers.startKind === 'existing') {
+                  // Pre-fill projectName from basename(path), only if user
+                  // hasn't already entered one (preserves their input on back-nav).
+                  if (answers.path && !answers.projectName) {
+                    answers.projectName = basename(answers.path);
+                  }
+                  go('NEW_NAME');
+                } else {
+                  go('NEW_DEVICES');
+                }
+              };
+              pathInput.oninput = () => { answers.path = pathInput.value; };
+              pathInput.onkeydown = (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); advance(); }
+              };
+              pathContinue.onclick = advance;
+              pathSkip.onclick = () => { answers.path = ''; advance(); };
+              setTimeout(() => pathInput.focus(), 0);
             }
 
             // Copy wiring
