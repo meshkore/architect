@@ -1,7 +1,7 @@
 # CF Pages project config — meshkore-portal (architect cockpit).
 #
 # Subdomain:  architect.meshkore.com
-# (alias)     portal.meshkore.com
+# (alias)     meshkore.com/portal → 301 → architect.meshkore.com
 # Account:    875bd2c5943a18d6c520d894ed12905f (rjj@proars.com)
 # Project:    meshkore-portal
 #
@@ -10,9 +10,10 @@
 #             (`deploy:prod` = `vite build` + `wrangler pages deploy dist
 #              --project-name meshkore-portal --branch main`)
 #
-# The cockpit is fully client-side. It talks ONLY to the local meshcore
-# daemon at http://localhost:5570 (or :5571–5589). No server-side
-# concerns — no Functions, no R2, no DB. CF Pages just serves dist/.
+# The cockpit is fully client-side. It talks ONLY to the local Python
+# daemon at http://localhost:5570 (or any free port in 5570–5589). No
+# server-side concerns — no Functions, no R2, no DB. CF Pages just
+# serves dist/.
 
 name = "meshkore-portal"
 compatibility_date = "2026-05-18"

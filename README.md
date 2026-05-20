@@ -57,10 +57,11 @@ cd architect
 npm run dev           # serves public/ on http://localhost:4173
 ```
 
-Then in another terminal, run the daemon:
+Then in another terminal, run the daemon from any MeshKore repo:
 
 ```bash
-npx meshkore start    # binds localhost:5570
+python3 webapp/reference/cluster/scripts/daemon.py
+# binds the first free port in 5570–5589
 ```
 
 The architect will detect the daemon and load state.
