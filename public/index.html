@@ -4371,32 +4371,29 @@ python3 .meshkore/scripts/daemon.py</pre>
       }
     }
 
-    // Open the "Add a project" modal — explains how to spin up another
-    // local daemon (paste this prompt into your AI agent inside the new
-    // repo) and points to the public docs for the cloud option (which
-    // the cloud-team agent is wiring up separately).
+    // V51 — Wizard for adding a project. Step-by-step, 1-3 buttons per
+    // screen, explicit "let agent do it" vs "manual then hand-off"
+    // branches. Replaces the previous tab-based modal that crammed all
+    // three paths onto one screen.
     async function openAddProjectModal() {
+      console.log('[Add Project] wizard V51 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_103_1    = STD + '#10-3-1-the-canonical-apply-standard-prompt';
       const STD_103_4    = STD + '#10-3-4-bootstrap-a-new-repo';
       const STD_103_5    = STD + '#10-3-5-start-a-stopped-daemon';
       const DAEMON_URL   = 'https://meshkore.com/reference/cluster/scripts/daemon.py';
+      const TPL_DEV      = 'https://meshkore.com/reference/cluster/templates/cluster.yaml.dev';
 
-      // What stopped projects do we know about? Surfaced as tab A so the
-      // most common "I have everything, just turn it back on" case is the
-      // first choice the operator sees.
       const stopped = KnownProjects.list().filter(k =>
         !PROJECTS.find(p => p.port === k.port && !p._stopped)
       );
 
-      // Prompts — these mirror /standard §10.3.1 / .4 / .5 verbatim so a
-      // reader can copy from here OR from the standard URL without drift.
       const promptB = (
 'Apply the MeshKore Standard to this repo so it shows up in my architect.\n' +
 '\n' +
 '1. Read the canonical standard at ' + STD + '.\n' +
 '2. Create the .meshkore/ tree per §2 of the standard.\n' +
-'   Use ' + STD.replace('/standard', '/reference/cluster/templates/cluster.yaml.dev') + '\n' +
+'   Use ' + TPL_DEV + '\n' +
 '   as the starter for .meshkore/public/cluster.yaml.\n' +
 '3. Drop the editor boot block from §8 at the repo root (CLAUDE.md /\n' +
 '   .cursorrules / .windsurfrules — pick whichever your editor needs).\n' +
@@ -4422,7 +4419,7 @@ python3 .meshkore/scripts/daemon.py</pre>
 '2. Initialise a git repo here (`git init`) if there isn\'t one already.\n' +
 '3. Create the .meshkore/ tree per §2 of the standard.\n' +
 '4. Write .meshkore/public/cluster.yaml from the dev template:\n' +
-'       curl -fsSL https://meshkore.com/reference/cluster/templates/cluster.yaml.dev\n' +
+'       curl -fsSL ' + TPL_DEV + '\n' +
 '   …filling in {{cluster_id}} / {{cluster_name}} / {{cluster_description}}\n' +
 '   based on the folder name and ask me to confirm.\n' +
 '5. Drop the editor boot block from §8 at the repo root.\n' +
@@ -4439,134 +4436,278 @@ python3 .meshkore/scripts/daemon.py</pre>
 'Stop after step 10 — let me drive the rest from the architect.'
       );
 
-      const stoppedRowsHtml = stopped.length === 0
-        ? '<p style="font-size:12px;color:#6b7280;margin:6px 0;">No previously-connected projects on this browser. Pick option B or C below to add your first one — or come back here once you\'ve had a project running.</p>'
-        : stopped.map(s => {
-            const name = s.cluster_name || s.cluster_id || (':' + s.port);
-            return '<div class="wiz-stopped-row" data-port="' + s.port + '">' +
-              '<div class="wiz-stopped-name">' + esc(name) +
-                (s.cluster_id ? ' <span style="color:#6b7280;font-size:11px;" class="mono">(' + esc(s.cluster_id) + ')</span>' : '') +
-              '</div>' +
-              (s.repo_path ? '<div class="wiz-stopped-path mono">' + esc(s.repo_path) + '</div>' : '') +
-              '<div class="wiz-stopped-meta">last seen ' + (s.last_seen ? new Date(s.last_seen).toLocaleString() : '—') + ' · :' + s.port + '</div>' +
-              '<button type="button" class="wiz-stopped-btn" data-action="open-start" data-port="' + s.port + '">Show start command →</button>' +
-            '</div>';
-          }).join('');
+      const css = (
+        '<style>' +
+        '.wiz-step { padding: 2px 0; }' +
+        '.wiz-back { display: inline-flex; align-items: center; gap: 4px; background: transparent; border: none; color: #9ca3af; font-size: 11.5px; cursor: pointer; padding: 4px 8px; margin-bottom: 12px; border-radius: 5px; font-family: inherit; }' +
+        '.wiz-back:hover { color: #e5e7eb; background: rgba(75,85,99,0.20); }' +
+        '.wiz-h { font-size: 17px; font-weight: 600; color: #f3f4f6; margin: 0 0 6px; line-height: 1.3; }' +
+        '.wiz-sub { font-size: 12.5px; color: #9ca3af; margin: 0 0 16px; line-height: 1.55; }' +
+        '.wiz-sub strong { color: #d1d5db; font-weight: 600; }' +
+        '.wiz-choice { display: flex; align-items: center; gap: 12px; width: 100%; background: rgba(11,18,32,0.6); border: 1px solid rgba(75,85,99,0.30); border-radius: 10px; padding: 14px 16px; margin-bottom: 8px; cursor: pointer; text-align: left; transition: all 140ms ease; font-family: inherit; color: inherit; }' +
+        '.wiz-choice:hover { background: rgba(11,18,32,0.95); border-color: rgba(52,211,153,0.40); transform: translateX(2px); }' +
+        '.wiz-choice.wiz-primary { border-color: rgba(52,211,153,0.50); background: rgba(16,185,129,0.10); }' +
+        '.wiz-choice.wiz-primary:hover { background: rgba(16,185,129,0.18); border-color: rgba(52,211,153,0.75); }' +
+        '.wiz-choice-body { flex: 1; min-width: 0; }' +
+        '.wiz-choice-title { font-size: 14px; font-weight: 600; color: #e5e7eb; margin-bottom: 2px; }' +
+        '.wiz-choice-sub { font-size: 11.5px; color: #9ca3af; line-height: 1.45; }' +
+        '.wiz-choice-arrow { color: #6b7280; font-size: 16px; flex-shrink: 0; }' +
+        '.wiz-choice:hover .wiz-choice-arrow { color: #34d399; }' +
+        '.wiz-steps { background: rgba(11,18,32,0.4); border: 1px solid rgba(75,85,99,0.30); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }' +
+        '.wiz-steps ol { margin: 0; padding-left: 22px; }' +
+        '.wiz-steps li { font-size: 13px; color: #d1d5db; margin-bottom: 10px; line-height: 1.55; }' +
+        '.wiz-steps li:last-child { margin-bottom: 0; }' +
+        '.wiz-steps li .wiz-step-note { display: block; font-size: 11px; color: #9ca3af; margin-top: 4px; }' +
+        '.wiz-cmd { display: inline-block; background: #020617; border: 1px solid rgba(75,85,99,0.40); border-radius: 4px; padding: 2px 7px; font-family: JetBrains Mono,monospace; font-size: 11.5px; color: #6ee7b7; word-break: break-all; }' +
+        '.wiz-prompt-box { position: relative; background: #020617; border: 1px solid rgba(52,211,153,0.30); border-radius: 8px; padding: 12px 60px 12px 14px; font-family: JetBrains Mono,monospace; font-size: 11.5px; color: #cbd5e1; line-height: 1.55; white-space: pre-wrap; word-break: break-word; max-height: 280px; overflow-y: auto; margin-top: 10px; }' +
+        '.wiz-copy { position: absolute; top: 8px; right: 8px; padding: 5px 10px; border-radius: 5px; background: rgba(16,185,129,0.18); color: #6ee7b7; border: 1px solid rgba(52,211,153,0.40); font-family: JetBrains Mono,monospace; font-size: 10.5px; cursor: pointer; }' +
+        '.wiz-copy:hover { background: rgba(16,185,129,0.30); }' +
+        '.wiz-tip { background: rgba(96,165,250,0.08); border: 1px solid rgba(96,165,250,0.25); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 12.5px; color: #cbd5e1; line-height: 1.55; }' +
+        '.wiz-divider { display: flex; align-items: center; gap: 10px; margin: 18px 0 10px; color: #9ca3af; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.10em; font-family: JetBrains Mono,monospace; }' +
+        '.wiz-divider:before, .wiz-divider:after { content: ""; flex: 1; height: 1px; background: rgba(75,85,99,0.30); }' +
+        '.wiz-stopped-row { display: flex; align-items: center; gap: 10px; background: rgba(11,18,32,0.6); border: 1px solid rgba(75,85,99,0.30); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; cursor: pointer; transition: background 120ms, border-color 120ms; width: 100%; text-align: left; font-family: inherit; color: inherit; }' +
+        '.wiz-stopped-row:hover { background: rgba(11,18,32,0.95); border-color: rgba(96,165,250,0.40); }' +
+        '.wiz-stopped-name { flex: 1; min-width: 0; }' +
+        '.wiz-stopped-title { font-size: 13px; font-weight: 600; color: #e5e7eb; }' +
+        '.wiz-stopped-meta { font-size: 10.5px; color: #6b7280; margin-top: 2px; }' +
+        '.wiz-stopped-port { font-family: JetBrains Mono,monospace; font-size: 11px; color: #93c5fd; }' +
+        '.wiz-stopped-empty { font-size: 12px; color: #9ca3af; padding: 12px; background: rgba(11,18,32,0.4); border-radius: 8px; border: 1px dashed rgba(75,85,99,0.40); text-align: center; }' +
+        '.wiz-fineprint { font-size: 11px; color: #6b7280; margin-top: 12px; }' +
+        '.wiz-fineprint a { color: #34d399; text-decoration: none; }' +
+        '.wiz-fineprint a:hover { text-decoration: underline; }' +
+        '</style>'
+      );
+
+      // ── State machine ────────────────────────────────────────────────
+      // If no stopped projects, skip the START menu and go straight
+      // to the "new project" branch with a back-to-START button hidden.
+      let step = stopped.length > 0 ? 'START' : 'NEW_HOW';
+      const history = [];
 
       await mcModal({
         title: 'Add a project',
-        subtitle: 'Three paths depending on where you are: revive a stopped one, apply the standard to an existing repo, or bootstrap a brand-new repo.',
-        body:
-          '<style>' +
-            '.wiz-tabs { display: flex; gap: 2px; border-bottom: 1px solid rgba(75,85,99,0.30); margin-bottom: 14px; }' +
-            '.wiz-tab { flex: 1; padding: 8px 10px; background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; text-align: left; transition: color 120ms, border-color 120ms; }' +
-            '.wiz-tab:hover { color: #e5e7eb; }' +
-            '.wiz-tab.active { color: #34d399; border-bottom-color: #34d399; }' +
-            '.wiz-tab-pill { display:inline-block; padding:1px 6px; border-radius:4px; background:rgba(75,85,99,0.20); font-family:JetBrains Mono,monospace; font-size:9.5px; letter-spacing:0.08em; margin-right:6px; color:#9ca3af; }' +
-            '.wiz-tab.active .wiz-tab-pill { background:rgba(52,211,153,0.20); color:#34d399; }' +
-            '.wiz-tab-title { font-size: 13px; color: #d1d5db; font-weight: 600; line-height:1.2; }' +
-            '.wiz-tab.active .wiz-tab-title { color: #e5e7eb; }' +
-            '.wiz-tab-sub { font-size: 10.5px; color: #6b7280; margin-top: 2px; }' +
-            '.wiz-tab.active .wiz-tab-sub { color: #9ca3af; }' +
-            '.wiz-panel { display: none; }' +
-            '.wiz-panel.active { display: block; }' +
-            '.wiz-section { background: rgba(11,18,32,0.5); border: 1px solid rgba(75,85,99,0.30); border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; }' +
-            '.wiz-section h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #e5e7eb; }' +
-            '.wiz-section p { font-size: 12.5px; color: #d1d5db; line-height: 1.55; margin: 4px 0; }' +
-            '.wiz-prompt { position: relative; background: #020617; border: 1px solid rgba(75,85,99,0.40); border-radius: 8px; padding: 10px 44px 10px 12px; font-family: JetBrains Mono,monospace; font-size: 11.5px; color: #cbd5e1; line-height: 1.55; white-space: pre-wrap; word-break: break-word; max-height: 280px; overflow-y: auto; margin: 6px 0; }' +
-            '.wiz-copy { position: absolute; top: 8px; right: 8px; padding: 4px 8px; border-radius: 5px; background: rgba(16,185,129,0.15); color: #6ee7b7; border: 1px solid rgba(52,211,153,0.40); font-family: JetBrains Mono,monospace; font-size: 10px; cursor: pointer; }' +
-            '.wiz-copy:hover { background: rgba(16,185,129,0.30); }' +
-            '.wiz-stopped-row { background: rgba(11,18,32,0.5); border: 1px solid rgba(75,85,99,0.30); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }' +
-            '.wiz-stopped-name { font-size: 13px; font-weight: 600; color: #e5e7eb; }' +
-            '.wiz-stopped-path { font-size: 11px; color: #93c5fd; margin: 2px 0; word-break: break-all; }' +
-            '.wiz-stopped-meta { font-size: 10.5px; color: #6b7280; margin-bottom: 6px; }' +
-            '.wiz-stopped-btn { font-family: JetBrains Mono,monospace; font-size: 10.5px; padding: 5px 9px; border-radius: 5px; background: rgba(96,165,250,0.15); color: #93c5fd; border: 1px solid rgba(96,165,250,0.40); cursor: pointer; }' +
-            '.wiz-stopped-btn:hover { background: rgba(96,165,250,0.25); }' +
-            '.wiz-cloud { opacity: 0.85; background: rgba(96,165,250,0.04); border-color: rgba(96,165,250,0.25); }' +
-          '</style>' +
-
-          '<div class="wiz-tabs">' +
-            '<button type="button" class="wiz-tab" data-tab="A">' +
-              '<div><span class="wiz-tab-pill">A</span><span class="wiz-tab-title">Start a stopped project</span></div>' +
-              '<div class="wiz-tab-sub">' + (stopped.length > 0 ? stopped.length + ' known · daemon offline' : 'none on record yet') + '</div>' +
-            '</button>' +
-            '<button type="button" class="wiz-tab" data-tab="B">' +
-              '<div><span class="wiz-tab-pill">B</span><span class="wiz-tab-title">Apply standard to an existing repo</span></div>' +
-              '<div class="wiz-tab-sub">have a repo, no .meshkore/ yet</div>' +
-            '</button>' +
-            '<button type="button" class="wiz-tab" data-tab="C">' +
-              '<div><span class="wiz-tab-pill">C</span><span class="wiz-tab-title">Bootstrap a new repo from scratch</span></div>' +
-              '<div class="wiz-tab-sub">empty folder, start from zero</div>' +
-            '</button>' +
-          '</div>' +
-
-          '<div class="wiz-panel" data-panel="A">' +
-            '<div class="wiz-section">' +
-              '<h4>Resume a project the architect has seen before</h4>' +
-              '<p>These are projects in this browser\'s memory whose daemon isn\'t currently answering. Pick one and the architect will show you the exact folder + command to bring it back up.</p>' +
-              stoppedRowsHtml +
-              '<p style="font-size:11px;color:#6b7280;margin-top:8px;">Full spec at <a href="' + STD_103_5 + '" target="_blank" style="color:#34d399;">/standard §10.3.5</a>.</p>' +
-            '</div>' +
-          '</div>' +
-
-          '<div class="wiz-panel" data-panel="B">' +
-            '<div class="wiz-section">' +
-              '<h4>Apply the MeshKore Standard to an existing repo</h4>' +
-              '<p>Open your AI agent (Claude Code, Cursor, Windsurf, …) inside the repo and paste this prompt. It applies the standard, downloads the Python daemon, and starts it — the architect picks it up automatically on its next probe.</p>' +
-              '<div class="wiz-prompt"><button type="button" class="wiz-copy" data-copy="B">copy</button><span data-prompt="B">' + esc(promptB) + '</span></div>' +
-              '<p style="font-size:11px;color:#6b7280;">Full spec at <a href="' + STD_103_1 + '" target="_blank" style="color:#34d399;">/standard §10.3.1</a>.</p>' +
-            '</div>' +
-          '</div>' +
-
-          '<div class="wiz-panel" data-panel="C">' +
-            '<div class="wiz-section">' +
-              '<h4>Bootstrap a brand-new repo</h4>' +
-              '<p>You have an empty folder (or no folder yet). Create it, open an AI agent inside, and paste this prompt. It will initialise git, scaffold .meshkore/, drop the editor boot block, start the Python daemon, and pre-create a first task so the architect lights up immediately.</p>' +
-              '<div class="wiz-prompt"><button type="button" class="wiz-copy" data-copy="C">copy</button><span data-prompt="C">' + esc(promptC_dev) + '</span></div>' +
-              '<p style="font-size:11px;color:#6b7280;">Full spec at <a href="' + STD_103_4 + '" target="_blank" style="color:#34d399;">/standard §10.3.4</a>.</p>' +
-            '</div>' +
-          '</div>' +
-
-          '<div class="wiz-section wiz-cloud" style="margin-top:14px;">' +
-            '<h4>Cloud — projects on other machines or your phone <span style="font-family:JetBrains Mono,monospace;font-size:9.5px;background:rgba(251,191,36,0.10);color:#fbbf24;border:1px solid rgba(251,191,36,0.30);padding:2px 7px;border-radius:999px;margin-left:6px;">in progress</span></h4>' +
-            '<p>Working in a remote VM or from your phone? A separate work-stream is wiring the cloud relay + bridge daemon so the same architect URL can manage projects that don\'t live on this machine. When it ships you\'ll see Cloud sub-tabs here. Track the design at <a href="' + STD + '#10-3-adding-more-projects-to-your-architect" target="_blank" style="color:#34d399;">/standard §10.3</a>.</p>' +
-          '</div>',
-
+        subtitle: 'Step-by-step wizard. Pick the closest match each screen.',
+        body: css + '<div id="wiz-root"></div>',
         buttons: [{ id: 'close', label: 'Close' }],
         onMount: (body, close) => {
-          // Pick the smartest default tab: A if there's anything stopped,
-          // else B (the most-used path), else C.
-          const defaultTab = stopped.length > 0 ? 'A' : 'B';
-          function activate(tab) {
-            body.querySelectorAll('.wiz-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-            body.querySelectorAll('.wiz-panel').forEach(b => b.classList.toggle('active', b.dataset.panel === tab));
+          const root = body.querySelector('#wiz-root');
+
+          function go(next) {
+            history.push(step);
+            step = next;
+            render();
           }
-          activate(defaultTab);
-          body.querySelectorAll('.wiz-tab').forEach(b => {
-            b.addEventListener('click', () => activate(b.dataset.tab));
-          });
-          body.querySelectorAll('[data-copy]').forEach(b => {
-            b.addEventListener('click', () => {
-              const which = b.dataset.copy;
-              const span  = body.querySelector('[data-prompt="' + which + '"]');
-              navigator.clipboard.writeText(span?.textContent || '');
-              b.textContent = 'copied ✓';
-              setTimeout(() => { b.textContent = 'copy'; }, 1500);
+          function back() {
+            if (history.length > 0) {
+              step = history.pop();
+              render();
+            }
+          }
+
+          function renderStep(s) {
+            switch (s) {
+              case 'START':
+                return ''
+                  + '<h3 class="wiz-h">What do you want to do?</h3>'
+                  + '<p class="wiz-sub">Pick the closest match. We\'ll guide you the rest of the way.</p>'
+                  + '<button type="button" class="wiz-choice" data-go="REVIVE">'
+                  +   '<div class="wiz-choice-body">'
+                  +     '<div class="wiz-choice-title">Revive a project I had before</div>'
+                  +     '<div class="wiz-choice-sub">' + stopped.length + ' project' + (stopped.length === 1 ? '' : 's') + ' this browser remembers, daemon offline</div>'
+                  +   '</div>'
+                  +   '<span class="wiz-choice-arrow">→</span>'
+                  + '</button>'
+                  + '<button type="button" class="wiz-choice" data-go="EXISTING_HOW">'
+                  +   '<div class="wiz-choice-body">'
+                  +     '<div class="wiz-choice-title">Add an existing repo to MeshKore</div>'
+                  +     '<div class="wiz-choice-sub">I have a folder with code already, no <span class="wiz-cmd">.meshkore/</span> yet</div>'
+                  +   '</div>'
+                  +   '<span class="wiz-choice-arrow">→</span>'
+                  + '</button>'
+                  + '<button type="button" class="wiz-choice" data-go="NEW_HOW">'
+                  +   '<div class="wiz-choice-body">'
+                  +     '<div class="wiz-choice-title">Start a brand-new project</div>'
+                  +     '<div class="wiz-choice-sub">Empty folder, from scratch</div>'
+                  +   '</div>'
+                  +   '<span class="wiz-choice-arrow">→</span>'
+                  + '</button>';
+
+              case 'REVIVE': {
+                let rows = '';
+                if (stopped.length === 0) {
+                  rows = '<div class="wiz-stopped-empty">No previously-connected projects on this browser yet. Go back and pick another option.</div>';
+                } else {
+                  rows = stopped.map(s => {
+                    const name = s.cluster_name || s.cluster_id || (':' + s.port);
+                    const lastSeen = s.last_seen ? new Date(s.last_seen).toLocaleString() : '—';
+                    const pathBit = s.repo_path ? ' · ' + esc(s.repo_path) : '';
+                    return ''
+                      + '<button type="button" class="wiz-stopped-row" data-revive-port="' + s.port + '">'
+                      +   '<div class="wiz-stopped-name">'
+                      +     '<div class="wiz-stopped-title">' + esc(name) + '</div>'
+                      +     '<div class="wiz-stopped-meta">last seen ' + esc(lastSeen) + ' · <span class="wiz-stopped-port">:' + s.port + '</span>' + pathBit + '</div>'
+                      +   '</div>'
+                      +   '<span class="wiz-choice-arrow">→</span>'
+                      + '</button>';
+                  }).join('');
+                }
+                return ''
+                  + '<h3 class="wiz-h">Pick the project to revive</h3>'
+                  + '<p class="wiz-sub">These are projects this browser remembers whose daemon isn\'t currently answering. Click one and we\'ll show you the exact command to bring it back up.</p>'
+                  + rows
+                  + '<p class="wiz-fineprint">Full spec at <a href="' + STD_103_5 + '" target="_blank">/standard §10.3.5</a>.</p>';
+              }
+
+              case 'EXISTING_HOW':
+                return ''
+                  + '<h3 class="wiz-h">How do you want to set this up?</h3>'
+                  + '<p class="wiz-sub">You have a folder with code already. Two ways forward.</p>'
+                  + '<button type="button" class="wiz-choice wiz-primary" data-go="EXISTING_PROMPT">'
+                  +   '<div class="wiz-choice-body">'
+                  +     '<div class="wiz-choice-title">Let my AI agent do it · recommended</div>'
+                  +     '<div class="wiz-choice-sub">Paste one prompt into Claude Code / Cursor / Windsurf inside your repo. Agent handles every step end-to-end.</div>'
+                  +   '</div>'
+                  +   '<span class="wiz-choice-arrow">→</span>'
+                  + '</button>'
+                  + '<button type="button" class="wiz-choice" data-go="EXISTING_MANUAL">'
+                  +   '<div class="wiz-choice-body">'
+                  +     '<div class="wiz-choice-title">Walk me through the manual steps first</div>'
+                  +     '<div class="wiz-choice-sub">Open the terminal yourself, run a couple of commands. You\'ll still need an agent for the final piece (applying the standard).</div>'
+                  +   '</div>'
+                  +   '<span class="wiz-choice-arrow">→</span>'
+                  + '</button>';
+
+              case 'EXISTING_PROMPT':
+                return ''
+                  + '<h3 class="wiz-h">Paste this in your AI agent</h3>'
+                  + '<p class="wiz-sub">Open <strong>Claude Code</strong>, <strong>Cursor</strong>, or <strong>Windsurf</strong> inside your repo folder, then paste the prompt below.</p>'
+                  + '<div class="wiz-prompt-box">'
+                  +   '<button type="button" class="wiz-copy" data-copy-target="prompt-b">copy</button>'
+                  +   '<span data-prompt-text id="prompt-b">' + esc(promptB) + '</span>'
+                  + '</div>'
+                  + '<p class="wiz-sub" style="margin-top:14px;">The agent will: read the standard, create <span class="wiz-cmd">.meshkore/</span>, download the Python daemon, start it, and print the bearer token. Your architect auto-detects it within seconds.</p>'
+                  + '<p class="wiz-fineprint">Full spec at <a href="' + STD_103_1 + '" target="_blank">/standard §10.3.1</a>.</p>';
+
+              case 'EXISTING_MANUAL':
+                return ''
+                  + '<h3 class="wiz-h">Manual steps — before the agent comes in</h3>'
+                  + '<p class="wiz-sub">Run these in your terminal, inside the repo folder. After step 4 the daemon is up and the architect can see it.</p>'
+                  + '<div class="wiz-steps">'
+                  +   '<ol>'
+                  +     '<li>Open your terminal in the repo folder (the one with your existing code).</li>'
+                  +     '<li>Create the daemon scripts directory:<br><span class="wiz-cmd">mkdir -p .meshkore/scripts</span></li>'
+                  +     '<li>Download the Python daemon:<br><span class="wiz-cmd">curl -fsSL ' + DAEMON_URL + ' -o .meshkore/scripts/daemon.py</span></li>'
+                  +     '<li>Start it:<br><span class="wiz-cmd">python3 .meshkore/scripts/daemon.py</span><span class="wiz-step-note">Picks the first free port in 5570-5589 and prints a bearer token. The architect auto-detects it within seconds.</span></li>'
+                  +   '</ol>'
+                  + '</div>'
+                  + '<div class="wiz-divider">Now the part that needs an agent</div>'
+                  + '<p class="wiz-sub">Creating <span class="wiz-cmd">.meshkore/public/cluster.yaml</span>, the modules tree and the editor boot block is too much to type by hand. Open an AI agent inside your repo and paste this:</p>'
+                  + '<div class="wiz-prompt-box">'
+                  +   '<button type="button" class="wiz-copy" data-copy-target="prompt-b-manual">copy</button>'
+                  +   '<span data-prompt-text id="prompt-b-manual">' + esc(promptB) + '</span>'
+                  + '</div>';
+
+              case 'NEW_HOW':
+                return ''
+                  + '<h3 class="wiz-h">How do you want to start?</h3>'
+                  + '<p class="wiz-sub">Brand-new project, empty folder. Two paths.</p>'
+                  + '<button type="button" class="wiz-choice wiz-primary" data-go="NEW_PROMPT">'
+                  +   '<div class="wiz-choice-body">'
+                  +     '<div class="wiz-choice-title">Let my AI agent do it · recommended</div>'
+                  +     '<div class="wiz-choice-sub">Open Claude Code / Cursor / Windsurf in an empty folder, paste a prompt. Agent scaffolds <span class="wiz-cmd">git init</span>, <span class="wiz-cmd">.meshkore/</span>, the daemon, a first task — everything.</div>'
+                  +   '</div>'
+                  +   '<span class="wiz-choice-arrow">→</span>'
+                  + '</button>'
+                  + '<button type="button" class="wiz-choice" data-go="NEW_MANUAL">'
+                  +   '<div class="wiz-choice-body">'
+                  +     '<div class="wiz-choice-title">Walk me through the manual steps first</div>'
+                  +     '<div class="wiz-choice-sub">Create the folder, <span class="wiz-cmd">git init</span> yourself, then hand off to the agent for the standard.</div>'
+                  +   '</div>'
+                  +   '<span class="wiz-choice-arrow">→</span>'
+                  + '</button>';
+
+              case 'NEW_PROMPT':
+                return ''
+                  + '<h3 class="wiz-h">Paste this in your AI agent</h3>'
+                  + '<div class="wiz-tip">'
+                  +   '<strong>First</strong>, create the folder and open your AI inside it:<br><span class="wiz-cmd">mkdir my-project &amp;&amp; cd my-project</span><br><span class="wiz-cmd">claude</span>&nbsp;&nbsp;<span style="color:#9ca3af;">(or open Cursor / Windsurf via "Open Folder")</span>'
+                  + '</div>'
+                  + '<p class="wiz-sub">Then paste:</p>'
+                  + '<div class="wiz-prompt-box">'
+                  +   '<button type="button" class="wiz-copy" data-copy-target="prompt-c">copy</button>'
+                  +   '<span data-prompt-text id="prompt-c">' + esc(promptC_dev) + '</span>'
+                  + '</div>'
+                  + '<p class="wiz-sub" style="margin-top:14px;">The agent will: <span class="wiz-cmd">git init</span>, scaffold <span class="wiz-cmd">.meshkore/</span>, write <span class="wiz-cmd">cluster.yaml</span> + a starter task, drop the editor boot block, download + start the daemon. Architect lights up automatically.</p>'
+                  + '<p class="wiz-fineprint">Full spec at <a href="' + STD_103_4 + '" target="_blank">/standard §10.3.4</a>.</p>';
+
+              case 'NEW_MANUAL':
+                return ''
+                  + '<h3 class="wiz-h">Manual steps — before the agent comes in</h3>'
+                  + '<p class="wiz-sub">Run these in your terminal first. After step 4 you have an empty git repo with an AI agent open in it, ready for the prompt.</p>'
+                  + '<div class="wiz-steps">'
+                  +   '<ol>'
+                  +     '<li>Open your terminal where you keep projects.</li>'
+                  +     '<li>Create + enter the folder (use whatever name fits):<br><span class="wiz-cmd">mkdir my-project &amp;&amp; cd my-project</span></li>'
+                  +     '<li>Initialise git — recommended, gives the agent a safety net:<br><span class="wiz-cmd">git init</span></li>'
+                  +     '<li>Open your AI agent <strong>inside this folder</strong> (Claude Code: <span class="wiz-cmd">claude</span> ; Cursor / Windsurf: "Open Folder" → pick the new folder).</li>'
+                  +   '</ol>'
+                  + '</div>'
+                  + '<div class="wiz-divider">Now hand off to the agent</div>'
+                  + '<p class="wiz-sub">Paste this in the agent. It scaffolds <span class="wiz-cmd">.meshkore/</span>, downloads the daemon, starts it, creates a first task. Architect lights up automatically.</p>'
+                  + '<div class="wiz-prompt-box">'
+                  +   '<button type="button" class="wiz-copy" data-copy-target="prompt-c-manual">copy</button>'
+                  +   '<span data-prompt-text id="prompt-c-manual">' + esc(promptC_dev) + '</span>'
+                  + '</div>';
+            }
+            return '<p class="wiz-sub">Unknown step.</p>';
+          }
+
+          function render() {
+            let html = '';
+            if (history.length > 0) {
+              html += '<button type="button" class="wiz-back" id="wiz-back-btn">← Back</button>';
+            }
+            html += '<div class="wiz-step">' + renderStep(step) + '</div>';
+            root.innerHTML = html;
+
+            // Wire back
+            const backBtn = root.querySelector('#wiz-back-btn');
+            if (backBtn) backBtn.onclick = back;
+
+            // Wire choice buttons
+            root.querySelectorAll('[data-go]').forEach(b => {
+              b.onclick = () => go(b.dataset.go);
             });
-          });
-          body.querySelectorAll('[data-action="open-start"]').forEach(b => {
-            b.addEventListener('click', () => {
-              const port = parseInt(b.dataset.port, 10);
-              const p = stopped.find(s => s.port === port);
-              if (!p) return;
-              close('chose-start');
-              setTimeout(() => openStartProjectModal({ ...p, _stopped: true }), 50);
+
+            // Wire stopped-row clicks
+            root.querySelectorAll('[data-revive-port]').forEach(b => {
+              b.onclick = () => {
+                const port = parseInt(b.dataset.revivePort, 10);
+                const p = stopped.find(s => s.port === port);
+                if (!p) return;
+                close('chose-revive');
+                setTimeout(() => openStartProjectModal({ ...p, _stopped: true }), 50);
+              };
             });
-          });
+
+            // Wire copy buttons
+            root.querySelectorAll('.wiz-copy').forEach(b => {
+              b.onclick = () => {
+                const targetId = b.dataset.copyTarget;
+                const target = targetId ? root.querySelector('#' + targetId) : b.parentElement.querySelector('[data-prompt-text]');
+                if (target) {
+                  navigator.clipboard.writeText(target.textContent || '');
+                  b.textContent = 'copied ✓';
+                  setTimeout(() => { b.textContent = 'copy'; }, 1500);
+                }
+              };
+            });
+          }
+
+          render();
         },
       });
     }
-
     async function tryDaemon() {
       await discoverProjects();
       if (!DAEMON_BASE) return;
@@ -10096,8 +10237,57 @@ credentials.`;
       }).join('');
       root.classList.remove('hidden');
       root.classList.add('flex');
+      // V49 — Force the load-bearing layout properties inline. CDN
+      // Tailwind generation is inconsistent for some class combos in
+      // this page (V48 diagnosis showed rect 0x0 + opacity 0 even with
+      // `.fixed .inset-0` in className). Inline styles bypass tailwind
+      // for the props that MUST work for the modal to be visible.
+      Object.assign(root.style, {
+        position: 'fixed',
+        top: '0', right: '0', bottom: '0', left: '0',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: '50',
+        opacity: '1',
+        animation: 'none',           // disable fade-in (was stuck at 0%)
+        background: 'rgba(2, 4, 12, 0.78)',
+        backdropFilter: 'blur(6px)',
+        padding: '1rem',
+      });
+      // V49 — force inner card visibility too, since its tailwind colour
+      // classes (bg-ink-900) aren't in the cdn config either.
+      const card = root.firstElementChild;
+      if (card) {
+        Object.assign(card.style, {
+          maxWidth: '42rem',
+          width: '100%',
+          maxHeight: '90vh',
+          background: '#0b1220',
+          border: '1px solid rgba(75,85,99,0.40)',
+          borderRadius: '1rem',
+          boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          animation: 'none',
+          opacity: '1',
+          transform: 'none',
+        });
+      }
+      // V50 — fix: extensions/scripts can wrap #mc-modal in a div that
+      // creates a containing block, so position:fixed gets anchored to
+      // a zero-sized element. Force-reparent back to <body> on every
+      // open. Load-bearing.
+      if (root.parentElement && root.parentElement !== document.body) {
+        document.body.appendChild(root);
+      }
       return new Promise((resolve) => {
         const cleanup = (id) => {
+          // V49 — undo the inline styles we forced on open, then re-add
+          // the .hidden class. Otherwise inline display:flex would win
+          // over .hidden's display:none.
+          root.style.display = 'none';
           root.classList.add('hidden');
           root.classList.remove('flex');
           document.removeEventListener('keydown', onKey);
