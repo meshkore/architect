@@ -4338,18 +4338,23 @@ python3 .meshkore/scripts/daemon.py</pre>
           if (btn) btn.disabled = false;
         }
       });
-      // V46 — Belt-and-braces wiring for the Add button. We attach a
-      // direct listener AND a document-level delegate, both pointing at
-      // the same safe handler. If anything in the modal body throws we
-      // surface it as an alert instead of dying silently.
+      // V47 — Belt-and-braces wiring for the Add button. Direct listener
+      // AND document-level delegate, both pointing at the same safe
+      // handler. The handler uses Promise.resolve().then().catch() so it
+      // captures BOTH synchronous throws AND async rejections from
+      // openAddProjectModal (which is async). The V46 try/catch missed
+      // async errors and could swallow them silently — fixed here.
       const safeOpenAddProject = (e) => {
         try { e?.stopPropagation?.(); e?.preventDefault?.(); } catch {}
-        try {
-          openAddProjectModal();
-        } catch (err) {
-          console.error('openAddProjectModal threw:', err);
-          alert('Add project — open failed: ' + (err?.message || err));
-        }
+        console.log('[Add Project] click reached handler');
+        Promise.resolve()
+          .then(() => openAddProjectModal())
+          .then(() => console.log('[Add Project] modal returned'))
+          .catch(err => {
+            console.error('[Add Project] FAILED:', err);
+            alert('Add project — open failed: ' + (err?.message || String(err)) +
+                  '\n\nCheck DevTools console for the stack trace.');
+          });
       };
       const directAdd = $('projects-rail-add');
       if (directAdd && !directAdd._mcAddBound) {
