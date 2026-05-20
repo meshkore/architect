@@ -4384,7 +4384,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     //   NEW_DATA       Local only    | Cloud sync     (data=local|cloud)
     //   NEW_PROMPT     copy-prompt + scan-now button
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V52 open');
+      console.log('[Add Project] wizard V53 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_HASH     = STD + '#10-3-adding-more-projects-to-your-architect';
       const TPL_DEV      = 'https://meshkore.com/reference/cluster/templates/cluster.yaml.dev';
@@ -4397,9 +4397,10 @@ python3 .meshkore/scripts/daemon.py</pre>
 
       // ── Answers carried across screens ────────────────────────────────
       const answers = {
+        startKind: null,  // 'new' (create folder) | 'existing' (apply to folder already on disk)
         projectName: '',
-        devices: null,   // 'single' | 'multi'
-        data: null,      // 'local' | 'cloud'
+        devices: null,    // 'single' | 'multi'
+        data: null,       // 'local' | 'cloud'
       };
 
       // ── Prompt generator (uses answers) ───────────────────────────────
@@ -4414,17 +4415,34 @@ python3 .meshkore/scripts/daemon.py</pre>
         lines.push('Read it before acting. Project parameters this user picked:');
         lines.push('');
         lines.push('  · name:    ' + name);
+        lines.push('  · kind:    ' + (answers.startKind === 'existing' ? 'apply to existing folder on disk' : 'create new folder from scratch'));
         lines.push('  · devices: ' + (isMulti ? 'multi (device admission will be set up)' : 'single (this machine only)'));
         lines.push('  · data:    ' + (isCloud ? 'cloud sync via cluster.meshkore.com (free in v1, may become paid later)' : 'local-only (no cloud)'));
         lines.push('');
-        lines.push('STEP 1 — Locate the project folder.');
-        lines.push('Make sure you are at the root of the user\'s projects folder.');
-        lines.push('If you are NOT, ask the user for the absolute path before doing');
-        lines.push('anything else. Do not guess. Do not create folders outside it.');
+        lines.push('STEP 1 — Where are you?');
+        if (answers.startKind === 'existing') {
+          lines.push('You should be at the root of the user\'s projects folder, OR');
+          lines.push('already inside the existing project folder. If you can\'t tell,');
+          lines.push('ASK the user for the absolute path of the project folder.');
+        } else {
+          lines.push('You should be at the root of the user\'s projects folder.');
+          lines.push('If you are NOT, ASK the user for the absolute path before');
+          lines.push('doing anything else. Do not guess. Do not create folders');
+          lines.push('outside the user\'s projects directory.');
+        }
         lines.push('');
-        lines.push('STEP 2 — Create the project folder.');
-        lines.push('Create ./' + name + '/ if it does not exist, cd into it.');
-        lines.push('Run `git init` if it is not already a git repo.');
+        if (answers.startKind === 'existing') {
+          lines.push('STEP 2 — Locate the existing project folder.');
+          lines.push('The user already has a folder on disk for this project.');
+          lines.push('If you are already INSIDE that folder, stay here.');
+          lines.push('Otherwise ASK the user for the absolute path and cd into it.');
+          lines.push('DO NOT create a new folder. DO NOT touch files outside it.');
+          lines.push('Run `git init` if it is not already a git repo (recommended).');
+        } else {
+          lines.push('STEP 2 — Create the project folder.');
+          lines.push('Create ./' + name + '/ if it does not exist, cd into it.');
+          lines.push('Run `git init` if it is not already a git repo.');
+        }
         lines.push('');
         lines.push('STEP 3 — Apply the MeshKore standard (§2).');
         lines.push('Create the .meshkore/ tree. Start cluster.yaml from the template:');
@@ -4514,7 +4532,10 @@ python3 .meshkore/scripts/daemon.py</pre>
       );
 
       // ── State ─────────────────────────────────────────────────────────
-      let step = stopped.length > 0 ? 'START' : 'NEW_NAME';
+      // Always show START — the user picks between 3 distinct intents
+      // (revive a known project, add an existing folder, brand new).
+      // If no stopped projects, START shows just 2 boxes (existing | new).
+      let step = 'START';
       const history = [];
 
       await mcModal({
@@ -4530,23 +4551,39 @@ python3 .meshkore/scripts/daemon.py</pre>
 
           function renderStep(s) {
             switch (s) {
-              case 'START':
-                return ''
-                  + '<h3 class="wiz-h">What do you want to do?</h3>'
-                  + '<button type="button" class="wiz-choice" data-go="REVIVE">'
+              case 'START': {
+                // Build the boxes for this screen. Up to 3:
+                //   1. Revive a known project   (only if stopped > 0)
+                //   2. Add an existing folder   (always)
+                //   3. Brand-new project        (always)
+                let html = '<h3 class="wiz-h">What do you want to do?</h3>';
+                if (stopped.length > 0) {
+                  html += ''
+                    + '<button type="button" class="wiz-choice" data-go="REVIVE">'
+                    +   '<div class="wiz-choice-body">'
+                    +     '<div class="wiz-choice-title">Connect a project I had before</div>'
+                    +     '<div class="wiz-choice-sub">' + stopped.length + ' on record · daemon offline</div>'
+                    +   '</div>'
+                    +   '<span class="wiz-choice-arrow">→</span>'
+                    + '</button>';
+                }
+                html += ''
+                  + '<button type="button" class="wiz-choice" data-answer-startkind="existing">'
                   +   '<div class="wiz-choice-body">'
-                  +     '<div class="wiz-choice-title">Connect a project I had before</div>'
-                  +     '<div class="wiz-choice-sub">' + stopped.length + ' on record · daemon offline</div>'
+                  +     '<div class="wiz-choice-title">Add an existing folder</div>'
+                  +     '<div class="wiz-choice-sub">I already have a folder with code on disk — no <span style="font-family:JetBrains Mono,monospace;color:#6ee7b7;">.meshkore/</span> yet</div>'
                   +   '</div>'
                   +   '<span class="wiz-choice-arrow">→</span>'
                   + '</button>'
-                  + '<button type="button" class="wiz-choice" data-go="NEW_NAME">'
+                  + '<button type="button" class="wiz-choice" data-answer-startkind="new">'
                   +   '<div class="wiz-choice-body">'
-                  +     '<div class="wiz-choice-title">Create a new project</div>'
-                  +     '<div class="wiz-choice-sub">Set up fresh — answer a few questions</div>'
+                  +     '<div class="wiz-choice-title">Start a brand-new project</div>'
+                  +     '<div class="wiz-choice-sub">Empty — we create the folder + scaffold everything</div>'
                   +   '</div>'
                   +   '<span class="wiz-choice-arrow">→</span>'
                   + '</button>';
+                return html;
+              }
 
               case 'REVIVE': {
                 const rows = stopped.map(s => {
@@ -4568,16 +4605,20 @@ python3 .meshkore/scripts/daemon.py</pre>
                   + rows;
               }
 
-              case 'NEW_NAME':
+              case 'NEW_NAME': {
+                const subtitle = answers.startKind === 'existing'
+                  ? 'This becomes the cluster id (used by the daemon and the mesh). It can match the folder name or be anything else. Lowercase, hyphens, no spaces.'
+                  : 'This becomes the folder name AND the cluster id. Lowercase, hyphens, no spaces.';
                 return ''
                   + '<h3 class="wiz-h">What\'s the project called?</h3>'
-                  + '<p class="wiz-sub">This becomes the folder name AND the cluster id. Use lowercase, hyphens, no spaces.</p>'
+                  + '<p class="wiz-sub">' + subtitle + '</p>'
                   + '<div class="wiz-input-wrap">'
                   +   '<input type="text" id="wiz-name-input" class="wiz-input" placeholder="my-project" value="' + esc(answers.projectName) + '" autocomplete="off" spellcheck="false">'
                   + '</div>'
                   + '<div class="wiz-actions">'
                   +   '<button type="button" class="wiz-btn wiz-primary" id="wiz-name-continue" ' + (answers.projectName.trim() ? '' : 'disabled') + '>Continue →</button>'
                   + '</div>';
+              }
 
               case 'NEW_DEVICES':
                 return ''
@@ -4647,6 +4688,9 @@ python3 .meshkore/scripts/daemon.py</pre>
               b.onclick = () => go(b.dataset.go);
             });
 
+            root.querySelectorAll('[data-answer-startkind]').forEach(b => {
+              b.onclick = () => { answers.startKind = b.dataset.answerStartkind; go('NEW_NAME'); };
+            });
             root.querySelectorAll('[data-answer-devices]').forEach(b => {
               b.onclick = () => { answers.devices = b.dataset.answerDevices; go('NEW_DATA'); };
             });
