@@ -3174,16 +3174,19 @@ python3 .meshkore/scripts/daemon.py</pre>
        experience stays inside the Architect. -->
   <div id="mc-modal" class="hidden fixed inset-0 z-50 bg-ink-950/80 backdrop-blur-md animate-fade-in flex items-center justify-center p-4">
     <div class="max-w-2xl w-full bg-ink-900 border border-gray-800 rounded-2xl shadow-2xl animate-slide-up flex flex-col max-h-[90vh] overflow-hidden">
-      <header class="flex items-start gap-3 px-5 py-4 border-b border-gray-800 flex-shrink-0">
+      <!-- V73 — header alignment fixed (items-center so icon and title
+           share a baseline) + close button styled inline for guaranteed
+           visibility/clickability regardless of tailwind cdn quirks. -->
+      <header class="flex items-center gap-3 px-5 py-4 border-b border-gray-800 flex-shrink-0" style="position: relative; z-index: 2;">
         <div class="w-9 h-9 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0" id="mc-modal-icon">
           <svg class="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/></svg>
         </div>
-        <div class="flex-1 min-w-0">
-          <h2 class="text-base font-semibold tracking-tight" id="mc-modal-title">Title</h2>
-          <p class="text-[12px] text-gray-500 mt-0.5" id="mc-modal-subtitle"></p>
+        <div class="flex-1 min-w-0" style="display:flex; flex-direction:column; justify-content:center;">
+          <h2 class="text-base font-semibold tracking-tight" id="mc-modal-title" style="color:#f3f4f6; line-height:1.2;">Title</h2>
+          <p class="text-[12px] mt-0.5" id="mc-modal-subtitle" style="color:#9ca3af; line-height:1.4;"></p>
         </div>
-        <button id="mc-modal-close" class="text-gray-500 hover:text-gray-300 transition px-2 py-1 rounded hover:bg-gray-800/60" title="Close">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+        <button id="mc-modal-close" type="button" title="Close" style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; padding:0; border-radius:6px; background:rgba(75,85,99,0.18); border:1px solid rgba(75,85,99,0.40); color:#e5e7eb; cursor:pointer; transition:all 120ms; flex-shrink:0; pointer-events:auto; position:relative; z-index:10;">
+          <svg style="width:14px; height:14px; pointer-events:none;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </header>
       <div class="flex-1 overflow-y-auto px-5 py-5 text-[13px]" id="mc-modal-body"></div>
@@ -4671,7 +4674,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V72 open');
+      console.log('[Add Project] wizard V73 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -10290,7 +10293,7 @@ credentials.`;
               '<div style="display:flex; flex-direction:column; gap:14px; padding:8px 0;">'
               + '<div style="display:flex; align-items:center; gap:10px;">'
               +   '<span style="font-family:JetBrains Mono,monospace; font-size:11px; color:#6b7280; letter-spacing:0.10em; text-transform:uppercase;">build</span>'
-              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v72</span>'
+              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v73</span>'
               + '</div>'
               + '<div style="height:1px; background:rgba(75,85,99,0.25);"></div>'
               + '<div style="font-size:13px; color:#cbd5e1; line-height:1.6;">'
@@ -11017,30 +11020,54 @@ credentials.`;
         };
         const onKey = (e) => { if (e.key === 'Escape') cleanup(null); };
         $$('[data-mc-btn]', footerEl).forEach(b => b.addEventListener('click', () => cleanup(b.dataset.mcBtn), { once: true }));
-        // V69 — Robust close-button wiring. Was `.onclick = …` which
-        // can be wiped by any subsequent assignment. Now uses
-        // addEventListener so wiring is additive and predictable. Also
-        // bound on mousedown for redundancy and stopPropagation to
-        // protect against any document-level click delegate that might
-        // intercept.
+        // V73 — Bulletproof close wiring: combine three mechanisms.
+        // (1) direct addEventListener on the X button itself,
+        // (2) DELEGATED listener on the modal root that catches any
+        //     click landing inside #mc-modal-close even if the button's
+        //     own handler was wiped or its DOM was replaced,
+        // (3) click on the backdrop (clicks outside the card) also
+        //     close — standard modal UX.
         const closeBtn = $('mc-modal-close');
         if (closeBtn) {
-          // Clear any stale handler from previous opens.
           if (closeBtn._mcCloseHandler) {
             closeBtn.removeEventListener('click', closeBtn._mcCloseHandler);
           }
           const handler = (e) => {
-            console.log('[mcModal] close button clicked');
+            console.log('[mcModal] X clicked (direct)');
             try { e.stopPropagation(); e.preventDefault(); } catch {}
             cleanup(null);
           };
           closeBtn._mcCloseHandler = handler;
           closeBtn.addEventListener('click', handler);
-          // Inline pointer-events to defeat any inherited none.
           closeBtn.style.pointerEvents = 'auto';
         } else {
           console.warn('[mcModal] mc-modal-close element not found!');
         }
+        // Delegated listener on the modal root — catches X clicks that
+        // somehow miss the direct handler (e.g., target was the inner
+        // SVG, or the button DOM got replaced by a re-render).
+        if (root._mcRootDelegate) {
+          root.removeEventListener('click', root._mcRootDelegate);
+        }
+        const rootDelegate = (e) => {
+          const t = e.target;
+          if (!t || !t.closest) return;
+          // X click inside the close button (or its SVG child)
+          if (t.closest('#mc-modal-close')) {
+            console.log('[mcModal] X clicked (delegated)');
+            try { e.stopPropagation(); e.preventDefault(); } catch {}
+            cleanup(null);
+            return;
+          }
+          // Backdrop click — only when target IS the root itself
+          // (clicking the card or its descendants is NOT a backdrop click).
+          if (t === root) {
+            console.log('[mcModal] backdrop clicked');
+            cleanup(null);
+          }
+        };
+        root._mcRootDelegate = rootDelegate;
+        root.addEventListener('click', rootDelegate);
         document.addEventListener('keydown', onKey);
         if (typeof opts.onMount === 'function') {
           // give DOM a tick to paint, then fire onMount with the body el
