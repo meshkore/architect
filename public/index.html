@@ -542,7 +542,20 @@
     }
     .projects-rail-scan-indicator .scan-label { flex: 1; }
     .projects-rail-scan-indicator .scan-stop {
-      font-size: 9.5px; color: rgba(110,231,183,0.65);
+      font-size: 10px;
+      color: #fca5a5;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: rgba(239,68,68,0.10);
+      border: 1px solid rgba(239,68,68,0.30);
+    }
+    .projects-rail-scan-indicator:hover .scan-stop {
+      color: #fff;
+      background: rgba(239,68,68,0.35);
+      border-color: rgba(239,68,68,0.60);
     }
     @keyframes scan-pulse {
       0%, 100% { opacity: 0.35; transform: scale(0.85); }
@@ -2656,10 +2669,10 @@ python3 .meshkore/scripts/daemon.py</pre>
         <!-- V62 — Scanning indicator. Hidden by default. The wizard's
              "Scan for daemon" button activates it; operator can stop it
              by clicking the indicator itself. -->
-        <button type="button" id="projects-rail-scan" class="projects-rail-scan-indicator" aria-label="Scanning for new daemons — click to stop">
+        <button type="button" id="projects-rail-scan" class="projects-rail-scan-indicator" aria-label="Stop scanning for new daemons">
           <span class="scan-dot" aria-hidden="true"></span>
           <span class="scan-label">scanning…</span>
-          <span class="scan-stop" aria-hidden="true">click to stop</span>
+          <span class="scan-stop" aria-hidden="true">stop</span>
         </button>
         <!-- V63 — Build version moved out of the rail (was pushing the
              rescan / add-project buttons up and looked cramped). It now
@@ -4010,7 +4023,8 @@ python3 .meshkore/scripts/daemon.py</pre>
       };
     })();
 
-    async function discoverProjects() {
+    async function discoverProjects(opts) {
+      opts = opts || {};
       const params = new URLSearchParams(location.search);
       const explicitHost = params.get('host'); // legacy ?host= override
       const host = (explicitHost || '').match(/^(?:localhost|127\.\d+\.\d+\.\d+):(\d+)$/);
@@ -4019,9 +4033,12 @@ python3 .meshkore/scripts/daemon.py</pre>
       // Scan strategy: try the prioritised ports first (explicit > last
       // used > default 5570). Only if NONE of those respond do we widen
       // the scan to the rest of 5570-5589. This keeps the console clean
-      // in the common case (single daemon on the default port) — the
-      // browser logs every ERR_CONNECTION_REFUSED and we can't suppress
-      // those at the JS level, so the only fix is to attempt fewer ports.
+      // in the common case (single daemon on the default port).
+      // V76 — When `fullScan: true` is requested (e.g. from
+      // startScanForNew), ALWAYS probe both passes. Without this, the
+      // "scan for new daemon" loop never discovers daemons on ports
+      // other than the active one — observed when ikamiro came up on
+      // 5572 but the architect was bound to MeshKore Core on 5570.
       const lastPort = parseInt(localStorage.getItem('meshcore-last-port') || '0', 10);
       const priority = [];
       const seen = new Set();
@@ -4052,11 +4069,13 @@ python3 .meshkore/scripts/daemon.py</pre>
         } catch { return null; }
       };
 
-      // Pass 1: priority ports in parallel (1-3 ports max).
+      // Pass 1: priority ports.
       let results = (await Promise.all(priority.map(probe))).filter(Boolean);
-      // Pass 2: only if nothing responded, fan out to the full range.
-      if (!results.length) {
-        results = (await Promise.all(rest.map(probe))).filter(Boolean);
+      // Pass 2: widen to the full range if (a) nothing responded yet OR
+      // (b) caller explicitly asked for a full scan.
+      if (!results.length || opts.fullScan) {
+        const restResults = (await Promise.all(rest.map(probe))).filter(Boolean);
+        results = results.concat(restResults);
       }
       // V35 — Merge live probes with the KnownProjects store so the rail
       // also surfaces projects whose daemon is currently stopped. Each
@@ -4101,24 +4120,31 @@ python3 .meshkore/scripts/daemon.py</pre>
     // operator clicks them. Operator can stop the scan by clicking the
     // "scanning…" indicator below the projects rail's footer buttons.
     function startScanForNew() {
-      // Already scanning? Idempotent.
-      if (SCANNING_FOR_NEW) return;
+      if (SCANNING_FOR_NEW) {
+        console.log('[scanForNew] already running, skipping start');
+        return;
+      }
       SCANNING_FOR_NEW = true;
-      // Snapshot the cluster_ids we already know about so we can detect
-      // anything new that appears after this moment.
       SCAN_BASELINE = new Set(PROJECTS.map(projectId));
+      console.log('[scanForNew] START · baseline:', [...SCAN_BASELINE]);
       renderScanIndicator();
-      // Initial probe immediately, then on interval.
+      // V76 — Pass `fullScan: true` to discoverProjects so the probe
+      // covers the WHOLE port range every tick, not just the active
+      // priority port. Without this the scan never sees daemons on
+      // ports other than the currently-bound one.
       const tick = async () => {
         if (!SCANNING_FOR_NEW) return;
-        try { await discoverProjects(); } catch (e) { console.warn('[scan] discover failed', e); }
-        // Anything currently in PROJECTS that wasn't in the baseline →
-        // mark as new. We never UNmark via timeout — only an explicit
-        // click clears the badge.
+        const before = PROJECTS.length;
+        try { await discoverProjects({ fullScan: true }); } catch (e) { console.warn('[scanForNew] discover failed', e); }
+        let newCount = 0;
         for (const p of PROJECTS) {
           const id = projectId(p);
-          if (!SCAN_BASELINE.has(id)) NEW_CLUSTER_IDS.add(id);
+          if (!SCAN_BASELINE.has(id)) {
+            if (!NEW_CLUSTER_IDS.has(id)) newCount++;
+            NEW_CLUSTER_IDS.add(id);
+          }
         }
+        console.log('[scanForNew] tick · projects:', PROJECTS.length, '(was ' + before + ') · new this tick:', newCount, '· NEW set:', [...NEW_CLUSTER_IDS]);
         renderProjectsRail();
       };
       tick();
@@ -4135,7 +4161,7 @@ python3 .meshkore/scripts/daemon.py</pre>
       if (!el) return;
       if (SCANNING_FOR_NEW) {
         el.classList.add('is-active');
-        el.setAttribute('title', 'Scanning ports 5570-5589 for new daemons · click to stop');
+        el.setAttribute('title', 'Stop scanning for new daemons');
       } else {
         el.classList.remove('is-active');
         el.setAttribute('title', '');
@@ -4674,7 +4700,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V75 open');
+      console.log('[Add Project] wizard V76 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -10310,7 +10336,7 @@ credentials.`;
               '<div style="display:flex; flex-direction:column; gap:14px; padding:8px 0;">'
               + '<div style="display:flex; align-items:center; gap:10px;">'
               +   '<span style="font-family:JetBrains Mono,monospace; font-size:11px; color:#6b7280; letter-spacing:0.10em; text-transform:uppercase;">build</span>'
-              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v75</span>'
+              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v76</span>'
               + '</div>'
               + '<div style="height:1px; background:rgba(75,85,99,0.25);"></div>'
               + '<div style="font-size:13px; color:#cbd5e1; line-height:1.6;">'
