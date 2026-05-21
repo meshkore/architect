@@ -67,9 +67,52 @@
       --shadow-bar:     var(--bar-shadow);
       --shadow-card:    0 1px 0 rgba(255,255,255,0.04) inset, 0 2px 6px rgba(0,0,0,0.50);
       --shadow-card-hov:0 1px 0 rgba(255,255,255,0.06) inset, 0 8px 22px rgba(0,0,0,0.65);
+
+      /* ─── V68 — Architect text + icon color standard ─────────────────
+         Five tiers. Use these tokens in new CSS instead of raw hex.
+         Tailwind's `text-gray-*` classes used inline throughout the
+         page are remapped below (see overrides) so the existing markup
+         picks up the new scale automatically.
+
+         Tier              | hex      | when to use
+         ─────────────────|──────────|─────────────────────────────────
+         --text-primary    | #f3f4f6  | section headings, project name,
+                                       primary chrome (titles)
+         --text-strong     | #e5e7eb  | emphasised body, hover targets,
+                                       active labels, default body color
+         --text-body       | #d1d5db  | secondary body (most paragraphs,
+                                       nav labels, menu items)
+         --text-muted      | #9ca3af  | meta info, status pills, counts,
+                                       secondary controls
+         --text-faint      | #6b7280  | low-tier captions, truly dimmed
+                                       (use sparingly — it's the floor)
+
+         Icons inherit from the text color of their container by default
+         (stroke="currentColor"). Use --icon-default for explicit
+         brightness on standalone icon buttons. */
+      --text-primary: #f3f4f6;
+      --text-strong:  #e5e7eb;
+      --text-body:    #d1d5db;
+      --text-muted:   #9ca3af;
+      --text-faint:   #6b7280;
+      --icon-default: #d1d5db;
+      --icon-muted:   #9ca3af;
     }
-    html, body { background: var(--bg-canvas); color: #e5e7eb; }
+    html, body { background: var(--bg-canvas); color: var(--text-strong); }
     body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+
+    /* V68 — Remap Tailwind's dim gray text classes used throughout the
+       architect's inline markup. The Tailwind defaults are calibrated
+       for white backgrounds — on our near-black dark mode many become
+       invisible-grey. Shift each one up one step toward the user. */
+    .text-gray-500 { color: var(--text-muted) !important; } /* was #6b7280 → #9ca3af */
+    .text-gray-600 { color: var(--text-faint)  !important; } /* was #4b5563 → #6b7280 */
+    .text-gray-700 { color: var(--text-faint)  !important; } /* was #374151 → #6b7280 */
+    /* gray-400 is already #9ca3af — leave Tailwind default in place. */
+    /* gray-300 / gray-200 / gray-100 are already legible — no change. */
+    .hover\:text-gray-200:hover { color: var(--text-strong) !important; }
+    .hover\:text-gray-100:hover { color: var(--text-primary) !important; }
+    .hover\:text-gray-300:hover { color: var(--text-body) !important; }
     /* V25 — keep the subtle vignette but cooler so the floating panels
        read clearly against a slightly varied canvas. */
     body::before {
@@ -4628,7 +4671,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V67 open');
+      console.log('[Add Project] wizard V68 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -10123,7 +10166,7 @@ credentials.`;
               '<div style="display:flex; flex-direction:column; gap:14px; padding:8px 0;">'
               + '<div style="display:flex; align-items:center; gap:10px;">'
               +   '<span style="font-family:JetBrains Mono,monospace; font-size:11px; color:#6b7280; letter-spacing:0.10em; text-transform:uppercase;">build</span>'
-              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v67</span>'
+              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v68</span>'
               + '</div>'
               + '<div style="height:1px; background:rgba(75,85,99,0.25);"></div>'
               + '<div style="font-size:13px; color:#cbd5e1; line-height:1.6;">'
