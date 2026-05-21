@@ -2478,7 +2478,7 @@ python3 .meshkore/scripts/daemon.py</pre>
         <!-- Build version badge — bumped on every architect deploy so
              the operator can verify visually that the latest code is
              being served (no more guessing about caches). -->
-        <div id="architect-build-version" title="Architect build version (visible to confirm cache freshness)" style="margin-top:8px; padding:6px 8px; font-family:JetBrains Mono,monospace; font-size:10px; color:#6b7280; text-align:center; letter-spacing:0.08em; border-top:1px solid rgba(75,85,99,0.20);">build v59</div>
+        <div id="architect-build-version" title="Architect build version (visible to confirm cache freshness)" style="margin-top:8px; padding:6px 8px; font-family:JetBrains Mono,monospace; font-size:10px; color:#6b7280; text-align:center; letter-spacing:0.08em; border-top:1px solid rgba(75,85,99,0.20);">build v60</div>
       </div>
     </aside>
 
@@ -4416,7 +4416,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V59 open');
+      console.log('[Add Project] wizard V60 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -4521,6 +4521,13 @@ python3 .meshkore/scripts/daemon.py</pre>
       let step = 'START';
       const history = [];
 
+      // V60 — capture the mc-modal-footer element's original inline display
+      // BEFORE the wizard runs, so we can restore it after the wizard closes.
+      // Otherwise the next consumer of mcModal (mcConfirm, mcAlert, etc.)
+      // would inherit our `display: none` and lose their footer buttons.
+      const footEl = document.getElementById('mc-modal-footer');
+      const footerOriginalDisplay = footEl ? footEl.style.display : '';
+
       await mcModal({
         title: 'Add a project',
         subtitle: '',
@@ -4529,26 +4536,6 @@ python3 .meshkore/scripts/daemon.py</pre>
         buttons: [],
         onMount: (body, close) => {
           const root = body.querySelector('#wiz-root');
-          // mcModal renders the footer at #mc-modal-footer. We hijack it.
-          const footEl = document.getElementById('mc-modal-footer');
-          // V56 — force inline styles so the footer always shows. CDN
-          // tailwind may not generate `.flex-shrink-0` for this element,
-          // which collapses an empty footer to 0 height and hides our
-          // injected nav buttons. Belt and braces.
-          if (footEl) {
-            Object.assign(footEl.style, {
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '10px',
-              padding: '14px 20px',
-              borderTop: '1px solid rgba(75,85,99,0.40)',
-              flexShrink: '0',
-              minHeight: '64px',
-              background: 'rgba(2,4,12,0.40)',
-            });
-          }
-          console.log('[Add Project wizard V57] footEl present?', !!footEl);
 
           function go(next) { history.push(step); step = next; render(); }
           function back()   { if (history.length) { step = history.pop(); render(); } }
@@ -4889,6 +4876,10 @@ python3 .meshkore/scripts/daemon.py</pre>
           render();
         },
       });
+
+      // V60 — restore the mc-modal-footer's display so the NEXT modal
+      // (mcConfirm / mcAlert / mcPromptText, etc.) gets its footer back.
+      if (footEl) footEl.style.display = footerOriginalDisplay;
     }
     async function tryDaemon() {
       await discoverProjects();
