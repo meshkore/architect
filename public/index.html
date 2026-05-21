@@ -4671,7 +4671,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V70 open');
+      console.log('[Add Project] wizard V71 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -4747,24 +4747,71 @@ python3 .meshkore/scripts/daemon.py</pre>
         }
         L.push("");
 
-        // STEP 2 — scaffold tree
-        L.push("STEP 2 — Scaffold the .meshkore/ folder tree.");
+        // STEP 2 — scaffold tree (per MeshKore standard v6)
+        L.push("STEP 2 — Scaffold the .meshkore/ folder tree per standard v6.");
         L.push("  mkdir -p .meshkore/public");
         L.push("  mkdir -p .meshkore/scripts");
         L.push("  mkdir -p .meshkore/modules/general/tasks");
-        L.push("  printf '1' > .meshkore/STANDARD_VERSION");
+        L.push("  mkdir -p .meshkore/modules/general/log");
+        L.push("  mkdir -p .meshkore/docs");
+        L.push("  mkdir -p .meshkore/log");
+        L.push("  mkdir -p .meshkore/timeline");
+        L.push("  mkdir -p .meshkore/credentials  # mode 0600, gitignored");
+        L.push("  chmod 700 .meshkore/credentials || true");
+        L.push("  printf '6' > .meshkore/STANDARD_VERSION");
         L.push("");
 
-        // STEP 3 — cluster.yaml
-        L.push("STEP 3 — Write .meshkore/public/cluster.yaml with this content:");
+        // STEP 2b — .gitignore contract (the standard's two-line floor)
+        L.push("STEP 2b — Write .gitignore at the repo root (or APPEND if it");
+        L.push("exists already). This is the standard's two-line contract:");
+        L.push("only .meshkore/public/ reaches git; everything else stays local.");
         L.push("  ─────────────────────────────────────────────────");
-        L.push("  cluster_id: " + name);
-        L.push("  cluster_name: \"" + name + "\"");
-        L.push("  cluster_description: # ask me for one sentence");
+        L.push("  .meshkore/*");
+        L.push("  !.meshkore/public/");
+        L.push("  ─────────────────────────────────────────────────");
+        L.push("");
+
+        // STEP 2c — governance pointer (per standard's R5 link-don't-copy)
+        L.push("STEP 2c — Write .meshkore/docs/governance.md as a thin pointer");
+        L.push("to the canonical standard (R5: link, don't copy):");
+        L.push("  ─────────────────────────────────────────────────");
+        L.push("  # Governance");
+        L.push("  Read https://meshkore.com/standard before any work in this");
+        L.push("  repo. R1-R6 there are binding. Path conventions and");
+        L.push("  frontmatter schemas live there too. Do not duplicate the");
+        L.push("  standard's text here.");
+        L.push("  ─────────────────────────────────────────────────");
+        L.push("");
+
+        // STEP 2d — public/README.md (how to join — committed)
+        L.push("STEP 2d — Write .meshkore/public/README.md (committed; how");
+        L.push("to join this cluster):");
+        L.push("  ─────────────────────────────────────────────────");
+        L.push("  # " + name);
+        L.push("  This folder is a MeshKore cluster. To join: clone the repo,");
+        L.push("  download the daemon from");
+        L.push("  https://meshkore.com/reference/cluster/scripts/daemon.py");
+        L.push("  into .meshkore/scripts/, run `python3 .meshkore/scripts/daemon.py`,");
+        L.push("  then open https://architect.meshkore.com.");
+        L.push("  ─────────────────────────────────────────────────");
+        L.push("");
+
+        // STEP 3 — cluster.yaml (per standard v6 §3 cluster_yaml schema)
+        L.push("STEP 3 — Write .meshkore/public/cluster.yaml with this content");
+        L.push("(matches the standard v6 cluster_yaml schema):");
+        L.push("  ─────────────────────────────────────────────────");
+        L.push("  version: 1                  # cluster.yaml schema version");
+        L.push("  id: " + name);
+        L.push("  type: dev                   # dev | comms | service | mixed");
+        L.push("  name: \"" + name + "\"");
+        L.push("  description: # ask me for one sentence");
+        L.push("  transport:");
+        L.push("    protocol: websocket");
+        L.push("    endpoint: ws://localhost:5570/events");
         L.push("  storage:");
         L.push("    mode: " + (isCloud ? "remote" : "local"));
         L.push("  modules:");
-        L.push("    - id: general");
+        L.push("    - id: general            # required: standard mandates a 'general' module");
         L.push("      kind: area");
         L.push("      description: \"Project-wide tasks\"");
         L.push("  ─────────────────────────────────────────────────");
@@ -4784,54 +4831,71 @@ python3 .meshkore/scripts/daemon.py</pre>
         L.push("");
 
         // STEP 5 — starter task
-        L.push("STEP 5 — Create a starter task so the project is not empty.");
+        L.push("STEP 5 — Create a starter task. Frontmatter MUST match the");
+        L.push("standard v6 task_frontmatter schema (id/title/status/priority/");
+        L.push("owner/category/created/updated all required).");
         L.push("Write .meshkore/modules/general/tasks/T1-hello.md:");
         L.push("  ─────────────────────────────────────────────────");
         L.push("  ---");
         L.push("  id: T1");
+        L.push("  title: \"T1 — first task\"");
         L.push("  status: next");
+        L.push("  priority: medium");
         L.push("  owner: me");
-        L.push("  category: general");
+        L.push("  category: general          # MUST match a module id from cluster.yaml");
+        L.push("  created: <today's date YYYY-MM-DD>");
+        L.push("  updated: <today's date YYYY-MM-DD>");
         L.push("  ---");
         L.push("  # T1 — first task");
-        L.push("  Hello. Replace this.");
+        L.push("  Hello. Replace this body when you have something real to track.");
         L.push("  ─────────────────────────────────────────────────");
         L.push("");
 
-        // STEP 6 — download daemon script
-        L.push("STEP 6 — Download the local daemon. It is a single Python");
+        // STEP 6 — download daemon script. THIS IS THE LAST AGENT STEP.
+        // Many agents refuse to spawn a long-running unaudited process,
+        // so the wizard shows a separate "you run this in your terminal"
+        // command below the agent prompt. The operator runs the daemon
+        // themselves — no agent friction, no security alarm.
+        L.push("STEP 6 (final) — Download the local daemon. Single Python");
         L.push("file (~600 lines, stdlib only — no pip install needed):");
         L.push("  curl -fsSL https://meshkore.com/reference/cluster/scripts/daemon.py \\");
         L.push("    -o .meshkore/scripts/daemon.py");
         L.push("");
-
-        // STEP 7 — start daemon
-        L.push("STEP 7 — Start the daemon. Leave it running.");
-        L.push("  python3 .meshkore/scripts/daemon.py");
-        L.push("");
-        L.push("It will print something like:");
-        L.push("  meshkore daemon listening on http://localhost:55xx");
-        L.push("");
-        L.push("My architect at " + ARCHITECT + " auto-detects the daemon");
-        L.push("on the next scan (a few seconds) and shows the project in");
-        L.push("the rail. Nothing else is required from you.");
+        L.push("That's it from you. Tell me when STEP 1-6 are done.");
+        L.push("I'll start the daemon myself from a terminal (no need for");
+        L.push("you to run a long-lived downloaded script). My architect");
+        L.push("at " + ARCHITECT + " auto-detects the daemon once it's up.");
 
         // Optional final notes
         if (isCloud || isMulti) {
           L.push("");
-          L.push("LATER (after the daemon is running):");
+          L.push("LATER (after I start the daemon):");
           if (isCloud) {
             L.push("  · Cloud sync — I'll sign up at https://cluster.meshkore.com");
-            L.push("    and paste the tenant token into cluster.yaml. You don't");
-            L.push("    need to do anything for this now.");
+            L.push("    and paste the tenant token into cluster.yaml.");
           }
           if (isMulti) {
-            L.push("  · Multi-device admission — separate device-pairing flow");
-            L.push("    once the daemon is up; not part of this setup.");
+            L.push("  · Multi-device admission — separate device-pairing flow.");
           }
         }
 
         return L.join("\n");
+      }
+
+      // V71 — Terminal command for the user to run themselves after the
+      // agent finishes the scaffolding. Bypasses the agent's reluctance
+      // to start a long-running downloaded script.
+      function genTerminalCommand() {
+        const name = (answers.projectName || '').trim() || 'my-project';
+        const path = (answers.path || '').trim();
+        const isExisting = answers.startKind === 'existing';
+        let folder;
+        if (isExisting) {
+          folder = path || '<project-folder>';
+        } else {
+          folder = path ? (path.replace(/\/$/, '') + '/' + name) : '<parent>/' + name;
+        }
+        return 'cd ' + folder + ' && python3 .meshkore/scripts/daemon.py';
       }
 
       // ── Styles ────────────────────────────────────────────────────────
@@ -5042,12 +5106,19 @@ python3 .meshkore/scripts/daemon.py</pre>
 
               case 'NEW_PROMPT':
                 return ''
-                  + '<h3 class="wiz-h">Paste this in your coding agent</h3>'
-                  + '<p class="wiz-sub">Open <strong>Claude Code</strong> / <strong>Cursor</strong> / <strong>Windsurf</strong> at the root of your projects folder, paste, hit enter.</p>'
+                  + '<h3 class="wiz-h">Two copies, two actions</h3>'
+                  + '<p class="wiz-sub">Block 1 goes to your AI agent (it scaffolds the project). Block 2 you run in a terminal yourself — agents typically refuse to start downloaded scripts, so this is the one piece you do.</p>'
+                  + '<p class="wiz-sub" style="margin-top:10px; color: #d1d5db;"><strong style="color:#f3f4f6;">1. Paste in your coding agent</strong> (Claude Code / Cursor / Windsurf, at the root of your projects folder):</p>'
                   + '<div class="wiz-prompt-box">'
                   +   '<button type="button" class="wiz-copy" data-copy-target="wiz-prompt">copy</button>'
                   +   '<span id="wiz-prompt">' + esc(genPrompt()) + '</span>'
-                  + '</div>';
+                  + '</div>'
+                  + '<p class="wiz-sub" style="margin-top:18px; color: #d1d5db;"><strong style="color:#f3f4f6;">2. When the agent finishes, paste this in a terminal</strong> to start the daemon yourself:</p>'
+                  + '<div class="wiz-prompt-box" style="max-height: 80px;">'
+                  +   '<button type="button" class="wiz-copy" data-copy-target="wiz-terminal">copy</button>'
+                  +   '<span id="wiz-terminal">' + esc(genTerminalCommand()) + '</span>'
+                  + '</div>'
+                  + '<p class="wiz-sub" style="margin-top:10px; font-size:11.5px;">The daemon prints its port (5570-5589). Then click <strong>Scan for daemon →</strong> below — the architect picks it up.</p>';
             }
             return '<p class="wiz-sub">Unknown step.</p>';
           }
@@ -10291,7 +10362,7 @@ credentials.`;
               '<div style="display:flex; flex-direction:column; gap:14px; padding:8px 0;">'
               + '<div style="display:flex; align-items:center; gap:10px;">'
               +   '<span style="font-family:JetBrains Mono,monospace; font-size:11px; color:#6b7280; letter-spacing:0.10em; text-transform:uppercase;">build</span>'
-              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v70</span>'
+              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v71</span>'
               + '</div>'
               + '<div style="height:1px; background:rgba(75,85,99,0.25);"></div>'
               + '<div style="font-size:13px; color:#cbd5e1; line-height:1.6;">'
