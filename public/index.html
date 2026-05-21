@@ -46,16 +46,17 @@
       /* V25 — three floating panels on a slightly lifted canvas. The
          canvas is the "desk surface", panels are objects that sit on it.
          Header sits above all of them with the strongest relief.
-         Brand alignment with meshkore.com: same emerald + cool navy. */
-      --bg-canvas:      #263650;          /* the desk — slate-blue, panels float on this */
-      --bg-page:        #263650;          /* alias */
+         V63 — flattened to neutral dark (was slate-blue #263650 which
+         clashed with the rest of the dark mode). Brand emerald stays. */
+      --bg-canvas:      #0a0e15;          /* the desk — neutral dark, very slight blue, no slate */
+      --bg-page:        #0a0e15;          /* alias */
       --bg-panel:       #02040c;          /* column panels — near-pure black */
       --bg-panel-alt:   #02040c;          /* chat column */
       --bg-bar:         #010204;          /* header — pure black */
-      --bg-card:        #08111f;          /* cards inside panels — dark navy, clearly lighter than panel */
-      --bg-card-hover:  #0e1a32;
-      --bg-input:       #040b1a;
-      --border-col:     rgba(25,40,90,0.45);  /* subtle blue line between columns */
+      --bg-card:        #0c121c;          /* cards inside panels — slightly lighter than panel, neutral */
+      --bg-card-hover:  #131b28;
+      --bg-input:       #060a14;
+      --border-col:     rgba(75,85,99,0.30);  /* subtle neutral line between columns (was blue-tinted) */
       --border-col-glow: rgba(96,104,120,0.08);
       --border-bar:     rgba(75,85,99,0.35);
       --border-soft:    rgba(31,45,80,0.55);
@@ -2341,27 +2342,37 @@
 
   <!-- ────────────── Header ────────────── -->
   <header class="z-40 backdrop-blur-xl" style="background: var(--bg-bar); border-bottom: 1px solid var(--border-bar); box-shadow: var(--bar-shadow); position: relative;">
-    <!-- Header layout (redesigned 2026-05-20 — CRON-07):
-         LEFT  — logo + 6 primary nav zones (Architect | Bookmarks |
-                 Crons | Links | Protocols | Diary). "Architect" is the
-                 project dashboard (current modules + roadmap view).
-                 Clicking any other zone replaces modules+roadmap with
-                 the zone panel; the chat column stays and gets scoped
-                 to that zone's specialist agent (V42-V45 pattern).
-         RIGHT — compact project group: bounded title plate + daemon
-                 dot + cluster dot + Cluster cog. Half the width of the
-                 previous strip. -->
+    <!-- Header layout V63 (redesigned 2026-05-21):
+         LEFT  — project group (project title plate is the very first
+                 element, the "where am I" anchor). Then daemon + cluster
+                 status pills (tied to the project visually).
+         CENTER — 6 primary nav zones. Architect is project dashboard;
+                 the others are zone toggles (V42-V45 pattern).
+         RIGHT — Cluster settings cog (manage tab) + Architect logo
+                 (clickable for About + build version). -->
     <div class="h-12 flex items-center gap-2" style="padding-left: var(--panel-gap); padding-right: var(--panel-gap);">
 
-      <!-- LEFT: logo (icon-only) -->
-      <div class="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0" title="MeshKore Architect">
-        <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      <!-- LEFT: project title plate — wider (240px) so longer cluster
+           names breathe. THIS is the first element the operator sees. -->
+      <div id="project-bar-primary" class="flex items-center px-2.5 py-1 rounded-lg bg-gray-900/40 border border-gray-800/60 overflow-hidden flex-shrink-0" style="width:240px;"></div>
+
+      <!-- Daemon status pill -->
+      <div class="flex items-center gap-1 px-1.5 py-1 text-[10px] mono" id="daemon-pill" title="local daemon">
+        <span class="dot bg-gray-600" id="daemon-dot"></span>
+        <span class="text-gray-400" id="daemon-status">—</span>
       </div>
 
-      <!-- PRIMARY NAV: 6 zones. Architect is the project dashboard;
-           the other 5 are zone toggles (panel + chat-scoped agent).
-           Icon+label on lg+; icon-only on md. -->
-      <div id="header-zone-buttons" class="hidden md:flex items-center gap-0 flex-shrink-0 ml-1">
+      <!-- Cluster connection pill (hidden until joined to a channel) -->
+      <div id="cluster-conn-pill" class="hidden items-center gap-1 px-1.5 py-1 text-[10px] mono" title="cluster channel">
+        <span class="dot bg-gray-600" id="cluster-conn-dot"></span>
+        <span class="text-gray-400" id="cluster-conn-label"></span>
+      </div>
+
+      <!-- Vertical divider between project group and nav -->
+      <div style="width:1px; height:22px; background: rgba(75,85,99,0.30); margin: 0 6px;" aria-hidden="true"></div>
+
+      <!-- PRIMARY NAV: 6 zones. Icon+label on lg+; icon-only on md. -->
+      <div id="header-zone-buttons" class="hidden md:flex items-center gap-0 flex-shrink-0">
         <button data-zone="architect" class="zone-btn zone-btn-primary px-2 py-1.5 text-[12px] text-gray-400 hover:text-gray-100 transition flex items-center gap-1.5 rounded border border-transparent hover:border-gray-800/60" title="Architect — project dashboard (modules · roadmap · chat)">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h13"/></svg>
           <span class="hidden lg:inline">Architect</span>
@@ -2388,35 +2399,25 @@
         </button>
       </div>
 
-      <!-- SPACER — pushes the project group to the right edge -->
+      <!-- SPACER — pushes settings + logo to the right edge -->
       <div class="flex-1"></div>
 
       <!-- hidden legacy holders -->
       <button id="search-trigger" class="hidden"></button>
       <span id="generated-pill" class="hidden"></span>
 
-      <!-- PROJECT GROUP (right, compact). Title plate has fixed width so
-           the operator sees the bounded zone the project name has. -->
-      <div class="flex items-center gap-1 flex-shrink-0">
+      <!-- RIGHT: Cluster settings cog + Architect logo (click for About) -->
+      <div class="flex items-center gap-1.5 flex-shrink-0">
 
-        <!-- Project title plate — single line, truncated, fixed-width container. -->
-        <div id="project-bar-primary" class="flex items-center px-2.5 py-1 rounded-lg bg-gray-900/40 border border-gray-800/60 overflow-hidden" style="width:180px;"></div>
-
-        <!-- Compact daemon dot pill -->
-        <div class="flex items-center gap-1 px-1.5 py-1 text-[10px] mono" id="daemon-pill" title="local daemon">
-          <span class="dot bg-gray-600" id="daemon-dot"></span>
-          <span class="text-gray-400" id="daemon-status">—</span>
-        </div>
-
-        <!-- Compact cluster dot pill (hidden until daemon joins a cluster channel) -->
-        <div id="cluster-conn-pill" class="hidden items-center gap-1 px-1.5 py-1 text-[10px] mono" title="cluster channel">
-          <span class="dot bg-gray-600" id="cluster-conn-dot"></span>
-          <span class="text-gray-400" id="cluster-conn-label"></span>
-        </div>
-
-        <!-- Cluster settings — icon-only -->
-        <button data-tab="manage" class="tab-btn relative p-1.5 text-gray-500 hover:text-gray-200 transition rounded border border-transparent hover:border-gray-800/60" title="Cluster settings">
+        <!-- Cluster settings — icon-only. V63 — click again when active
+             closes the cluster zone (toggle behavior, see init script). -->
+        <button data-tab="manage" class="tab-btn relative p-1.5 text-gray-500 hover:text-gray-200 transition rounded border border-transparent hover:border-gray-800/60" title="Cluster settings (click again to close)">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1.08-1.5 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1.08 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        </button>
+
+        <!-- Architect logo — click opens About modal with build version -->
+        <button type="button" id="architect-logo" class="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 hover:bg-emerald-500/25 transition-colors cursor-pointer" title="MeshKore Architect — click for build info">
+          <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
         </button>
       </div>
     </div>
@@ -2564,10 +2565,11 @@ python3 .meshkore/scripts/daemon.py</pre>
           <span class="scan-label">scanning…</span>
           <span class="scan-stop" aria-hidden="true">click to stop</span>
         </button>
-        <!-- Build version badge — bumped on every architect deploy so
-             the operator can verify visually that the latest code is
-             being served (no more guessing about caches). -->
-        <div id="architect-build-version" title="Architect build version (visible to confirm cache freshness)" style="margin-top:8px; padding:6px 8px; font-family:JetBrains Mono,monospace; font-size:10px; color:#6b7280; text-align:center; letter-spacing:0.08em; border-top:1px solid rgba(75,85,99,0.20);">build v62</div>
+        <!-- V63 — Build version moved out of the rail (was pushing the
+             rescan / add-project buttons up and looked cramped). It now
+             lives in the Architect logo's About modal (click the green
+             logo top-right of the header). -->
+        <!-- (architect-build-version intentionally removed) -->
       </div>
     </aside>
 
@@ -4573,7 +4575,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V62 open');
+      console.log('[Add Project] wizard V63 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -10042,8 +10044,49 @@ credentials.`;
 
     // ─── Events / wiring ────────────────────────────────────────────────
     function attachEvents() {
-      $$('.tab-btn, .mb-tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+      // V63 — tab buttons: clicking the cluster gear when already on
+      // manage closes it (toggle), so the operator can dismiss the
+      // cluster sub-tabs row without having to navigate away manually.
+      $$('.tab-btn, .mb-tab').forEach(b => b.addEventListener('click', () => {
+        const target = b.dataset.tab;
+        if (target === 'manage' && activeTab === 'manage') {
+          // Toggle off: go back to roadmap (the default workspace tab)
+          switchTab('roadmap');
+        } else {
+          switchTab(target);
+        }
+      }));
       $$('.zone-btn').forEach(b => b.addEventListener('click', () => activateZone(b.dataset.zone)));
+
+      // V63 — Architect logo opens an About modal showing the build
+      // version. Replaces the build-version badge that used to live
+      // at the bottom of the projects rail.
+      $('architect-logo')?.addEventListener('click', () => {
+        try {
+          mcModal({
+            title: 'MeshKore Architect',
+            subtitle: 'Operator cockpit for MeshKore clusters',
+            body:
+              '<div style="display:flex; flex-direction:column; gap:14px; padding:8px 0;">'
+              + '<div style="display:flex; align-items:center; gap:10px;">'
+              +   '<span style="font-family:JetBrains Mono,monospace; font-size:11px; color:#6b7280; letter-spacing:0.10em; text-transform:uppercase;">build</span>'
+              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v63</span>'
+              + '</div>'
+              + '<div style="height:1px; background:rgba(75,85,99,0.25);"></div>'
+              + '<div style="font-size:13px; color:#cbd5e1; line-height:1.6;">'
+              +   'Web cockpit for any MeshKore cluster. Connects to your local Python daemon over <code style="font-family:JetBrains Mono,monospace; font-size:11.5px; color:#6ee7b7; background:#020617; padding:1px 5px; border-radius:3px;">localhost:5570</code> — your roadmap, docs and credentials stay on your machine.'
+              + '</div>'
+              + '<div style="display:flex; flex-direction:column; gap:6px; font-size:12.5px;">'
+              +   '<a href="https://meshkore.com/architect" target="_blank" style="color:#34d399; text-decoration:none;">→ meshkore.com/architect</a>'
+              +   '<a href="https://meshkore.com/standard" target="_blank" style="color:#34d399; text-decoration:none;">→ The MeshKore standard</a>'
+              +   '<a href="https://meshkore.com/docs" target="_blank" style="color:#34d399; text-decoration:none;">→ Documentation</a>'
+              +   '<a href="https://github.com/asimovia/meshkore" target="_blank" style="color:#34d399; text-decoration:none;">→ GitHub</a>'
+              + '</div>'
+              + '</div>',
+            buttons: [{ id: 'ok', label: 'Close', primary: true }],
+          });
+        } catch (e) { console.warn(e); }
+      });
 
       // Workspace tab strip. Roadmap is the project-level overview — clicking
       // it from anywhere also resets the scope to the project root, so the
