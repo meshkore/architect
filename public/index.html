@@ -4671,7 +4671,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V69 open');
+      console.log('[Add Project] wizard V70 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -5123,12 +5123,34 @@ python3 .meshkore/scripts/daemon.py</pre>
             const nameInput = root.querySelector('#wiz-name-input');
             if (nameInput) {
               const continueBtn = () => document.getElementById('wiz-foot-continue');
+              // V70 — sync NOT JUST the disabled attribute but ALSO the
+              // inline opacity / cursor / pointer-events. Before V70 the
+              // button was rendered with dim opacity inline if name was
+              // empty, but typing only toggled the `disabled` attribute
+              // — the inline opacity stayed dim, so visually the button
+              // never lit up even though it WAS clickable. Now we
+              // mutate the inline style on every keystroke so the
+              // user always sees the correct state.
               const sync = () => {
                 answers.projectName = nameInput.value;
                 const btn = continueBtn();
                 if (!btn) return;
-                if (answers.projectName.trim()) btn.removeAttribute('disabled');
-                else                            btn.setAttribute('disabled', '');
+                const ok = !!answers.projectName.trim();
+                if (ok) {
+                  btn.removeAttribute('disabled');
+                  btn.style.opacity      = '1';
+                  btn.style.cursor       = 'pointer';
+                  btn.style.pointerEvents = 'auto';
+                  btn.style.background   = '#34d399';      // primary green ON
+                  btn.style.borderColor  = '#34d399';
+                } else {
+                  btn.setAttribute('disabled', '');
+                  btn.style.opacity      = '0.45';
+                  btn.style.cursor       = 'not-allowed';
+                  btn.style.pointerEvents = 'none';       // hard-block clicks
+                  btn.style.background   = '#34d399';
+                  btn.style.borderColor  = '#34d399';
+                }
               };
               nameInput.oninput = sync;
               nameInput.onkeydown = (e) => {
@@ -5137,7 +5159,7 @@ python3 .meshkore/scripts/daemon.py</pre>
                   go(answers.startKind === 'existing' ? 'NEW_DEVICES' : 'NEW_PATH');
                 }
               };
-              setTimeout(() => nameInput.focus(), 0);
+              setTimeout(() => { nameInput.focus(); sync(); }, 0);
             }
             // PATH input
             const pathInput = root.querySelector('#wiz-path-input');
@@ -10269,7 +10291,7 @@ credentials.`;
               '<div style="display:flex; flex-direction:column; gap:14px; padding:8px 0;">'
               + '<div style="display:flex; align-items:center; gap:10px;">'
               +   '<span style="font-family:JetBrains Mono,monospace; font-size:11px; color:#6b7280; letter-spacing:0.10em; text-transform:uppercase;">build</span>'
-              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v69</span>'
+              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v70</span>'
               + '</div>'
               + '<div style="height:1px; background:rgba(75,85,99,0.25);"></div>'
               + '<div style="font-size:13px; color:#cbd5e1; line-height:1.6;">'
