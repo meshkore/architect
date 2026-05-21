@@ -2478,7 +2478,7 @@ python3 .meshkore/scripts/daemon.py</pre>
         <!-- Build version badge — bumped on every architect deploy so
              the operator can verify visually that the latest code is
              being served (no more guessing about caches). -->
-        <div id="architect-build-version" title="Architect build version (visible to confirm cache freshness)" style="margin-top:8px; padding:6px 8px; font-family:JetBrains Mono,monospace; font-size:10px; color:#6b7280; text-align:center; letter-spacing:0.08em; border-top:1px solid rgba(75,85,99,0.20);">build v60</div>
+        <div id="architect-build-version" title="Architect build version (visible to confirm cache freshness)" style="margin-top:8px; padding:6px 8px; font-family:JetBrains Mono,monospace; font-size:10px; color:#6b7280; text-align:center; letter-spacing:0.08em; border-top:1px solid rgba(75,85,99,0.20);">build v61</div>
       </div>
     </aside>
 
@@ -4416,7 +4416,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V60 open');
+      console.log('[Add Project] wizard V61 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -4521,12 +4521,13 @@ python3 .meshkore/scripts/daemon.py</pre>
       let step = 'START';
       const history = [];
 
-      // V60 — capture the mc-modal-footer element's original inline display
-      // BEFORE the wizard runs, so we can restore it after the wizard closes.
-      // Otherwise the next consumer of mcModal (mcConfirm, mcAlert, etc.)
-      // would inherit our `display: none` and lose their footer buttons.
+      // V60+V61 — Capture original styles of the elements we're going to
+      // mutate so we can restore them on close. Otherwise the next modal
+      // (mcConfirm/mcAlert/mcPromptText) inherits broken styles.
       const footEl = document.getElementById('mc-modal-footer');
-      const footerOriginalDisplay = footEl ? footEl.style.display : '';
+      const bodyEl = document.getElementById('mc-modal-body');
+      const footerOriginalCssText = footEl ? footEl.style.cssText : '';
+      const bodyOriginalCssText   = bodyEl ? bodyEl.style.cssText : '';
 
       await mcModal({
         title: 'Add a project',
@@ -4536,6 +4537,23 @@ python3 .meshkore/scripts/daemon.py</pre>
         buttons: [],
         onMount: (body, close) => {
           const root = body.querySelector('#wiz-root');
+          // V61 — Reconfigure the mc-modal-body as a flex column with a
+          // substantial min-height so the wizard never looks "squished".
+          // wiz-root becomes a flex item that fills the body. Inside
+          // wiz-root we put a step-area (flex:1, grows) + sticky-bar
+          // (auto height, position:sticky). Result:
+          //   · step content sits at the top with proper top padding
+          //   · sticky-bar lives at the BOTTOM of the body
+          //   · when content overflows, the bar stays pinned (sticky)
+          //   · when content is short, flex:1 on step-area absorbs the
+          //     empty space so there's no dead zone below the bar
+          Object.assign(body.style, {
+            padding: '0',
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: '360px',
+            overflowY: 'auto',
+          });
 
           function go(next) { history.push(step); step = next; render(); }
           function back()   { if (history.length) { step = history.pop(); render(); } }
@@ -4837,27 +4855,27 @@ python3 .meshkore/scripts/daemon.py</pre>
           }
 
           function render() {
-            // V59 — Render the nav bar INSIDE the body as a sticky-bottom
-            // strip. We tried using the mc-modal-footer 3 times and the
-            // <footer> kept collapsing to 0×0 height despite forced
-            // inline styles. Sticky inside the scroll container is
-            // bulletproof: it's part of the body's flow, gets visible
-            // by definition.
-            const footHtml = renderFooter(step);
-            const stickyBar = ''
-              + '<div id="wiz-sticky-bar" style="'
-              +   'position: sticky; bottom: 0; left: 0; right: 0;'
-              +   'margin: 24px -20px -20px -20px;'   // pull into body padding edges
-              +   'padding: 14px 20px;'
-              +   'display: flex; align-items: center; justify-content: space-between; gap: 10px;'
-              +   'background: #0b1220;'
-              +   'border-top: 1px solid rgba(75,85,99,0.40);'
-              +   'min-height: 64px;'
-              +   'z-index: 5;'
-              + '">' + footHtml + '</div>';
-            root.innerHTML = renderStep(step) + stickyBar;
-            // Hide the mc-modal-footer entirely so it doesn't leave an
-            // empty strip below.
+            // V61 — Internal layout: step-area (flex:1, padded) + sticky
+            // bar (auto, anchored to bottom of body's scroll viewport).
+            // Body is already a flex column (set in onMount). wiz-root
+            // becomes a flex child that fills it. Step-area's flex:1
+            // absorbs empty space when content is short → bar sits at
+            // bottom of card. When content overflows the body scrolls
+            // and sticky-bar stays pinned.
+            const STEP_AREA = 'padding: 28px 28px 20px 28px; flex: 1 1 auto; min-height: 0; box-sizing: border-box;';
+            const STICKY    = 'position: sticky; bottom: 0; left: 0; right: 0; padding: 16px 28px; display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #0b1220; border-top: 1px solid rgba(75,85,99,0.40); min-height: 68px; box-sizing: border-box; z-index: 5; flex-shrink: 0;';
+            root.innerHTML = ''
+              + '<div id="wiz-step-area" style="' + STEP_AREA + '">' + renderStep(step) + '</div>'
+              + '<div id="wiz-sticky-bar" style="' + STICKY    + '">' + renderFooter(step) + '</div>';
+            // Make wiz-root itself a flex column that fills mc-modal-body
+            Object.assign(root.style, {
+              display: 'flex',
+              flexDirection: 'column',
+              flex: '1 1 auto',
+              minHeight: '0',
+              width: '100%',
+            });
+            // Hide the empty mc-modal-footer (we render our bar inside body).
             if (footEl) footEl.style.display = 'none';
             requestAnimationFrame(() => {
               const bar = document.getElementById('wiz-sticky-bar');
@@ -4877,9 +4895,12 @@ python3 .meshkore/scripts/daemon.py</pre>
         },
       });
 
-      // V60 — restore the mc-modal-footer's display so the NEXT modal
-      // (mcConfirm / mcAlert / mcPromptText, etc.) gets its footer back.
-      if (footEl) footEl.style.display = footerOriginalDisplay;
+      // V60+V61 — Restore the styles we mutated on mc-modal-body and
+      // mc-modal-footer so the NEXT modal (mcConfirm / mcAlert / etc.)
+      // gets its original layout back. cssText is the simplest way to
+      // reset to whatever was there before (typically empty).
+      if (footEl) footEl.style.cssText = footerOriginalCssText;
+      if (bodyEl) bodyEl.style.cssText = bodyOriginalCssText;
     }
     async function tryDaemon() {
       await discoverProjects();
