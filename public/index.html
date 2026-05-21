@@ -200,14 +200,16 @@
     .projects-rail-btn {
       width: 22px; height: 22px;
       display: inline-flex; align-items: center; justify-content: center;
-      color: #4b5563;
+      /* V66 — brightened from #4b5563 (gray-600) so the << / >> chevrons
+         are legible on dim monitors. */
+      color: #9ca3af;
       background: transparent;
       border: none;
       border-radius: 4px; cursor: pointer;
       padding: 0;
-      transition: color 120ms;
+      transition: color 120ms, background 120ms;
     }
-    .projects-rail-btn:hover { color: #d1d5db; }
+    .projects-rail-btn:hover { color: #f3f4f6; background: rgba(75,85,99,0.20); }
     /* Toggle icon swap: collapse arrows in full, expand arrows in short. */
     .rail-icon-collapse, .rail-icon-expand { display: none; }
     .projects-rail[data-mode="full"]  .rail-icon-collapse { display: inline; }
@@ -373,12 +375,24 @@
       letter-spacing: 0.02em;
     }
     .projects-rail[data-mode="short"] .proj-row {
-      padding: 6px 4px;
+      padding: 8px 4px;
       gap: 0;
       justify-content: center;
+      min-height: 36px;
     }
     .projects-rail[data-mode="short"] .proj-row-name { display: none; }
-    .projects-rail[data-mode="short"] .proj-row-initials { display: inline-block; }
+    /* V66 — initials brighter + slightly larger in short mode so they
+       read clearly in the 56px-wide rail. The rail has plenty of room
+       for a chunkier pill. */
+    .projects-rail[data-mode="short"] .proj-row-initials {
+      display: inline-block;
+      font-size: 12px;
+      color: #d1d5db;
+      letter-spacing: 0.04em;
+    }
+    .projects-rail[data-mode="short"] .proj-row.active .proj-row-initials {
+      color: #f3f4f6;
+    }
 
     /* ── Hover-overlay action buttons. Right-aligned, fade in on
        row hover. Buttons sit ABOVE the row's content with z-index so
@@ -682,8 +696,9 @@
     .nav-col .nav-rail:hover,
     .center-col.collapsed .chat-rail:hover { color: #34d399; background: rgba(16,185,129,0.05); }
     .center-col.collapsed .chat-rail:hover { color: #34d399; background: rgba(16,185,129,0.05); }
-    .chat-collapse-btn { color: #6b7280; padding: 4px 6px; border-radius: 4px; cursor: pointer; background: transparent; border: 0; transition: opacity 140ms; }
-    .chat-collapse-btn:hover:not(:disabled) { color: #d1d5db; background: rgba(31,41,55,0.5); }
+    /* V66 — brightened from #6b7280 so the chevron is visible on dim screens. */
+    .chat-collapse-btn { color: #9ca3af; padding: 4px 6px; border-radius: 4px; cursor: pointer; background: transparent; border: 0; transition: color 140ms, background 140ms; }
+    .chat-collapse-btn:hover:not(:disabled) { color: #f3f4f6; background: rgba(75,85,99,0.20); }
     /* V30.11 — collapse buttons go disabled when their panel is not at
        the matching edge (positional CSS rules can't follow a panel into
        the middle slot). The operator drags the panel back to its edge
@@ -2621,8 +2636,8 @@ python3 .meshkore/scripts/daemon.py</pre>
             <span class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Modules</span>
             <span class="flex items-center gap-1.5">
               <span class="text-gray-700 mono text-[10px]" id="nav-modules-count">—</span>
-              <button id="nav-collapse" title="Collapse modules" class="text-gray-500 hover:text-emerald-400 px-1 py-0.5 rounded hover:bg-emerald-500/10">
-                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg>
+              <button id="nav-collapse" title="Collapse modules" class="text-gray-400 hover:text-emerald-400 px-1 py-0.5 rounded hover:bg-emerald-500/10" style="color:#9ca3af;">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path d="M15 5l-7 7 7 7"/></svg>
               </button>
             </span>
           </div>
@@ -4604,7 +4619,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V65 open');
+      console.log('[Add Project] wizard V66 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -10099,7 +10114,7 @@ credentials.`;
               '<div style="display:flex; flex-direction:column; gap:14px; padding:8px 0;">'
               + '<div style="display:flex; align-items:center; gap:10px;">'
               +   '<span style="font-family:JetBrains Mono,monospace; font-size:11px; color:#6b7280; letter-spacing:0.10em; text-transform:uppercase;">build</span>'
-              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v65</span>'
+              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v66</span>'
               + '</div>'
               + '<div style="height:1px; background:rgba(75,85,99,0.25);"></div>'
               + '<div style="font-size:13px; color:#cbd5e1; line-height:1.6;">'
