@@ -4412,7 +4412,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V55 open');
+      console.log('[Add Project] wizard V58 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -4504,12 +4504,12 @@ python3 .meshkore/scripts/daemon.py</pre>
         '.wiz-stopped-meta { font-size: 11px; color: #6b7280; margin-top: 2px; }' +
         '.wiz-stopped-port { font-family: JetBrains Mono,monospace; color: #93c5fd; }' +
         // Footer-area buttons (rendered inside mc-modal-footer)
-        '.wiz-foot-btn { padding: 9px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid transparent; font-family: inherit; transition: all 120ms; background: transparent; color: #cbd5e1; }' +
-        '.wiz-foot-btn:hover:not([disabled]) { background: rgba(75,85,99,0.20); color: #f3f4f6; }' +
+        '.wiz-foot-btn { padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid rgba(75,85,99,0.45); font-family: inherit; transition: all 120ms; background: rgba(11,18,32,0.7); color: #e5e7eb; }' +
+        '.wiz-foot-btn:hover:not([disabled]) { background: rgba(75,85,99,0.30); border-color: rgba(148,163,184,0.55); color: #f9fafb; }' +
         '.wiz-foot-btn.is-primary { background: #34d399; color: #02040c; border-color: #34d399; }' +
         '.wiz-foot-btn.is-primary:hover:not([disabled]) { background: #6ee7b7; border-color: #6ee7b7; }' +
         '.wiz-foot-btn[disabled] { opacity: 0.4; cursor: not-allowed; }' +
-        '.wiz-foot-step-tag { font-family: JetBrains Mono,monospace; font-size: 10.5px; color: #6b7280; letter-spacing: 0.08em; text-transform: uppercase; }' +
+        '.wiz-foot-step-tag { font-family: JetBrains Mono,monospace; font-size: 11px; color: #6b7280; letter-spacing: 0.10em; text-transform: uppercase; }' +
         '</style>'
       );
 
@@ -4527,6 +4527,24 @@ python3 .meshkore/scripts/daemon.py</pre>
           const root = body.querySelector('#wiz-root');
           // mcModal renders the footer at #mc-modal-footer. We hijack it.
           const footEl = document.getElementById('mc-modal-footer');
+          // V56 — force inline styles so the footer always shows. CDN
+          // tailwind may not generate `.flex-shrink-0` for this element,
+          // which collapses an empty footer to 0 height and hides our
+          // injected nav buttons. Belt and braces.
+          if (footEl) {
+            Object.assign(footEl.style, {
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '10px',
+              padding: '14px 20px',
+              borderTop: '1px solid rgba(75,85,99,0.40)',
+              flexShrink: '0',
+              minHeight: '64px',
+              background: 'rgba(2,4,12,0.40)',
+            });
+          }
+          console.log('[Add Project wizard V57] footEl present?', !!footEl);
 
           function go(next) { history.push(step); step = next; render(); }
           function back()   { if (history.length) { step = history.pop(); render(); } }
@@ -4669,27 +4687,37 @@ python3 .meshkore/scripts/daemon.py</pre>
 
           // ── Footer (navigation only) — depends on step ────────────────
           function renderFooter(s) {
-            // Step counter (best-effort UX nicety)
+            // V57 — inline styles on EVERY button. Tailwind CDN's
+            // preflight resets `button { padding:0; background:transparent; ... }`
+            // which can win over class styles depending on stylesheet
+            // order. Inline beats classes — guaranteed visible.
+            const BTN_BASE   = 'padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; line-height: 1.2; transition: all 120ms;';
+            const BTN_GHOST  = BTN_BASE + ' background: rgba(11,18,32,0.7); color: #e5e7eb; border: 1px solid rgba(75,85,99,0.45);';
+            const BTN_PRIM   = BTN_BASE + ' background: #34d399; color: #02040c; border: 1px solid #34d399;';
+            const STEP_TAG   = 'font-family: JetBrains Mono,monospace; font-size: 11px; color: #6b7280; letter-spacing: 0.10em; text-transform: uppercase;';
+
             const stepIdx = { START: 1, REVIVE: 2, NEW_NAME: 2, NEW_PATH: 3, NEW_DEVICES: 4, NEW_DATA: 5, NEW_PROMPT: 6 }[s];
-            const stepTag = stepIdx ? ('<span class="wiz-foot-step-tag">step ' + stepIdx + '</span>') : '<span></span>';
+            const stepLabel = stepIdx ? ('<span style="' + STEP_TAG + '">step ' + stepIdx + '</span>') : '<span></span>';
 
             // Left side: Back (if not first)
             const left = history.length > 0
-              ? '<button type="button" class="wiz-foot-btn" id="wiz-foot-back">← Back</button>'
-              : stepTag;
+              ? '<button type="button" id="wiz-foot-back" style="' + BTN_GHOST + '">← Back</button>'
+              : stepLabel;
 
             // Right side: depends on step
             let right = '<span></span>';
             if (s === 'NEW_NAME') {
-              right = '<button type="button" class="wiz-foot-btn is-primary" id="wiz-foot-continue"' + (answers.projectName.trim() ? '' : ' disabled') + '>Continue →</button>';
+              const dim = answers.projectName.trim() ? '' : ' opacity: 0.45; cursor: not-allowed;';
+              const dis = answers.projectName.trim() ? '' : ' disabled';
+              right = '<button type="button" id="wiz-foot-continue" style="' + BTN_PRIM + dim + '"' + dis + '>Continue →</button>';
             } else if (s === 'NEW_PATH') {
               right = ''
                 + '<div style="display:flex; gap:10px; align-items:center;">'
-                +   '<button type="button" class="wiz-foot-btn" id="wiz-foot-skip">Skip — let the agent ask</button>'
-                +   '<button type="button" class="wiz-foot-btn is-primary" id="wiz-foot-continue">Continue →</button>'
+                +   '<button type="button" id="wiz-foot-skip" style="' + BTN_GHOST + '">Skip — let the agent ask</button>'
+                +   '<button type="button" id="wiz-foot-continue" style="' + BTN_PRIM + '">Continue →</button>'
                 + '</div>';
             } else if (s === 'NEW_PROMPT') {
-              right = '<button type="button" class="wiz-foot-btn is-primary" id="wiz-foot-scan">Scan for daemon →</button>';
+              right = '<button type="button" id="wiz-foot-scan" style="' + BTN_PRIM + '">Scan for daemon →</button>';
             }
 
             return left + right;
@@ -4819,7 +4847,18 @@ python3 .meshkore/scripts/daemon.py</pre>
 
           function render() {
             root.innerHTML = renderStep(step);
-            if (footEl) footEl.innerHTML = renderFooter(step);
+            const footHtml = renderFooter(step);
+            if (footEl) footEl.innerHTML = footHtml;
+            requestAnimationFrame(() => {
+              if (!footEl) return;
+              const r = footEl.getBoundingClientRect();
+              const btn = footEl.querySelector('button');
+              const br = btn ? btn.getBoundingClientRect() : null;
+              console.log('[wizard V58]', step,
+                '· footer:', r.width.toFixed(0) + 'x' + r.height.toFixed(0), '@', r.top.toFixed(0),
+                '· buttons:', footEl.querySelectorAll('button').length,
+                '· btn1:', br ? (br.width.toFixed(0) + 'x' + br.height.toFixed(0)) : 'none');
+            });
             wireBody();
             wireFooter();
           }
@@ -10463,8 +10502,12 @@ credentials.`;
         backdropFilter: 'blur(6px)',
         padding: '1rem',
       });
-      // V49 — force inner card visibility too, since its tailwind colour
-      // classes (bg-ink-900) aren't in the cdn config either.
+      // V58 — Card uses CSS Grid for the header/body/footer layout.
+      // Flex column was flaky: with `flex-1` on body and `flex-shrink:0`
+      // forced on footer, on some renders the footer was being squeezed
+      // to 0 even with min-height set. Grid `auto 1fr auto` is
+      // deterministic: header at top, body fills middle, footer at
+      // bottom — period.
       const card = root.firstElementChild;
       if (card) {
         Object.assign(card.style, {
@@ -10475,13 +10518,22 @@ credentials.`;
           border: '1px solid rgba(75,85,99,0.40)',
           borderRadius: '1rem',
           boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)',
-          display: 'flex',
-          flexDirection: 'column',
+          display: 'grid',
+          gridTemplateRows: 'auto minmax(0, 1fr) auto',
           overflow: 'hidden',
           animation: 'none',
           opacity: '1',
           transform: 'none',
         });
+        // Also ensure the body element scrolls and can shrink — min-height:0
+        // on a grid child is required for overflow to work properly.
+        const bodyChild = card.querySelector('#mc-modal-body');
+        if (bodyChild) {
+          Object.assign(bodyChild.style, {
+            minHeight: '0',
+            overflowY: 'auto',
+          });
+        }
       }
       // V50 — fix: extensions/scripts can wrap #mc-modal in a div that
       // creates a containing block, so position:fixed gets anchored to
