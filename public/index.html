@@ -4674,7 +4674,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V73 open');
+      console.log('[Add Project] wizard V74 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -4735,14 +4735,23 @@ python3 .meshkore/scripts/daemon.py</pre>
 
         // STEP 1 — folder
         if (isExisting) {
-          L.push("1. Go to my existing folder. " +
-                 (path ? "cd " + path : "Ask me for the absolute path, then cd there.") +
-                 " Run `git init` if it isn't already a git repo.");
+          L.push("1. Go to my existing folder.");
+          if (path) {
+            L.push("     cd " + path);
+          } else {
+            L.push("     (ask me for the absolute path, then cd there)");
+          }
+          L.push("     git init   # only if not already a git repo");
         } else {
-          L.push("1. Create the project folder. " +
-                 (path ? "cd " + path + " && mkdir -p " + name + " && cd " + name
-                       : "Ask me for the parent path, then mkdir + cd into " + name + ".") +
-                 " Run `git init`.");
+          L.push("1. Create the project folder.");
+          if (path) {
+            L.push("     cd " + path);
+            L.push("     mkdir -p " + name);
+            L.push("     cd " + name);
+          } else {
+            L.push("     (ask me for the parent path, then mkdir + cd " + name + ")");
+          }
+          L.push("     git init");
         }
         L.push("");
 
@@ -4790,17 +4799,28 @@ python3 .meshkore/scripts/daemon.py</pre>
         L.push("   one-liner.");
         L.push("");
 
-        // STEP 7 — daemon download (the only network call)
+        // STEP 7 — daemon download (single named file, agents are fine)
         L.push("7. Download the local daemon (single Python stdlib file, ~600 lines —");
         L.push("   no pip install needed):");
         L.push("     curl -fsSL https://meshkore.com/reference/cluster/scripts/daemon.py \\");
         L.push("       -o .meshkore/scripts/daemon.py");
         L.push("");
 
-        L.push("Tell me when steps 1-7 are done. I'll start the daemon myself in a");
-        L.push("terminal — agents typically refuse to spawn long-running downloaded");
-        L.push("scripts, so that's the one piece I do. My architect at");
-        L.push("https://architect.meshkore.com auto-detects the daemon when it comes up.");
+        // STEP 8 — start daemon WITH FALLBACK INLINE
+        L.push("8. Start the daemon. Try this in the background:");
+        L.push("     python3 .meshkore/scripts/daemon.py");
+        L.push("   If your security policy prevents you from running a long-lived");
+        L.push("   downloaded script (most coding agents do refuse this — totally");
+        L.push("   fine), just print me the exact command to paste in my own");
+        L.push("   terminal, with the FULL absolute path, like this:");
+        L.push("");
+        L.push("     cd <absolute-folder-path> && python3 .meshkore/scripts/daemon.py");
+        L.push("");
+        L.push("   I'll run it myself. The daemon binds the first free port in");
+        L.push("   5570-5589 and prints \"listening on http://localhost:55xx\".");
+        L.push("");
+        L.push("My architect at https://architect.meshkore.com auto-detects the");
+        L.push("daemon once it's up. Nothing else needed from us today.");
 
         if (isCloud || isMulti) {
           L.push("");
@@ -4813,21 +4833,8 @@ python3 .meshkore/scripts/daemon.py</pre>
       }
 
 
-      // V71 — Terminal command for the user to run themselves after the
-      // agent finishes the scaffolding. Bypasses the agent's reluctance
-      // to start a long-running downloaded script.
-      function genTerminalCommand() {
-        const name = (answers.projectName || '').trim() || 'my-project';
-        const path = (answers.path || '').trim();
-        const isExisting = answers.startKind === 'existing';
-        let folder;
-        if (isExisting) {
-          folder = path || '<project-folder>';
-        } else {
-          folder = path ? (path.replace(/\/$/, '') + '/' + name) : '<parent>/' + name;
-        }
-        return 'cd ' + folder + ' && python3 .meshkore/scripts/daemon.py';
-      }
+      // V74 — genTerminalCommand removed. The fallback is now inline in
+      // genPrompt's step 8; the wizard's final screen shows ONE block.
 
       // ── Styles ────────────────────────────────────────────────────────
       const css = (
@@ -5037,19 +5044,13 @@ python3 .meshkore/scripts/daemon.py</pre>
 
               case 'NEW_PROMPT':
                 return ''
-                  + '<h3 class="wiz-h">Two copies, two actions</h3>'
-                  + '<p class="wiz-sub">Block 1 goes to your AI agent (it scaffolds the project). Block 2 you run in a terminal yourself — agents typically refuse to start downloaded scripts, so this is the one piece you do.</p>'
-                  + '<p class="wiz-sub" style="margin-top:10px; color: #d1d5db;"><strong style="color:#f3f4f6;">1. Paste in your coding agent</strong> (Claude Code / Cursor / Windsurf, at the root of your projects folder):</p>'
+                  + '<h3 class="wiz-h">Paste this in your coding agent</h3>'
+                  + '<p class="wiz-sub">Open <strong>Claude Code</strong>, <strong>Cursor</strong> or <strong>Windsurf</strong> at the root of your projects folder, paste, hit enter. The prompt itself handles the case where the agent can\'t start the daemon (it\'ll print the exact command for you to run in a terminal).</p>'
                   + '<div class="wiz-prompt-box">'
                   +   '<button type="button" class="wiz-copy" data-copy-target="wiz-prompt">copy</button>'
                   +   '<span id="wiz-prompt">' + esc(genPrompt()) + '</span>'
                   + '</div>'
-                  + '<p class="wiz-sub" style="margin-top:18px; color: #d1d5db;"><strong style="color:#f3f4f6;">2. When the agent finishes, paste this in a terminal</strong> to start the daemon yourself:</p>'
-                  + '<div class="wiz-prompt-box" style="max-height: 80px;">'
-                  +   '<button type="button" class="wiz-copy" data-copy-target="wiz-terminal">copy</button>'
-                  +   '<span id="wiz-terminal">' + esc(genTerminalCommand()) + '</span>'
-                  + '</div>'
-                  + '<p class="wiz-sub" style="margin-top:10px; font-size:11.5px;">The daemon prints its port (5570-5589). Then click <strong>Scan for daemon →</strong> below — the architect picks it up.</p>';
+                  + '<p class="wiz-sub" style="margin-top:10px; font-size:11.5px;">When the daemon prints its port (5570-5589), click <strong>Scan for daemon →</strong> below.</p>';
             }
             return '<p class="wiz-sub">Unknown step.</p>';
           }
@@ -10293,7 +10294,7 @@ credentials.`;
               '<div style="display:flex; flex-direction:column; gap:14px; padding:8px 0;">'
               + '<div style="display:flex; align-items:center; gap:10px;">'
               +   '<span style="font-family:JetBrains Mono,monospace; font-size:11px; color:#6b7280; letter-spacing:0.10em; text-transform:uppercase;">build</span>'
-              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v73</span>'
+              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v74</span>'
               + '</div>'
               + '<div style="height:1px; background:rgba(75,85,99,0.25);"></div>'
               + '<div style="font-size:13px; color:#cbd5e1; line-height:1.6;">'
