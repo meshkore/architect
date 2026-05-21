@@ -2342,37 +2342,27 @@
 
   <!-- ────────────── Header ────────────── -->
   <header class="z-40 backdrop-blur-xl" style="background: var(--bg-bar); border-bottom: 1px solid var(--border-bar); box-shadow: var(--bar-shadow); position: relative;">
-    <!-- Header layout V63 (redesigned 2026-05-21):
-         LEFT  — project group (project title plate is the very first
-                 element, the "where am I" anchor). Then daemon + cluster
-                 status pills (tied to the project visually).
-         CENTER — 6 primary nav zones. Architect is project dashboard;
-                 the others are zone toggles (V42-V45 pattern).
-         RIGHT — Cluster settings cog (manage tab) + Architect logo
-                 (clickable for About + build version). -->
+    <!-- Header layout V64 (operator brief 2026-05-21):
+         LEFT  — Architect logo + project title plate. Logo first
+                 (brand anchor), project name immediately after.
+         AFTER  — Project-scoped tabs (Architect zone, Bookmarks,
+                 Crons, Links, Protocols, Diary) + Config as a text
+                 label (was a separate gear cog on the right — but
+                 Config is per-project, so it groups with the tabs).
+         RIGHT — Communications status only: daemon pill + cluster
+                 connection pill. No actions, just signals. -->
     <div class="h-12 flex items-center gap-2" style="padding-left: var(--panel-gap); padding-right: var(--panel-gap);">
 
-      <!-- LEFT: project title plate — wider (240px) so longer cluster
-           names breathe. THIS is the first element the operator sees. -->
-      <div id="project-bar-primary" class="flex items-center px-2.5 py-1 rounded-lg bg-gray-900/40 border border-gray-800/60 overflow-hidden flex-shrink-0" style="width:240px;"></div>
+      <!-- LEFT: Architect logo — clickable, opens About + build version -->
+      <button type="button" id="architect-logo" class="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 hover:bg-emerald-500/25 transition-colors cursor-pointer" title="MeshKore Architect — click for build info">
+        <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      </button>
 
-      <!-- Daemon status pill -->
-      <div class="flex items-center gap-1 px-1.5 py-1 text-[10px] mono" id="daemon-pill" title="local daemon">
-        <span class="dot bg-gray-600" id="daemon-dot"></span>
-        <span class="text-gray-400" id="daemon-status">—</span>
-      </div>
+      <!-- Project title plate — 200px, fits comfortable cluster names -->
+      <div id="project-bar-primary" class="flex items-center px-2.5 py-1 rounded-lg bg-gray-900/40 border border-gray-800/60 overflow-hidden flex-shrink-0" style="width:200px;"></div>
 
-      <!-- Cluster connection pill (hidden until joined to a channel) -->
-      <div id="cluster-conn-pill" class="hidden items-center gap-1 px-1.5 py-1 text-[10px] mono" title="cluster channel">
-        <span class="dot bg-gray-600" id="cluster-conn-dot"></span>
-        <span class="text-gray-400" id="cluster-conn-label"></span>
-      </div>
-
-      <!-- Vertical divider between project group and nav -->
-      <div style="width:1px; height:22px; background: rgba(75,85,99,0.30); margin: 0 6px;" aria-hidden="true"></div>
-
-      <!-- PRIMARY NAV: 6 zones. Icon+label on lg+; icon-only on md. -->
-      <div id="header-zone-buttons" class="hidden md:flex items-center gap-0 flex-shrink-0">
+      <!-- PRIMARY NAV: 6 project zones + Config (text). All project-scoped. -->
+      <div id="header-zone-buttons" class="hidden md:flex items-center gap-0 flex-shrink-0 ml-1">
         <button data-zone="architect" class="zone-btn zone-btn-primary px-2 py-1.5 text-[12px] text-gray-400 hover:text-gray-100 transition flex items-center gap-1.5 rounded border border-transparent hover:border-gray-800/60" title="Architect — project dashboard (modules · roadmap · chat)">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h13"/></svg>
           <span class="hidden lg:inline">Architect</span>
@@ -2397,28 +2387,35 @@
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
           <span class="hidden lg:inline">Diary</span>
         </button>
+        <!-- V64 — Config as a text tab next to the other project zones
+             (it's per-project cluster settings, NOT global Architect
+             settings — so it belongs here, not isolated on the right). -->
+        <button data-tab="manage" class="tab-btn px-2 py-1.5 text-[12px] text-gray-500 hover:text-gray-200 transition flex items-center gap-1.5 rounded border border-transparent hover:border-gray-800/60" title="Config — this project's cluster settings (click again to close)">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1.08-1.5 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1.08 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          <span class="hidden lg:inline">Config</span>
+        </button>
       </div>
 
-      <!-- SPACER — pushes settings + logo to the right edge -->
+      <!-- SPACER -->
       <div class="flex-1"></div>
 
       <!-- hidden legacy holders -->
       <button id="search-trigger" class="hidden"></button>
       <span id="generated-pill" class="hidden"></span>
 
-      <!-- RIGHT: Cluster settings cog + Architect logo (click for About) -->
+      <!-- RIGHT: Communications status pills (read-only signals,
+           no actions). V64 — daemon and cluster connection. -->
       <div class="flex items-center gap-1.5 flex-shrink-0">
-
-        <!-- Cluster settings — icon-only. V63 — click again when active
-             closes the cluster zone (toggle behavior, see init script). -->
-        <button data-tab="manage" class="tab-btn relative p-1.5 text-gray-500 hover:text-gray-200 transition rounded border border-transparent hover:border-gray-800/60" title="Cluster settings (click again to close)">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1.08-1.5 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1.08 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-        </button>
-
-        <!-- Architect logo — click opens About modal with build version -->
-        <button type="button" id="architect-logo" class="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 hover:bg-emerald-500/25 transition-colors cursor-pointer" title="MeshKore Architect — click for build info">
-          <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-        </button>
+        <!-- Daemon pill -->
+        <div class="flex items-center gap-1 px-1.5 py-1 text-[10px] mono" id="daemon-pill" title="local daemon">
+          <span class="dot bg-gray-600" id="daemon-dot"></span>
+          <span class="text-gray-400" id="daemon-status">—</span>
+        </div>
+        <!-- Cluster connection pill (hidden until joined to a channel) -->
+        <div id="cluster-conn-pill" class="hidden items-center gap-1 px-1.5 py-1 text-[10px] mono" title="cluster channel">
+          <span class="dot bg-gray-600" id="cluster-conn-dot"></span>
+          <span class="text-gray-400" id="cluster-conn-label"></span>
+        </div>
       </div>
     </div>
 
@@ -4575,7 +4572,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V63 open');
+      console.log('[Add Project] wizard V64 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -10070,7 +10067,7 @@ credentials.`;
               '<div style="display:flex; flex-direction:column; gap:14px; padding:8px 0;">'
               + '<div style="display:flex; align-items:center; gap:10px;">'
               +   '<span style="font-family:JetBrains Mono,monospace; font-size:11px; color:#6b7280; letter-spacing:0.10em; text-transform:uppercase;">build</span>'
-              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v63</span>'
+              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v64</span>'
               + '</div>'
               + '<div style="height:1px; background:rgba(75,85,99,0.25);"></div>'
               + '<div style="font-size:13px; color:#cbd5e1; line-height:1.6;">'
