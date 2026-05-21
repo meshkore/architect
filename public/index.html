@@ -198,18 +198,25 @@
     }
     .projects-rail[data-mode="short"] .projects-rail-title { display: none; }
     .projects-rail-btn {
-      width: 22px; height: 22px;
+      width: 24px; height: 24px;
       display: inline-flex; align-items: center; justify-content: center;
-      /* V66 — brightened from #4b5563 (gray-600) so the << / >> chevrons
-         are legible on dim monitors. */
-      color: #9ca3af;
-      background: transparent;
-      border: none;
-      border-radius: 4px; cursor: pointer;
+      /* V67 — aggressive brightness for the << / >> chevrons. Operator
+         reported V66's #9ca3af was still too dim on some monitors. Now
+         gray-100 (#e5e7eb) which is near-white, plus a subtle visible
+         background so the button is recognised as a control. */
+      color: #e5e7eb;
+      background: rgba(75,85,99,0.15);
+      border: 1px solid rgba(75,85,99,0.30);
+      border-radius: 5px; cursor: pointer;
       padding: 0;
-      transition: color 120ms, background 120ms;
+      transition: color 120ms, background 120ms, border-color 120ms;
     }
-    .projects-rail-btn:hover { color: #f3f4f6; background: rgba(75,85,99,0.20); }
+    .projects-rail-btn:hover {
+      color: #ffffff;
+      background: rgba(75,85,99,0.40);
+      border-color: rgba(148,163,184,0.55);
+    }
+    .projects-rail-btn svg { stroke-width: 2.6; }
     /* Toggle icon swap: collapse arrows in full, expand arrows in short. */
     .rail-icon-collapse, .rail-icon-expand { display: none; }
     .projects-rail[data-mode="full"]  .rail-icon-collapse { display: inline; }
@@ -696,9 +703,11 @@
     .nav-col .nav-rail:hover,
     .center-col.collapsed .chat-rail:hover { color: #34d399; background: rgba(16,185,129,0.05); }
     .center-col.collapsed .chat-rail:hover { color: #34d399; background: rgba(16,185,129,0.05); }
-    /* V66 — brightened from #6b7280 so the chevron is visible on dim screens. */
-    .chat-collapse-btn { color: #9ca3af; padding: 4px 6px; border-radius: 4px; cursor: pointer; background: transparent; border: 0; transition: color 140ms, background 140ms; }
-    .chat-collapse-btn:hover:not(:disabled) { color: #f3f4f6; background: rgba(75,85,99,0.20); }
+    /* V67 — bright + visible background by default so the chevron
+       button is unmistakable on any monitor. */
+    .chat-collapse-btn { color: #e5e7eb; padding: 4px 7px; border-radius: 5px; cursor: pointer; background: rgba(75,85,99,0.15); border: 1px solid rgba(75,85,99,0.30); transition: color 140ms, background 140ms, border-color 140ms; }
+    .chat-collapse-btn:hover:not(:disabled) { color: #ffffff; background: rgba(75,85,99,0.40); border-color: rgba(148,163,184,0.55); }
+    .chat-collapse-btn svg { stroke-width: 2.6; }
     /* V30.11 — collapse buttons go disabled when their panel is not at
        the matching edge (positional CSS rules can't follow a panel into
        the middle slot). The operator drags the panel back to its edge
@@ -2636,8 +2645,8 @@ python3 .meshkore/scripts/daemon.py</pre>
             <span class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Modules</span>
             <span class="flex items-center gap-1.5">
               <span class="text-gray-700 mono text-[10px]" id="nav-modules-count">—</span>
-              <button id="nav-collapse" title="Collapse modules" class="text-gray-400 hover:text-emerald-400 px-1 py-0.5 rounded hover:bg-emerald-500/10" style="color:#9ca3af;">
-                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path d="M15 5l-7 7 7 7"/></svg>
+              <button id="nav-collapse" title="Collapse modules" class="hover:text-emerald-400 px-1.5 py-1 rounded hover:bg-emerald-500/10" style="color:#e5e7eb; background:rgba(75,85,99,0.15); border:1px solid rgba(75,85,99,0.30);">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.8"><path d="M15 5l-7 7 7 7"/></svg>
               </button>
             </span>
           </div>
@@ -4619,7 +4628,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V66 open');
+      console.log('[Add Project] wizard V67 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -10114,7 +10123,7 @@ credentials.`;
               '<div style="display:flex; flex-direction:column; gap:14px; padding:8px 0;">'
               + '<div style="display:flex; align-items:center; gap:10px;">'
               +   '<span style="font-family:JetBrains Mono,monospace; font-size:11px; color:#6b7280; letter-spacing:0.10em; text-transform:uppercase;">build</span>'
-              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v66</span>'
+              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v67</span>'
               + '</div>'
               + '<div style="height:1px; background:rgba(75,85,99,0.25);"></div>'
               + '<div style="font-size:13px; color:#cbd5e1; line-height:1.6;">'
