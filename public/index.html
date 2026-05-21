@@ -4674,7 +4674,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V74 open');
+      console.log('[Add Project] wizard V75 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -5045,12 +5045,25 @@ python3 .meshkore/scripts/daemon.py</pre>
               case 'NEW_PROMPT':
                 return ''
                   + '<h3 class="wiz-h">Paste this in your coding agent</h3>'
-                  + '<p class="wiz-sub">Open <strong>Claude Code</strong>, <strong>Cursor</strong> or <strong>Windsurf</strong> at the root of your projects folder, paste, hit enter. The prompt itself handles the case where the agent can\'t start the daemon (it\'ll print the exact command for you to run in a terminal).</p>'
+                  + '<p class="wiz-sub">Open <strong>Claude Code</strong>, <strong>Cursor</strong> or <strong>Windsurf</strong> at the root of your projects folder, paste, hit enter. The prompt handles both cases — if the agent can\'t start the daemon, it prints the exact terminal command for you to run.</p>'
                   + '<div class="wiz-prompt-box">'
                   +   '<button type="button" class="wiz-copy" data-copy-target="wiz-prompt">copy</button>'
                   +   '<span id="wiz-prompt">' + esc(genPrompt()) + '</span>'
                   + '</div>'
-                  + '<p class="wiz-sub" style="margin-top:10px; font-size:11.5px;">When the daemon prints its port (5570-5589), click <strong>Scan for daemon →</strong> below.</p>';
+
+                  // V75 — auto-scan status panel. Replaces the old "Scan
+                  // for daemon" button. Scanning starts the moment this
+                  // screen renders; the user just waits (or closes the
+                  // modal — scanning continues in the rail).
+                  + '<div style="margin-top:18px; padding:14px 16px; background: rgba(16,185,129,0.06); border: 1px solid rgba(52,211,153,0.30); border-radius: 10px;">'
+                  +   '<div style="display:flex; align-items:center; gap:10px;">'
+                  +     '<span style="width:10px; height:10px; border-radius:50%; background:#34d399; box-shadow:0 0 12px rgba(52,211,153,0.7); animation: scan-pulse 1.2s ease-in-out infinite; flex-shrink:0;" aria-hidden="true"></span>'
+                  +     '<span style="font-family:JetBrains Mono,monospace; font-size:12px; color:#6ee7b7; letter-spacing:0.06em;">Watching for your daemon on ports 5570-5589</span>'
+                  +   '</div>'
+                  +   '<p style="margin-top:10px; font-size:12px; color:#cbd5e1; line-height:1.55;">As soon as your agent (or you, if the agent prints the terminal command) starts the daemon, the new project pops into the rail on the left.</p>'
+                  +   '<p style="margin-top:8px; font-size:11.5px; color:#9ca3af; line-height:1.55;"><strong style="color:#fbbf24;">⚠</strong> Most coding agents refuse to spawn long-running downloaded scripts — totally normal. Watch the agent\'s output: it should print a <span class="wiz-cmd">cd … && python3 .meshkore/scripts/daemon.py</span> command for you to paste in your terminal.</p>'
+                  +   '<p style="margin-top:8px; font-size:11.5px; color:#9ca3af; line-height:1.55;">You can close this window — detection keeps running in the projects rail.</p>'
+                  + '</div>';
             }
             return '<p class="wiz-sub">Unknown step.</p>';
           }
@@ -5087,7 +5100,10 @@ python3 .meshkore/scripts/daemon.py</pre>
                 +   '<button type="button" id="wiz-foot-continue" style="' + BTN_PRIM + '">Continue →</button>'
                 + '</div>';
             } else if (s === 'NEW_PROMPT') {
-              right = '<button type="button" id="wiz-foot-scan" style="' + BTN_PRIM + '">Scan for daemon →</button>';
+              // V75 — scanning auto-starts when this screen renders, so
+              // the footer button is just "close, keep scanning" instead
+              // of "kick off scan now".
+              right = '<button type="button" id="wiz-foot-scan" style="' + BTN_GHOST + '">Close — keep scanning</button>';
             }
 
             return left + right;
@@ -5226,18 +5242,18 @@ python3 .meshkore/scripts/daemon.py</pre>
               };
             }
 
+            // V75 — On NEW_PROMPT render, auto-start the continuous scan.
+            // The user landed here because they're about to paste a prompt;
+            // the daemon may come up any second. No click required to
+            // begin watching. startScanForNew() is idempotent.
+            if (step === 'NEW_PROMPT') {
+              try { startScanForNew(); } catch (e) { console.warn(e); }
+            }
+
             const scanBtn = document.getElementById('wiz-foot-scan');
             if (scanBtn) {
-              scanBtn.onclick = () => {
-                close('scan-now');
-                // V62 — kick off CONTINUOUS scanning rather than a single
-                // probe. Polls every ~2.5s, marks any new project that
-                // appears, runs until the operator clicks the scanning
-                // indicator below the rail's "+ add" / "rescan" buttons.
-                setTimeout(() => {
-                  try { startScanForNew(); } catch (e) { console.warn(e); }
-                }, 50);
-              };
+              // Now just closes the modal — scan keeps running in the rail.
+              scanBtn.onclick = () => close('keep-scanning');
             }
           }
 
@@ -10294,7 +10310,7 @@ credentials.`;
               '<div style="display:flex; flex-direction:column; gap:14px; padding:8px 0;">'
               + '<div style="display:flex; align-items:center; gap:10px;">'
               +   '<span style="font-family:JetBrains Mono,monospace; font-size:11px; color:#6b7280; letter-spacing:0.10em; text-transform:uppercase;">build</span>'
-              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v74</span>'
+              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v75</span>'
               + '</div>'
               + '<div style="height:1px; background:rgba(75,85,99,0.25);"></div>'
               + '<div style="font-size:13px; color:#cbd5e1; line-height:1.6;">'
