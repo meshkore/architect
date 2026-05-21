@@ -443,6 +443,87 @@
       display: flex; flex-direction: column; gap: 4px;
     }
     .projects-rail[data-mode="short"] .projects-rail-foot { padding: 6px 6px; }
+
+    /* V62 — Scan-for-new indicator. Hidden by default; .is-active makes
+       it visible. Click anywhere on it to stop scanning. */
+    .projects-rail-scan-indicator {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      padding: 8px 10px;
+      background: rgba(16,185,129,0.06);
+      border: 1px solid rgba(52,211,153,0.30);
+      border-radius: 7px;
+      color: #6ee7b7;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      text-align: left;
+      transition: background 120ms, border-color 120ms;
+    }
+    .projects-rail-scan-indicator.is-active { display: flex; }
+    .projects-rail-scan-indicator:hover {
+      background: rgba(16,185,129,0.12);
+      border-color: rgba(52,211,153,0.50);
+    }
+    .projects-rail-scan-indicator .scan-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #34d399;
+      box-shadow: 0 0 10px rgba(52,211,153,0.6);
+      animation: scan-pulse 1.2s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    .projects-rail-scan-indicator .scan-label { flex: 1; }
+    .projects-rail-scan-indicator .scan-stop {
+      font-size: 9.5px; color: rgba(110,231,183,0.65);
+    }
+    @keyframes scan-pulse {
+      0%, 100% { opacity: 0.35; transform: scale(0.85); }
+      50%      { opacity: 1;    transform: scale(1.15); }
+    }
+    /* Short mode: hide the labels, just keep the dot */
+    .projects-rail[data-mode="short"] .projects-rail-scan-indicator .scan-label,
+    .projects-rail[data-mode="short"] .projects-rail-scan-indicator .scan-stop { display: none; }
+    .projects-rail[data-mode="short"] .projects-rail-scan-indicator {
+      justify-content: center; padding: 8px 0;
+    }
+
+    /* V62 — "new project just appeared" badge. Applied to .proj-row-wrap
+       when its cluster_id is in NEW_CLUSTER_IDS. Pulsing emerald ring
+       + a NEW pill. Cleared on first click. */
+    .proj-row-wrap.is-new::after {
+      content: 'NEW';
+      position: absolute;
+      top: 50%; right: 10px;
+      transform: translateY(-50%);
+      background: #34d399;
+      color: #02040c;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      padding: 2px 6px;
+      border-radius: 4px;
+      pointer-events: none;
+      animation: new-pill-pulse 1.6s ease-in-out infinite;
+      z-index: 1;
+    }
+    @keyframes new-pill-pulse {
+      0%, 100% { opacity: 0.85; }
+      50%      { opacity: 1; box-shadow: 0 0 12px rgba(52,211,153,0.55); }
+    }
+    .projects-rail[data-mode="short"] .proj-row-wrap.is-new::after {
+      content: '•';
+      right: 4px; top: 4px;
+      transform: none;
+      padding: 0;
+      font-size: 14px;
+      background: transparent;
+      color: #34d399;
+      text-shadow: 0 0 8px rgba(52,211,153,0.8);
+    }
     .projects-rail-foot-btn.is-primary {
       background: rgba(16,185,129,0.10);
       border-color: rgba(52,211,153,0.35);
@@ -2475,10 +2556,18 @@ python3 .meshkore/scripts/daemon.py</pre>
           <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" width="13" height="13"><path d="M4 4v6h6M20 20v-6h-6M5 13a8 8 0 1014.5-3.5"/></svg>
           <span class="projects-rail-foot-label">rescan</span>
         </button>
+        <!-- V62 — Scanning indicator. Hidden by default. The wizard's
+             "Scan for daemon" button activates it; operator can stop it
+             by clicking the indicator itself. -->
+        <button type="button" id="projects-rail-scan" class="projects-rail-scan-indicator" aria-label="Scanning for new daemons — click to stop">
+          <span class="scan-dot" aria-hidden="true"></span>
+          <span class="scan-label">scanning…</span>
+          <span class="scan-stop" aria-hidden="true">click to stop</span>
+        </button>
         <!-- Build version badge — bumped on every architect deploy so
              the operator can verify visually that the latest code is
              being served (no more guessing about caches). -->
-        <div id="architect-build-version" title="Architect build version (visible to confirm cache freshness)" style="margin-top:8px; padding:6px 8px; font-family:JetBrains Mono,monospace; font-size:10px; color:#6b7280; text-align:center; letter-spacing:0.08em; border-top:1px solid rgba(75,85,99,0.20);">build v61</div>
+        <div id="architect-build-version" title="Architect build version (visible to confirm cache freshness)" style="margin-top:8px; padding:6px 8px; font-family:JetBrains Mono,monospace; font-size:10px; color:#6b7280; text-align:center; letter-spacing:0.08em; border-top:1px solid rgba(75,85,99,0.20);">build v62</div>
       </div>
     </aside>
 
@@ -3627,6 +3716,16 @@ python3 .meshkore/scripts/daemon.py</pre>
     let DAEMON_WS = null;
     let PROJECTS = [];                  // [{port, base, cluster_id, cluster_name, cluster_type, status, identity}]
     let ACTIVE_PROJECT_PORT = null;     // currently selected project port
+    // V62 — Continuous-scan mode triggered by the wizard's "Scan for
+    // daemon" button. We poll discoverProjects() on a short interval and
+    // mark any cluster_id not present at the moment scanning started as
+    // "new" (visual badge in the rail) until the operator clicks it.
+    let SCANNING_FOR_NEW = false;
+    let SCAN_INTERVAL_ID = null;
+    let SCAN_BASELINE = new Set();
+    const NEW_CLUSTER_IDS = new Set();
+    // Helper: which id we use to identify a project in the rail
+    function projectId(p) { return p.cluster_id || ('port:' + p.port); }
     const docCache = new Map();
     const mdCache = new Map();
     let activeTab = 'roadmap';
@@ -3894,6 +3993,61 @@ python3 .meshkore/scripts/daemon.py</pre>
       renderProjectsRail();
     }
 
+    // ─── Continuous scan-for-new-project mode (V62) ─────────────────
+    // Triggered by the wizard's "Scan for daemon" button. Polls
+    // discoverProjects() every 2.5s, marks newly-appearing cluster_ids
+    // (relative to the baseline at scan start) as "new" until the
+    // operator clicks them. Operator can stop the scan by clicking the
+    // "scanning…" indicator below the projects rail's footer buttons.
+    function startScanForNew() {
+      // Already scanning? Idempotent.
+      if (SCANNING_FOR_NEW) return;
+      SCANNING_FOR_NEW = true;
+      // Snapshot the cluster_ids we already know about so we can detect
+      // anything new that appears after this moment.
+      SCAN_BASELINE = new Set(PROJECTS.map(projectId));
+      renderScanIndicator();
+      // Initial probe immediately, then on interval.
+      const tick = async () => {
+        if (!SCANNING_FOR_NEW) return;
+        try { await discoverProjects(); } catch (e) { console.warn('[scan] discover failed', e); }
+        // Anything currently in PROJECTS that wasn't in the baseline →
+        // mark as new. We never UNmark via timeout — only an explicit
+        // click clears the badge.
+        for (const p of PROJECTS) {
+          const id = projectId(p);
+          if (!SCAN_BASELINE.has(id)) NEW_CLUSTER_IDS.add(id);
+        }
+        renderProjectsRail();
+      };
+      tick();
+      SCAN_INTERVAL_ID = setInterval(tick, 2500);
+    }
+    function stopScanForNew() {
+      if (!SCANNING_FOR_NEW) return;
+      SCANNING_FOR_NEW = false;
+      if (SCAN_INTERVAL_ID) { clearInterval(SCAN_INTERVAL_ID); SCAN_INTERVAL_ID = null; }
+      renderScanIndicator();
+    }
+    function renderScanIndicator() {
+      const el = document.getElementById('projects-rail-scan');
+      if (!el) return;
+      if (SCANNING_FOR_NEW) {
+        el.classList.add('is-active');
+        el.setAttribute('title', 'Scanning ports 5570-5589 for new daemons · click to stop');
+      } else {
+        el.classList.remove('is-active');
+        el.setAttribute('title', '');
+      }
+    }
+    function clearNewMarkerFor(p) {
+      const id = projectId(p);
+      if (NEW_CLUSTER_IDS.has(id)) {
+        NEW_CLUSTER_IDS.delete(id);
+        renderProjectsRail();
+      }
+    }
+
     // ─── Projects rail (pinned leftmost column) ──────────────────────
     // The rail is the operator's view of every meshcore daemon currently
     // running on this machine (ports 5570-5589, one per project). It is
@@ -3968,7 +4122,8 @@ python3 .meshkore/scripts/daemon.py</pre>
         if (active)  cls.push('active');
         if (working) cls.push('is-working');
         if (pending) cls.push('is-pending-review');
-        return `<div class="proj-row-wrap${active ? ' active' : ''}${stopped ? ' is-stopped' : ''}" data-port="${p.port}">
+        const isNew = NEW_CLUSTER_IDS.has(clusterId);
+        return `<div class="proj-row-wrap${active ? ' active' : ''}${stopped ? ' is-stopped' : ''}${isNew ? ' is-new' : ''}" data-port="${p.port}">
           <button type="button" class="${cls.join(' ')}"
             data-port="${p.port}" data-action="${stopped ? 'start' : 'switch'}"
             title="${esc(title)}" aria-label="${esc(title)}">
@@ -4328,6 +4483,8 @@ python3 .meshkore/scripts/daemon.py</pre>
           try { renderChatRail && renderChatRail(); } catch {}
         });
       } catch {}
+      // V62 — Click on the scan indicator stops the continuous scan.
+      $('projects-rail-scan')?.addEventListener('click', () => stopScanForNew());
       // Apply saved manual width if any (overrides preset on first paint).
       try {
         const saved = parseInt(localStorage.getItem(PROJECTS_RAIL_WIDTH_KEY) || '0', 10);
@@ -4416,7 +4573,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V61 open');
+      console.log('[Add Project] wizard V62 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -4847,8 +5004,12 @@ python3 .meshkore/scripts/daemon.py</pre>
             if (scanBtn) {
               scanBtn.onclick = () => {
                 close('scan-now');
+                // V62 — kick off CONTINUOUS scanning rather than a single
+                // probe. Polls every ~2.5s, marks any new project that
+                // appears, runs until the operator clicks the scanning
+                // indicator below the rail's "+ add" / "rescan" buttons.
                 setTimeout(() => {
-                  try { discoverProjects && discoverProjects(); } catch (e) { console.warn(e); }
+                  try { startScanForNew(); } catch (e) { console.warn(e); }
                 }, 50);
               };
             }
@@ -5052,6 +5213,11 @@ python3 .meshkore/scripts/daemon.py</pre>
     async function switchProject(port) {
       const p = PROJECTS.find(x => x.port === port);
       if (!p) return;
+      // V62 — clear the "new" marker as soon as the operator clicks
+      // the project (the marker's purpose was "draw attention"; once
+      // clicked, attention served). Done BEFORE the redirect so the
+      // marker doesn't flash back on reload.
+      clearNewMarkerFor(p);
       if (port === ACTIVE_PROJECT_PORT) return;
       try { localStorage.setItem('meshcore-last-port', String(port)); } catch {}
       // Reload the page targeting that port — simpler than hot-swapping
