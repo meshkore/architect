@@ -2355,7 +2355,25 @@
 
       <!-- LEFT: Architect logo — clickable, opens About + build version -->
       <button type="button" id="architect-logo" class="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 hover:bg-emerald-500/25 transition-colors cursor-pointer" title="MeshKore Architect — click for build info">
-        <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        <!-- V65 — MeshKore original mark: center hub + 4 satellites
+             with connecting spokes. Represents the architect (center)
+             orchestrating the mesh of agents (satellites). Simple,
+             symmetric, holds up at 16px. -->
+        <svg class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" aria-hidden="true">
+          <g stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none">
+            <line x1="12" y1="12" x2="12" y2="3.5"/>
+            <line x1="12" y1="12" x2="20.5" y2="12"/>
+            <line x1="12" y1="12" x2="12" y2="20.5"/>
+            <line x1="12" y1="12" x2="3.5" y2="12"/>
+          </g>
+          <g fill="currentColor">
+            <circle cx="12"   cy="3.5"  r="2"/>
+            <circle cx="20.5" cy="12"   r="2"/>
+            <circle cx="12"   cy="20.5" r="2"/>
+            <circle cx="3.5"  cy="12"   r="2"/>
+            <circle cx="12"   cy="12"   r="2.8"/>
+          </g>
+        </svg>
       </button>
 
       <!-- Project title plate — 200px, fits comfortable cluster names -->
@@ -2437,7 +2455,21 @@
   <div id="loader" class="fixed inset-0 z-50 bg-ink-950 flex items-center justify-center">
     <div class="flex flex-col items-center gap-3">
       <div class="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center animate-pulse">
-        <svg class="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        <svg class="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" aria-hidden="true">
+          <g stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none">
+            <line x1="12" y1="12" x2="12" y2="3.5"/>
+            <line x1="12" y1="12" x2="20.5" y2="12"/>
+            <line x1="12" y1="12" x2="12" y2="20.5"/>
+            <line x1="12" y1="12" x2="3.5" y2="12"/>
+          </g>
+          <g fill="currentColor">
+            <circle cx="12"   cy="3.5"  r="2"/>
+            <circle cx="20.5" cy="12"   r="2"/>
+            <circle cx="12"   cy="20.5" r="2"/>
+            <circle cx="3.5"  cy="12"   r="2"/>
+            <circle cx="12"   cy="12"   r="2.8"/>
+          </g>
+        </svg>
       </div>
       <p class="text-xs text-gray-400 mono">Loading cluster state…</p>
     </div>
@@ -4572,7 +4604,7 @@ python3 .meshkore/scripts/daemon.py</pre>
     // Prompt is now ~12 lines (URL to spec + parameters block) so the
     // user doesn't have to read a wall of text before pasting.
     async function openAddProjectModal() {
-      console.log('[Add Project] wizard V64 open');
+      console.log('[Add Project] wizard V65 open');
       const STD          = 'https://meshkore.com/standard';
       const STD_SETUP    = STD + '#10-3-adding-more-projects-to-your-architect';
       const ARCHITECT    = 'https://architect.meshkore.com';
@@ -5810,7 +5842,7 @@ python3 .meshkore/scripts/daemon.py</pre>
       const hosts = document.querySelectorAll('.scope-breadcrumb[data-scope-host]');
       if (!hosts.length) return;
       const path = getScopePath();
-      const rootIcon = `<svg class="scope-bc-root-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>`;
+      const rootIcon = `<svg class="scope-bc-root-icon" viewBox="0 0 24 24" aria-hidden="true"><g stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"><line x1="12" y1="12" x2="12" y2="3.5"/><line x1="12" y1="12" x2="20.5" y2="12"/><line x1="12" y1="12" x2="12" y2="20.5"/><line x1="12" y1="12" x2="3.5" y2="12"/></g><g fill="currentColor"><circle cx="12" cy="3.5" r="2"/><circle cx="20.5" cy="12" r="2"/><circle cx="12" cy="20.5" r="2"/><circle cx="3.5" cy="12" r="2"/><circle cx="12" cy="12" r="2.8"/></g></svg>`;
       const html = path.map((seg, i) => {
         const isFirst = i === 0;
         const segHtml = `<span class="scope-bc-seg${seg.isCurrent ? ' is-current' : ''}" data-scope-id="${esc(seg.id)}">${isFirst ? rootIcon : ''}${esc(seg.label)}</span>`;
@@ -10067,7 +10099,7 @@ credentials.`;
               '<div style="display:flex; flex-direction:column; gap:14px; padding:8px 0;">'
               + '<div style="display:flex; align-items:center; gap:10px;">'
               +   '<span style="font-family:JetBrains Mono,monospace; font-size:11px; color:#6b7280; letter-spacing:0.10em; text-transform:uppercase;">build</span>'
-              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v64</span>'
+              +   '<span style="font-family:JetBrains Mono,monospace; font-size:16px; color:#34d399; font-weight:700;">v65</span>'
               + '</div>'
               + '<div style="height:1px; background:rgba(75,85,99,0.25);"></div>'
               + '<div style="font-size:13px; color:#cbd5e1; line-height:1.6;">'
