@@ -1,108 +1,221 @@
 /**
- * DaemonClient — typed wrapper over the daemon HTTP+WS surface.
+ * daemon-client.ts — typed HTTP wrapper over the meshcore daemon REST
+ * surface.
  *
- * Daemon API reference (canonical: daemon/src/server.ts header):
+ * The cockpit hits the daemon for every state read / mutation. This
+ * module is the single source of truth for the request shapes and
+ * response types. Higher-level state stores (M2) wrap it; components
+ * (M3+) never call fetch directly.
  *
- *   GET   /health                       (public — no auth)
- *   GET   /state                        full bundle (cluster, roadmap, docs, …)
- *   GET   /state/{roadmap|docs|cluster|modules|timeline}
- *   GET   /agents
- *   GET   /credentials                  metadata only
- *   GET   /reload                       force state rebuild
- *   GET   /docs/<path>                  raw markdown
- *   GET   /tasks/<path>                 raw markdown
- *   GET   /modules/<path>
- *   POST  /messages                     append chat.user
- *   POST  /tasks                        create task
- *   POST  /tasks/{id}/transition        update status
- *   POST  /tasks/{id}/dispatch          spawn worker
- *   POST  /tasks/{id}/cancel
- *   POST  /chat/dispatch                coordinator chat
- *   WS    /events                       JSON-line event stream
+ * Usage:
+ *   const client = new DaemonClient(localTransport(5570, token));
+ *   const h = await client.health();
+ *   if (h.ok) log.info('daemon ready', h.data.identity, h.daemonVersion);
  *
- * Auth: Bearer in `Authorization` header. On WebSocket upgrade, the
- * daemon also accepts `?token=<token>` query (browsers can't set headers
- * on a WS handshake). We use the query-string variant for WS so the
- * browser side works without extra plumbing.
+ * All methods return `Result<T>` (a discriminated union):
+ *   - { ok: true, data, status, daemonVersion? }   on 2xx
+ *   - { ok: false, status, body }                  on non-2xx or network error
+ *
+ * No exceptions thrown for ordinary HTTP errors — callers branch on
+ * `result.ok`. Exceptions only escape for programmer errors (e.g.
+ * passing a malformed URL).
+ *
+ * AbortSignal is accepted on every method so the operator can cancel
+ * an in-flight request when navigating away or switching cluster.
+ *
+ * The daemon version header (`x-meshkore-daemon-version`) is surfaced
+ * on the result for callers that need it (health check, version gate).
  */
 
 import type { TransportConfig } from './transport';
+import { log } from './log';
+
+// ─── Result type ────────────────────────────────────────────────────
+
+export type Result<T> =
+  | { ok: true; data: T; status: number; daemonVersion?: string }
+  | { ok: false; status: number; body: string; error?: string };
+
+// ─── Response shapes ────────────────────────────────────────────────
 
 export interface HealthResponse {
   ok: boolean;
   identity: string;
   port: number;
   mode: string;
+  implementation?: string;
+  version?: string;
   cluster_id?: string;
   cluster_name?: string;
   cluster_type?: string;
   device?: { hostname: string; platform: string; arch: string; os_release: string };
-  ts: string;
+  features?: string[];
+  ts?: string;
 }
 
-/** A single event coming off the daemon's /events stream. */
-export interface DaemonEvent {
-  type: string;
-  ts?: string;
+export interface InfoResponse {
+  ok: boolean;
+  root: string;
+  cluster_id?: string;
+  cluster_name?: string;
+  port: number;
+  pid: number;
   [k: string]: unknown;
 }
 
-export class DaemonError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+export interface DaemonEvent {
+  type: string;
+  ts?: string;
+  conv?: string;
+  author?: string;
+  [k: string]: unknown;
 }
+
+export interface DispatchResponse {
+  conv: string;
+  runner: string;
+  identity: string;
+  pid: number;
+  stream_id: string;
+  agent_type?: string;
+}
+
+export interface SelfUpdateResponse {
+  ok: boolean;
+  new_pid: number;
+  new_port: number;
+  shutdown_in_sec: number;
+  old_backup: string;
+  old_version: string;
+  source_url: string;
+}
+
+export interface DispatchBody {
+  conv?: string;
+  author?: string;
+  text: string;
+  agent_type?: string;
+  agent_id?: string;
+  module_id?: string;
+  task_id?: string;
+  initiative_id?: string;
+  context_docs?: Array<{ filename: string; content: string }>;
+  images?: Array<{ type: 'image'; media_type: string; data: string }>;
+}
+
+export interface TaskCreateBody {
+  id?: string;
+  title: string;
+  module?: string;
+  status?: string;
+  initiative?: string;
+  body?: string;
+  [k: string]: unknown;
+}
+
+// ─── Client ─────────────────────────────────────────────────────────
 
 export class DaemonClient {
   constructor(public readonly transport: TransportConfig) {}
 
-  // ─── HTTP ────────────────────────────────────────────────────────────────
+  // ── Read endpoints ────────────────────────────────────────────────
 
-  async health(signal?: AbortSignal): Promise<HealthResponse> {
-    const res = await fetch(`${this.transport.httpBase}/health`, { signal });
-    if (!res.ok) throw new DaemonError(res.status, await res.text());
-    return res.json() as Promise<HealthResponse>;
+  async health(signal?: AbortSignal): Promise<Result<HealthResponse>> {
+    return this.request<HealthResponse>('GET', '/health', undefined, signal, /*requireAuth*/ false);
   }
 
-  async state(signal?: AbortSignal): Promise<unknown> {
-    return this.get('/state', signal);
+  async state(signal?: AbortSignal): Promise<Result<unknown>> {
+    return this.request<unknown>('GET', '/state', undefined, signal);
   }
 
-  async agents(signal?: AbortSignal): Promise<unknown[]> {
-    return this.get<unknown[]>('/agents', signal);
+  async stateSubset(name: string, signal?: AbortSignal): Promise<Result<unknown>> {
+    return this.request<unknown>('GET', `/state/${encodeURIComponent(name)}`, undefined, signal);
   }
 
-  async credentials(signal?: AbortSignal): Promise<unknown[]> {
-    return this.get<unknown[]>('/credentials', signal);
+  async info(signal?: AbortSignal): Promise<Result<InfoResponse>> {
+    return this.request<InfoResponse>('GET', '/info', undefined, signal);
   }
 
-  async reload(): Promise<{ ok: boolean; generated_at: string }> {
-    return this.get('/reload');
+  async credentials(signal?: AbortSignal): Promise<Result<unknown[]>> {
+    return this.request<unknown[]>('GET', '/credentials', undefined, signal);
   }
 
-  // ─── Mutating ────────────────────────────────────────────────────────────
-
-  async postMessage(body: { text: string; author?: string; conv?: string }): Promise<DaemonEvent> {
-    return this.post<DaemonEvent>('/messages', body);
+  async agents(signal?: AbortSignal): Promise<Result<unknown[]>> {
+    return this.request<unknown[]>('GET', '/agents', undefined, signal);
   }
 
-  async chatDispatch(body: { text: string; author?: string; conv?: string }): Promise<unknown> {
-    return this.post<unknown>('/chat/dispatch', body);
+  async cronList(signal?: AbortSignal): Promise<Result<unknown[]>> {
+    return this.request<unknown[]>('GET', '/cron/list', undefined, signal);
   }
 
-  async taskDispatch(id: string, body: Record<string, unknown> = {}): Promise<unknown> {
-    return this.post<unknown>(`/tasks/${encodeURIComponent(id)}/dispatch`, body);
+  async protocols(signal?: AbortSignal): Promise<Result<unknown>> {
+    return this.request<unknown>('GET', '/protocols', undefined, signal);
   }
 
-  async taskCancel(id: string): Promise<unknown> {
-    return this.post<unknown>(`/tasks/${encodeURIComponent(id)}/cancel`, {});
+  async links(signal?: AbortSignal): Promise<Result<unknown>> {
+    return this.request<unknown>('GET', '/links', undefined, signal);
   }
 
-  // ─── WebSocket ───────────────────────────────────────────────────────────
+  // ── Mutating endpoints ────────────────────────────────────────────
+
+  async chatDispatch(body: DispatchBody, signal?: AbortSignal): Promise<Result<DispatchResponse>> {
+    return this.request<DispatchResponse>('POST', '/chat/dispatch', body, signal);
+  }
+
+  async chatCancel(conv: string, signal?: AbortSignal): Promise<Result<unknown>> {
+    return this.request<unknown>('POST', '/chat/cancel', { conv }, signal);
+  }
+
+  async messages(body: { text: string; author?: string; conv?: string }, signal?: AbortSignal): Promise<Result<DaemonEvent>> {
+    return this.request<DaemonEvent>('POST', '/messages', body, signal);
+  }
+
+  async tasksCreate(body: TaskCreateBody, signal?: AbortSignal): Promise<Result<unknown>> {
+    return this.request<unknown>('POST', '/tasks', body, signal);
+  }
+
+  async taskTransition(id: string, status: string, signal?: AbortSignal): Promise<Result<unknown>> {
+    return this.request<unknown>('POST', `/tasks/${encodeURIComponent(id)}/transition`, { status }, signal);
+  }
+
+  async taskCancel(id: string, signal?: AbortSignal): Promise<Result<unknown>> {
+    return this.request<unknown>('POST', `/tasks/${encodeURIComponent(id)}/cancel`, {}, signal);
+  }
+
+  async agentsCreate(body: Record<string, unknown>, signal?: AbortSignal): Promise<Result<unknown>> {
+    return this.request<unknown>('POST', '/agents', body, signal);
+  }
+
+  async reload(signal?: AbortSignal): Promise<Result<{ ok: boolean; generated_at: string }>> {
+    return this.request<{ ok: boolean; generated_at: string }>('POST', '/reload', {}, signal);
+  }
+
+  async shutdown(signal?: AbortSignal): Promise<Result<unknown>> {
+    return this.request<unknown>('POST', '/shutdown', {}, signal);
+  }
+
+  async selfUpdate(body: { url?: string } = {}, signal?: AbortSignal): Promise<Result<SelfUpdateResponse>> {
+    return this.request<SelfUpdateResponse>('POST', '/self-update', body, signal);
+  }
+
+  async versionNext(body: { key: string; bump?: 'major' | 'minor' | 'patch' }, signal?: AbortSignal): Promise<Result<{ version: string }>> {
+    return this.request<{ version: string }>('POST', '/version/next', body, signal);
+  }
+
+  // ── WebSocket (temporary — moves to lib/transport in M1.2) ───────
 
   /**
-   * Open the /events stream. Reconnection is the caller's job (an upstream
-   * store layer handles backoff + state machine).
+   * Open the daemon's /events WebSocket stream. Returns the raw socket
+   * — reconnection / backoff / state machine is the caller's job (or
+   * gets wrapped in M1.2's transport layer).
+   *
+   * @deprecated until M1.2. Use the future `Transport.openEvents` once
+   * it lands.
    */
-  openEvents(onEvent: (ev: DaemonEvent) => void, onState: (s: 'open' | 'closed' | 'error') => void): WebSocket {
+  openEvents(
+    onEvent: (ev: DaemonEvent) => void,
+    onState: (s: 'open' | 'closed' | 'error') => void,
+  ): WebSocket {
     const url = new URL('/events', this.transport.wsBase);
     if (this.transport.token) url.searchParams.set('token', this.transport.token);
     const ws = new WebSocket(url.toString());
@@ -111,37 +224,68 @@ export class DaemonClient {
     ws.addEventListener('error', () => onState('error'));
     ws.addEventListener('message', (msg) => {
       try {
-        onEvent(JSON.parse(typeof msg.data === 'string' ? msg.data : '') as DaemonEvent);
-      } catch {
-        // Daemon only ever emits JSON lines; if parsing fails, drop silently.
-        // A user-visible logger goes here in a follow-up.
+        const data = typeof msg.data === 'string' ? msg.data : '';
+        if (!data) return;
+        onEvent(JSON.parse(data) as DaemonEvent);
+      } catch (e) {
+        log.warn('events parse failed', e instanceof Error ? e.message : String(e));
       }
     });
     return ws;
   }
 
-  // ─── Internals ───────────────────────────────────────────────────────────
+  // ── Internals ─────────────────────────────────────────────────────
 
-  private async get<T = unknown>(path: string, signal?: AbortSignal): Promise<T> {
-    const res = await fetch(`${this.transport.httpBase}${path}`, {
-      signal,
-      headers: this.authHeaders(),
-    });
-    if (!res.ok) throw new DaemonError(res.status, await res.text());
-    return res.json() as Promise<T>;
+  private async request<T>(
+    method: 'GET' | 'POST',
+    path: string,
+    body: unknown,
+    signal: AbortSignal | undefined,
+    requireAuth = true,
+  ): Promise<Result<T>> {
+    const url = `${this.transport.httpBase}${path}`;
+    const headers: Record<string, string> = {};
+    if (method === 'POST') headers['content-type'] = 'application/json';
+    if (requireAuth && this.transport.token) {
+      headers['authorization'] = `Bearer ${this.transport.token}`;
+    }
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method,
+        headers,
+        body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
+        signal,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      log.warn('daemon request failed', method, path, msg);
+      return { ok: false, status: 0, body: '', error: msg };
+    }
+    const daemonVersion = res.headers.get('x-meshkore-daemon-version') ?? undefined;
+    const text = await res.text();
+    if (!res.ok) {
+      log.warn('daemon non-2xx', method, path, res.status, text.slice(0, 200));
+      return { ok: false, status: res.status, body: text };
+    }
+    let data: T;
+    try {
+      data = (text ? JSON.parse(text) : {}) as T;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      log.warn('daemon JSON parse failed', path, msg);
+      return { ok: false, status: res.status, body: text, error: 'invalid JSON' };
+    }
+    return { ok: true, data, status: res.status, daemonVersion };
   }
+}
 
-  private async post<T = unknown>(path: string, body: Record<string, unknown>): Promise<T> {
-    const res = await fetch(`${this.transport.httpBase}${path}`, {
-      method: 'POST',
-      headers: { ...this.authHeaders(), 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new DaemonError(res.status, await res.text());
-    return res.json() as Promise<T>;
-  }
-
-  private authHeaders(): Record<string, string> {
-    return this.transport.token ? { authorization: `Bearer ${this.transport.token}` } : {};
+export class DaemonError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'DaemonError';
   }
 }

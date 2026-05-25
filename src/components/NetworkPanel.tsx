@@ -17,11 +17,8 @@ interface AgentInfo {
 
 export default function NetworkPanel(props: { client: DaemonClient }) {
   const [agents, { refetch }] = createResource(async () => {
-    try {
-      return await props.client.agents() as AgentInfo[];
-    } catch {
-      return [] as AgentInfo[];
-    }
+    const res = await props.client.agents();
+    return res.ok ? (res.data as AgentInfo[]) : ([] as AgentInfo[]);
   });
 
   // Patch agent presence from live events without refetching.

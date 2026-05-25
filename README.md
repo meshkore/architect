@@ -54,17 +54,65 @@ Or push to a branch tracked by CF Pages → auto-deploy.
 
 ```bash
 cd architect
-npm run dev           # serves public/ on http://localhost:4173
+npm install
+npm run dev           # Vite dev server on http://localhost:4173
 ```
 
 Then in another terminal, run the daemon from any MeshKore repo:
 
 ```bash
-python3 webapp/reference/cluster/scripts/daemon.py
+python3 .meshkore/scripts/daemon.py
 # binds the first free port in 5570–5589
 ```
 
 The architect will detect the daemon and load state.
+
+## Quality gates (M0.4)
+
+Three commands you should run before pushing:
+
+```bash
+npm run typecheck     # tsc --noEmit, strict mode
+npm run lint          # eslint . (flat config)
+npm run check         # both, in sequence
+```
+
+### TypeScript strictness
+
+`tsconfig.json` enables (beyond `strict: true`):
+
+- `noImplicitAny`
+- `noUncheckedIndexedAccess`
+- `noUnusedLocals`
+- `noUnusedParameters`
+- `noImplicitOverride`
+- `noFallthroughCasesInSwitch`
+
+### ESLint rules
+
+`eslint.config.js` (flat config) is intentionally minimal. The rules
+that matter:
+
+- `eqeqeq` — always `===` / `!==`.
+- `no-console` — `warn` only for `console.log`/`debug`; `warn`/`error`
+  always allowed. The wrapper in `src/lib/log.ts` is exempt — it's the
+  abstraction everyone else should call.
+- `prefer-const` — error.
+- `no-empty` — warn (except `catch {}`).
+- `@typescript-eslint/no-explicit-any` — warn (audit-§4 lean code).
+
+TypeScript handles undeclared/unused; ESLint focuses on stylistic
+patterns tsc doesn't catch.
+
+### Build
+
+```bash
+npm run build         # vite build → dist/, includes dist/health.json
+```
+
+`dist/health.json` is generated at build time via the
+`healthJsonPlugin` in `vite.config.ts` and exposes
+`{name, version, commit, built_at}` (M0.2).
 
 ## Structure (current — Phase 1, monolithic)
 

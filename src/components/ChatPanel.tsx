@@ -192,14 +192,17 @@ export default function ChatPanel(props: { client: DaemonClient }) {
       const body: { text: string; conv?: string } = { text };
       if (activeConv()) body.conv = activeConv()!;
       log.info('chat send', body);
-      const res = await props.client.chatDispatch(body) as { queued?: boolean; conv?: string };
-      // If the server tells us this was queued (turn already running), we
-      // don't need to update local state — the chat.user event arrives via
-      // WS and the view re-renders with the message above the live bubble.
-      if (res?.conv && !activeConv()) setActiveConv(res.conv);
+      const res = await props.client.chatDispatch(body);
+      if (!res.ok) {
+        log.error('chat send failed', res.status, res.body);
+      } else if (res.data.conv && !activeConv()) {
+        // If the server queued the turn (already running), we don't
+        // need to update local state — the chat.user event arrives via
+        // WS and the view re-renders with the message above the live
+        // bubble. Just set the active conv if we didn't have one.
+        setActiveConv(res.data.conv);
+      }
       setDraft('');
-    } catch (err) {
-      log.error('chat send failed', err);
     } finally {
       setSending(false);
     }
@@ -211,16 +214,8 @@ export default function ChatPanel(props: { client: DaemonClient }) {
     setCancelling(true);
     try {
       log.info('chat cancel', { conv });
-      await fetch(`${props.client.transport.httpBase}/chat/cancel`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          ...(props.client.transport.token ? { authorization: `Bearer ${props.client.transport.token}` } : {}),
-        },
-        body: JSON.stringify({ conv }),
-      });
-    } catch (err) {
-      log.error('chat cancel failed', err);
+      const res = await props.client.chatCancel(conv);
+      if (!res.ok) log.error('chat cancel failed', res.status, res.body);
     } finally {
       setCancelling(false);
     }

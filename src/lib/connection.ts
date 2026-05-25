@@ -12,7 +12,7 @@
  * The returned object carries connection state for the UI to render.
  */
 
-import { DaemonClient, type HealthResponse, DaemonError } from './daemon-client';
+import { DaemonClient, type HealthResponse } from './daemon-client';
 import {
   DEFAULT_DAEMON_PORTS,
   cloudTransport,
@@ -20,23 +20,37 @@ import {
   modeFromUrl,
   type TransportConfig,
 } from './transport';
+import {
+  clusterTokenKey,
+  tokenForCluster,
+  saveTokenForCluster,
+} from './tokens';
 
 export type ConnectionStatus =
   | { kind: 'probing'; message: string }
   | { kind: 'connected'; client: DaemonClient; health: HealthResponse }
   | { kind: 'no-daemon'; portsTried: number[] }
-  | { kind: 'unauthorized'; transport: TransportConfig }
+  | { kind: 'unauthorized'; transport: TransportConfig; clusterKey: string }
   | { kind: 'cloud-pending'; token: string }
   | { kind: 'error'; message: string };
 
-const TOKEN_STORAGE_KEY = 'mc-architect-token';
-
-export function readStoredToken(): string {
-  try { return localStorage.getItem(TOKEN_STORAGE_KEY) ?? ''; } catch { return ''; }
+/**
+ * Look up the bearer token for the current cluster. M1.3 routes
+ * through the per-cluster store (`meshkore-tokens-v1`) with a fallback
+ * to the legacy singleton `meshcore-token` slot. Callers that need to
+ * compute the key themselves should use `clusterTokenKey` directly.
+ */
+export function readStoredToken(health?: HealthResponse, port?: number): string {
+  return tokenForCluster(clusterTokenKey({ cluster_id: health?.cluster_id, port }));
 }
 
-export function storeToken(token: string): void {
-  try { localStorage.setItem(TOKEN_STORAGE_KEY, token); } catch { /* private mode */ }
+/**
+ * Persist a token for the current cluster. M1.3 — replaces the
+ * pre-Solid singleton-token store; callers MUST pass the cluster
+ * identity (from /health) so we file the token under the right slot.
+ */
+export function storeToken(token: string, health?: HealthResponse, port?: number): void {
+  saveTokenForCluster(clusterTokenKey({ cluster_id: health?.cluster_id, port }), token);
 }
 
 /**
@@ -86,20 +100,20 @@ export async function connect(setStatus: (s: ConnectionStatus) => void): Promise
     return;
   }
 
-  const userToken = readStoredToken();
+  const userToken = readStoredToken(probe.health, probe.port);
   const transport = localTransport(probe.port, userToken);
   const client = new DaemonClient(transport);
 
   // Authenticated probe — /state requires a Bearer. If 401 we ask the
-  // user for the token in the UI.
-  try {
-    await client.state();
+  // user for the token in the UI. M1.1: DaemonClient returns Result<T>
+  // instead of throwing on non-2xx, so branch on `.ok`.
+  const stateRes = await client.state();
+  const clusterKey = clusterTokenKey({ cluster_id: probe.health.cluster_id, port: probe.port });
+  if (stateRes.ok) {
     setStatus({ kind: 'connected', client, health: probe.health });
-  } catch (err) {
-    if (err instanceof DaemonError && err.status === 401) {
-      setStatus({ kind: 'unauthorized', transport });
-    } else {
-      setStatus({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
-    }
+  } else if (stateRes.status === 401) {
+    setStatus({ kind: 'unauthorized', transport, clusterKey });
+  } else {
+    setStatus({ kind: 'error', message: stateRes.error ?? stateRes.body.slice(0, 200) });
   }
 }
