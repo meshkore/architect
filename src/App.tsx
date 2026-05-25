@@ -19,6 +19,14 @@ import {
 } from '~/lib/connection';
 import { store } from '~/state/store';
 import { startLive, stopLive } from '~/state/live';
+// M3.1 — new bounded stores from M2. The old monolithic `store` keeps
+// running alongside for the legacy components (RoadmapList, ChatPanel,
+// etc.) that haven't migrated yet. M3.2 / M3.3 / M4 / M5 switch each
+// component over and the old `store` retires when M9 lands.
+import { daemonStore } from '~/state/daemon';
+import { serverStore } from '~/state/server';
+import { projectsStore } from '~/state/projects';
+import { chatStore } from '~/state/chat';
 import { log } from '~/lib/log';
 import Header from '~/components/Header';
 import ModulesTree from '~/components/ModulesTree';
@@ -38,18 +46,51 @@ export default function App() {
     void connect(setStatus);
   });
 
-  // When status flips to 'connected', attach the store + open the live stream.
+  // When status flips to 'connected', wire BOTH the legacy `store` (used
+  // by un-migrated components) AND the new bounded stores from M2. The
+  // new WS hub feeds chatStore + triggers serverStore refresh on
+  // `state.rebuilt` — that's how real-time roadmap rendering will work
+  // once M4 ships, with no polling.
   createEffect(() => {
     const s = status();
-    if (s.kind === 'connected') {
-      log.info('connection established — attaching store + live');
-      void store.attach(s.client);
-      startLive(s.client);
+    if (s.kind !== 'connected') return;
+    log.info('connection established — attaching stores');
+
+    // Legacy path (kept until M9).
+    void store.attach(s.client);
+    startLive(s.client);
+
+    // M2 stores.
+    daemonStore.attachClient(s.client, s.health);
+    void serverStore.refreshNow(s.client);
+    projectsStore.upsert({
+      port: s.health.port,
+      base: s.client.transport.httpBase,
+      cluster_id: s.health.cluster_id ?? undefined,
+      cluster_name: s.health.cluster_name ?? undefined,
+      status: 'live',
+    });
+    projectsStore.setActive(s.health.port, s.health.cluster_id ?? null);
+    chatStore.bindCluster(s.health.cluster_id ?? null);
+
+    // Wire the new WS hub to chatStore + serverStore. Note we don't
+    // double-feed the legacy store — `startLive` already does that.
+    const ws = daemonStore.state.ws;
+    if (ws) {
+      ws.onAny((ev) => {
+        // Anything with a conv id flows into the chat store.
+        if (typeof ev.conv === 'string') chatStore.ingestEvent(ev);
+        // File-write events kick the server snapshot.
+        if (ev.type === 'state.rebuilt' || ev.type === 'task.updated' || ev.type === 'task.created') {
+          void serverStore.refresh(s.client);
+        }
+      });
     }
   });
 
   onCleanup(() => {
     stopLive();
+    daemonStore.disconnect();
   });
 
   const retry = () => { log.info('manual retry'); void connect(setStatus); };
