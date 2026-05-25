@@ -1,20 +1,28 @@
 /**
  * EmptyOnboardingPanel — V46 empty-state when the cluster has no
- * initiatives AND no tasks (Ikamiro-style fresh repo).
+ * initiatives + no tasks (Ikamiro-style fresh repo).
  *
- * Behaviour matches the V46 monolith: explain what's expected,
- * point at the canonical folder, expose a "force rebuild" button
- * that hits the daemon's /reload endpoint.
+ * Per the V78b monolith: lead with the Coordinator CTA (→ open the
+ * chat), keep the force-rebuild escape hatch tucked under an
+ * <details> for users whose cached state predates the new
+ * `roadmap/initiatives/` layout.
  */
 
 import { createSignal } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { serverStore } from '~/state/server';
+import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
+import { nav } from '~/state/nav';
 import { log } from '~/lib/log';
 
 export default function EmptyOnboardingPanel() {
   const [busy, setBusy] = createSignal(false);
   const [msg, setMsg] = createSignal<string | null>(null);
+
+  const openCoordinatorChat = () => {
+    chatStore.seedOnboardingConv();
+    nav.goToConv(ONBOARDING_CONV_ID);
+  };
 
   async function rebuild() {
     const client = daemonStore.state.client;
@@ -34,28 +42,32 @@ export default function EmptyOnboardingPanel() {
   }
 
   return (
-    <section class="py-12 px-6 text-center">
-      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-medium mb-5">
-        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-        Empty cluster
-      </div>
-      <h2 class="text-xl font-bold text-gray-100 mb-2">No roadmap yet</h2>
-      <p class="text-sm text-gray-400 leading-relaxed max-w-md mx-auto mb-5">
-        This cluster has no initiatives or tasks. Drop markdown files under{' '}
-        <code class="font-mono text-emerald-300">.meshkore/roadmap/initiatives/</code> and{' '}
-        <code class="font-mono text-emerald-300">.meshkore/modules/&lt;id&gt;/tasks/</code> to populate the roadmap, then rebuild.
+    <section class="py-12 px-4 max-w-md mx-auto text-left">
+      <div class="text-[17px] font-semibold text-gray-200 mb-1.5">No roadmap yet.</div>
+      <p class="text-sm text-gray-400 leading-relaxed mb-4">
+        Tell your <strong class="text-gray-200">Coordinator</strong> what this project is — it will draft the initiatives, tasks and context.
       </p>
       <button
         type="button"
-        onClick={rebuild}
-        disabled={busy()}
-        class="px-3 py-1.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-50 text-emerald-300 border border-emerald-500/30 text-xs font-mono transition-colors"
+        onClick={openCoordinatorChat}
+        class="px-3 py-1.5 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[12px] font-mono transition-colors"
       >
-        {busy() ? 'rebuilding…' : 'force rebuild state.json'}
+        → open the chat
       </button>
-      <p class="text-[11px] text-gray-600 mt-3">
-        {msg() ?? 'or restart meshcore on your machine'}
-      </p>
+      <details class="mt-6 text-[11px] text-gray-500">
+        <summary class="cursor-pointer select-none hover:text-gray-400">Already initialised?</summary>
+        <button
+          type="button"
+          onClick={rebuild}
+          disabled={busy()}
+          class="mt-2 px-2.5 py-1 rounded-md bg-gray-800 hover:bg-gray-800/70 hover:border-emerald-500/30 hover:text-emerald-300 disabled:opacity-50 text-gray-300 border border-gray-700 text-[11px] font-mono transition-colors"
+        >
+          {busy() ? 'rebuilding…' : 'force rebuild state.json'}
+        </button>
+        <p class="text-[11px] text-gray-600 mt-2">
+          {msg() ?? 'or restart meshcore on your machine'}
+        </p>
+      </details>
     </section>
   );
 }

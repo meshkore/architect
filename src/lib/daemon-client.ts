@@ -90,6 +90,38 @@ export interface SelfUpdateResponse {
   source_url: string;
 }
 
+export interface CronJob {
+  id: string;
+  name: string;
+  schedule: string;
+  cmd: string;
+  cwd?: string | null;
+  env?: Record<string, string>;
+  enabled: boolean;
+  max_runtime_sec: number;
+  restart_policy: 'never' | 'on-failure' | 'always';
+  retention_runs: number;
+  destructive: boolean;
+  next_run: string;
+  running: boolean;
+}
+
+export interface CronListResponse {
+  jobs: CronJob[];
+  coordinator: boolean;
+  owner: string | null;
+  identity: string;
+  tick_sec: number;
+}
+
+export interface CronTriggerResponse {
+  id: string;
+  started_at: string;
+  pid: number;
+  log_path: string;
+  status: string;
+}
+
 export interface DispatchBody {
   conv?: string;
   author?: string;
@@ -144,8 +176,18 @@ export class DaemonClient {
     return this.request<unknown[]>('GET', '/agents', undefined, signal);
   }
 
-  async cronList(signal?: AbortSignal): Promise<Result<unknown[]>> {
-    return this.request<unknown[]>('GET', '/cron/list', undefined, signal);
+  async cronList(signal?: AbortSignal): Promise<Result<CronListResponse>> {
+    return this.request<CronListResponse>('GET', '/cron/list', undefined, signal);
+  }
+
+  async cronTrigger(id: string, signal?: AbortSignal): Promise<Result<CronTriggerResponse>> {
+    return this.request<CronTriggerResponse>('POST', `/cron/${encodeURIComponent(id)}/trigger`, {}, signal);
+  }
+
+  async cronCancel(id: string, signal?: AbortSignal): Promise<Result<{ ok: boolean; id: string; cancelled: boolean }>> {
+    return this.request<{ ok: boolean; id: string; cancelled: boolean }>(
+      'POST', `/cron/${encodeURIComponent(id)}/cancel`, {}, signal,
+    );
   }
 
   async protocols(signal?: AbortSignal): Promise<Result<unknown>> {

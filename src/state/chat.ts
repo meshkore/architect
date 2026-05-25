@@ -26,6 +26,7 @@ import { createStore } from 'solid-js/store';
 import { createSignal } from 'solid-js';
 import type { DaemonClient, DaemonEvent, DispatchBody } from '~/lib/daemon-client';
 import { log } from '~/lib/log';
+import { onboardingWelcomeText, ONBOARDING_COORDINATOR_AUTHOR } from '~/lib/onboarding-brief';
 
 export const ONBOARDING_CONV_ID = '_onboarding_v1';
 
@@ -155,6 +156,49 @@ function ensureConvMeta(convId: string, init: Partial<ConvMeta> = {}): ConvMeta 
 
 function setActiveConv(conv: string | null): void {
   setState('activeConv', conv);
+}
+
+/**
+ * Seed the synthetic Coordinator conversation (V46 / V78b). Idempotent —
+ * only creates the conv if it doesn't exist yet. Caller is responsible
+ * for the `isProjectEmpty` gate; this function just builds the shape.
+ *
+ * After seeding: a single assistant bubble (author='coordinator'),
+ * convMeta titled 'Coordinator' as a custom-type agent, and if no
+ * conversation is currently active, this one becomes active so the
+ * user lands on the welcome bubble.
+ */
+function seedOnboardingConv(): void {
+  if (state.convMap[ONBOARDING_CONV_ID]) return;
+  const ts = new Date().toISOString();
+  setState('convMap', ONBOARDING_CONV_ID, [
+    {
+      kind: 'assistant',
+      text: onboardingWelcomeText(),
+      author: ONBOARDING_COORDINATOR_AUTHOR,
+      ts,
+      streaming: false,
+    },
+  ]);
+  ensureConvMeta(ONBOARDING_CONV_ID, {
+    title: 'Coordinator',
+    type: 'custom',
+    location: { type: 'local', host: 'this machine' },
+  });
+  if (!state.activeConv) setState('activeConv', ONBOARDING_CONV_ID);
+}
+
+/**
+ * True when the synthetic Coordinator conv already received at least one
+ * real user message. Used by (a) ChatComposer to gate the bootstrap-brief
+ * attachment to the FIRST dispatch only and (b) ChatRail's retire memo
+ * so the card stays visible after the user starts chatting even once
+ * initiatives appear.
+ */
+function onboardingHasUserMessages(): boolean {
+  const list = state.convMap[ONBOARDING_CONV_ID];
+  if (!list || list.length === 0) return false;
+  return list.some((m) => m.kind === 'user');
 }
 
 /**
@@ -375,6 +419,8 @@ export const chatStore = {
   ensureConvMeta,
   createConv,
   setActiveConv,
+  seedOnboardingConv,
+  onboardingHasUserMessages,
   setConvTitle,
   archiveConv,
   unarchiveConv,

@@ -15,7 +15,8 @@
  */
 
 import { For, Show, createMemo, createSignal } from 'solid-js';
-import { chatStore, type ConvMeta } from '~/state/chat';
+import { chatStore, ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
+import { isProjectEmpty } from '~/state/server';
 import AgentCard from '~/components/AgentCard';
 import { agentTypeColor, isServiceType } from '~/lib/agent-types';
 
@@ -48,7 +49,13 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
   const [dragTgt, setDragTgt] = createSignal<string | null>(null);
 
   const orderedConvs = createMemo(() => {
-    const all = Object.keys(chatStore.state.convMap).filter((c) => !chatStore.state.archivedConvs[c]);
+    const all = Object.keys(chatStore.state.convMap).filter((c) => {
+      if (chatStore.state.archivedConvs[c]) return false;
+      // Synthetic Coordinator conv retires once initiatives appear AND
+      // the operator hasn't sent any real message in it yet (M6.6).
+      if (c === ONBOARDING_CONV_ID && !isProjectEmpty() && !chatStore.onboardingHasUserMessages()) return false;
+      return true;
+    });
     all.forEach((c) => chatStore.ensureConvMeta(c));
     const byRecency = (a: string, b: string) => {
       const aLast = (chatStore.state.convMap[a] ?? []).at(-1)?.ts ?? '';

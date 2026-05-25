@@ -18,6 +18,8 @@ interface Props {
   onToggleHistory: () => void;
   onRename: (next: string) => void;
   onArchive: () => void;
+  /** M7.7 — open per-type role memory viewer for this agent. */
+  onOpenRoleMemory?: () => void;
 }
 
 export default function ChatScopeStrip(props: Props) {
@@ -92,6 +94,14 @@ export default function ChatScopeStrip(props: Props) {
           class="p-1 rounded text-gray-500 hover:text-emerald-300 hover:bg-gray-800/60"
           title="Rename"
         >✎</button>
+        <Show when={props.onOpenRoleMemory}>
+          <button
+            type="button"
+            onClick={() => props.onOpenRoleMemory?.()}
+            class="p-1 rounded text-gray-500 hover:text-emerald-300 hover:bg-gray-800/60"
+            title="Role memory — accumulated REMEMBER: facts for this agent type"
+          >🧠</button>
+        </Show>
         <button
           type="button"
           onClick={props.onToggleHistory}

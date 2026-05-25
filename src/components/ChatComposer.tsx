@@ -67,7 +67,11 @@ export default function ChatComposer(props: {
     const sentImgs = imgs();
     const sentDocs = docs();
     const contextDocs = [...sentDocs];
-    if (props.conv === ONBOARDING_CONV_ID && isProjectEmpty()) {
+    if (
+      props.conv === ONBOARDING_CONV_ID &&
+      isProjectEmpty() &&
+      !chatStore.onboardingHasUserMessages()
+    ) {
       contextDocs.unshift({ filename: 'meshkore_coordinator_bootstrap.md', content: onboardingBootstrapBrief() });
     }
     setDraft(''); setImgs([]); setDocs([]); grow();

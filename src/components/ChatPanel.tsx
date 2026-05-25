@@ -36,6 +36,7 @@ import { log } from '~/lib/log';
 import ChatScopeStrip from '~/components/ChatScopeStrip';
 import ChatHistoryView from '~/components/ChatHistoryView';
 import ChatComposer from '~/components/ChatComposer';
+import RoleMemoryViewer from '~/components/RoleMemoryViewer';
 import {
   MessageBubble, ToolUseBubble, TaskLifecycleBubble,
 } from '~/components/ChatBubbles';
@@ -91,6 +92,7 @@ function buildStream(conv: string, msgs: ChatMsg[]): {
 export default function ChatPanel(props: { client: DaemonClient }) {
   const [cancelling, setCancelling] = createSignal(false);
   const [historyOpen, setHistoryOpen] = createSignal(false);
+  const [memoryOpen, setMemoryOpen] = createSignal(false);
   let threadEl: HTMLDivElement | undefined;
 
   const conv = () => chatStore.state.activeConv;
@@ -153,7 +155,16 @@ export default function ChatPanel(props: { client: DaemonClient }) {
           onToggleHistory={() => setHistoryOpen((v) => !v)}
           onRename={rename}
           onArchive={archive}
+          onOpenRoleMemory={() => setMemoryOpen(true)}
         />
+        <Show when={meta()}>
+          <RoleMemoryViewer
+            isOpen={memoryOpen()}
+            onClose={() => setMemoryOpen(false)}
+            type={meta()!.type}
+            rootPath={daemonStore.state.health?.identity ? null : null}
+          />
+        </Show>
 
         <Show when={!historyOpen()} fallback={
           <ChatHistoryView conv={conv()!} onClose={() => setHistoryOpen(false)} />

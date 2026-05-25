@@ -24,9 +24,11 @@ import { startLive, stopLive } from '~/state/live';
 // etc.) that haven't migrated yet. M3.2 / M3.3 / M4 / M5 switch each
 // component over and the old `store` retires when M9 lands.
 import { daemonStore } from '~/state/daemon';
-import { serverStore } from '~/state/server';
+import { serverStore, isProjectEmpty } from '~/state/server';
 import { projectsStore } from '~/state/projects';
 import { chatStore } from '~/state/chat';
+import { nav } from '~/state/nav';
+import { uiStore, type Zone } from '~/state/ui';
 import { attachEventBus } from '~/lib/event-bus';
 import { log } from '~/lib/log';
 import Header from '~/components/Header';
@@ -38,6 +40,8 @@ import ChatPanel from '~/components/ChatPanel';
 import ChatRail from '~/components/ChatRail';
 import NetworkPanel from '~/components/NetworkPanel';
 import ConfigPanel from '~/components/ConfigPanel';
+import BookmarksPanel from '~/components/zones/BookmarksPanel';
+import CronsPanel from '~/components/zones/CronsPanel';
 import { ModalHost } from '~/lib/modal';
 import { TokenUnlockHost } from '~/components/modals/TokenUnlockModal';
 import { DaemonOutdatedHost } from '~/components/modals/DaemonOutdatedModal';
@@ -89,6 +93,15 @@ export default function App() {
     if (ws) detachBus = attachEventBus(ws, s.client);
   });
 
+  // V46 / V78b — once the server snapshot lands, drop the synthetic
+  // Coordinator conv if the cluster is genuinely empty. Idempotent;
+  // re-runs are no-ops once seeded.
+  createEffect(() => {
+    if (status().kind !== 'connected') return;
+    if (!serverStore.state.snapshot) return;
+    if (isProjectEmpty()) chatStore.seedOnboardingConv();
+  });
+
   onCleanup(() => {
     if (detachBus) { detachBus(); detachBus = null; }
     stopLive();
@@ -132,17 +145,48 @@ export default function App() {
 
 type Tab = 'roadmap' | 'chat' | 'network' | 'config';
 
+const HASH_ZONES: readonly Zone[] = ['architect', 'bookmarks', 'crons', 'links', 'protocols', 'diary'];
+const MIGRATED_ZONES: readonly Zone[] = ['bookmarks', 'crons'];
+
 function Cockpit(props: {
   status: Extract<ConnectionStatus, { kind: 'connected' }>;
   selectedModule: string | null;
   onSelectModule: (id: string | null) => void;
 }) {
-  const [tab, setTab] = createSignal<Tab>('roadmap');
+  const tab = nav.cockpitTab;
+  const setTab = (t: Tab) => nav.setCockpitTab(t);
+  const zone = () => uiStore.state.activeZone;
+
+  // Hash deep-link: read `#bookmarks` (etc.) on mount + popstate, and
+  // write the current zone back to the URL when it changes.
+  onMount(() => {
+    const fromHash = window.location.hash.replace(/^#/, '') as Zone;
+    if (HASH_ZONES.includes(fromHash) && fromHash !== zone()) uiStore.setActiveZone(fromHash);
+    const onPop = () => {
+      const z = window.location.hash.replace(/^#/, '') as Zone;
+      if (HASH_ZONES.includes(z) && z !== uiStore.state.activeZone) uiStore.setActiveZone(z);
+    };
+    window.addEventListener('popstate', onPop);
+    window.addEventListener('hashchange', onPop);
+    onCleanup(() => {
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('hashchange', onPop);
+    });
+  });
+  createEffect(() => {
+    const z = zone();
+    const want = z === 'architect' ? '' : `#${z}`;
+    if (window.location.hash !== want) {
+      try { history.replaceState(null, '', `${window.location.pathname}${window.location.search}${want}`); } catch { /* ignore */ }
+    }
+  });
+
   return (
     <div class="min-h-screen flex">
       <ProjectsRail />
       <div class="flex-1 flex flex-col min-w-0">
       <Header activeTab={tab()} onTabChange={setTab} />
+      <Show when={!MIGRATED_ZONES.includes(zone())} fallback={<ZoneView zone={zone()} />}>
       <div class="bg-gray-950 border-b border-gray-800/60">
         <div class="max-w-[1600px] mx-auto px-5 flex items-center gap-1 h-10">
           <TabButton label="Roadmap" active={tab() === 'roadmap'} onClick={() => setTab('roadmap')} />
@@ -205,8 +249,22 @@ function Cockpit(props: {
           </Switch>
         </aside>
       </div>
+      </Show>
       </div>
     </div>
+  );
+}
+
+function ZoneView(props: { zone: Zone }) {
+  return (
+    <Switch fallback={<BookmarksPanel />}>
+      <Match when={props.zone === 'bookmarks'}>
+        <BookmarksPanel />
+      </Match>
+      <Match when={props.zone === 'crons'}>
+        <CronsPanel />
+      </Match>
+    </Switch>
   );
 }
 

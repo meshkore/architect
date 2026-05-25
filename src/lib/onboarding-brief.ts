@@ -5,6 +5,12 @@
  * the monolith's `onboardingBootstrapBrief()`.
  */
 
+export const ONBOARDING_COORDINATOR_AUTHOR = 'coordinator';
+
+export function onboardingWelcomeText(): string {
+  return "I'm your **Coordinator**. Tell me what this project is — goal, audience, rough shape — and I'll generate the initial roadmap, tasks and context in `.meshkore/`.";
+}
+
 export function onboardingBootstrapBrief(): string {
   return [
     '# Project bootstrap brief (MeshKore Coordinator role)',
