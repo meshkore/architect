@@ -8,6 +8,7 @@
 import { createSignal, onMount } from 'solid-js';
 import { genPrompt, type AddProjectAnswers } from './genPrompt';
 import { projectsRailScan } from '~/components/ProjectsRail';
+import { log } from '~/lib/log';
 import WizardStep from './WizardStep';
 
 export default function NewPromptScreen(props: { answers: AddProjectAnswers }) {
@@ -15,7 +16,7 @@ export default function NewPromptScreen(props: { answers: AddProjectAnswers }) {
   const prompt = () => genPrompt(props.answers);
 
   onMount(() => {
-    try { projectsRailScan.start(); } catch (e) { console.warn(e); }
+    try { projectsRailScan.start(); } catch (e) { log.warn('projectsRailScan.start failed', e); }
   });
 
   const copy = async () => {

@@ -67,6 +67,7 @@ export default function ChatScopeStrip(props: Props) {
       }>
         <span
           class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border"
+          /* dynamic: tint derived from the conversation's agent-type colour */
           style={{
             color: typeInfo().color,
             'border-color': `${typeInfo().color}55`,

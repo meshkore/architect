@@ -1,15 +1,14 @@
 /* @refresh reload */
 import { render } from 'solid-js/web';
 import App from '~/App';
+import { log } from '~/lib/log';
 import './index.css';
 
-// Visible early-life logs so we can diagnose mount problems from the browser
-// console. The Solid app prints further events as connection progresses.
-console.log('[architect] script loaded · version=0.2.0-alpha');
+log.info('script loaded · version=0.2.0-alpha');
 
 const root = document.getElementById('app');
 if (!root) {
-  console.error('[architect] #app mount node missing — index.html is broken');
+  log.error('#app mount node missing — index.html is broken');
   throw new Error('#app mount node missing');
 }
 
@@ -18,9 +17,9 @@ try {
   // the cockpit actually has multiple tabs/routes. For Hito 1 we want the
   // smallest possible runtime so any mount failure is easy to diagnose.
   render(() => <App />, root);
-  console.log('[architect] Solid mounted into #app');
+  log.info('Solid mounted into #app');
 } catch (err) {
-  console.error('[architect] Solid mount threw', err);
+  log.error('Solid mount threw', err);
   // Fall back to a plain HTML message so the user sees SOMETHING even when
   // the framework boot fails. Keeps the cockpit URL from looking dead.
   root.innerHTML = `

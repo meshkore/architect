@@ -56,6 +56,7 @@ export function Modal(props: ModalProps): JSX.Element {
               ? 'fixed inset-0 flex items-center justify-center p-4 pointer-events-none'
               : 'fixed inset-0 flex items-center justify-center p-4 bg-[rgba(2,4,12,0.78)] backdrop-blur'
           }
+          /* dynamic: callers can stack modals via props.zIndex */
           style={{ 'z-index': String(props.zIndex ?? 50) }}
           onClick={onBackdropClick}
         >

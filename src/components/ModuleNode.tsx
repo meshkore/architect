@@ -28,6 +28,7 @@ export default function ModuleNode(props: {
         class={`px-2 py-1.5 rounded-md flex items-center gap-2 transition-colors cursor-pointer ${
           isActive() ? 'bg-emerald-500/10 text-emerald-300' : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
         }`}
+        /* dynamic: padding scales with tree depth (props.depth, unbounded) */
         style={{ 'padding-left': `${0.5 + props.depth * 0.75}rem` }}
         onClick={() => props.onSelect(props.mod.id)}
       >

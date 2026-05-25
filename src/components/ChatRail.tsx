@@ -1,47 +1,11 @@
-/**
- * ChatRail — vertical column of agent cards left of the chat panel.
- *
- * Source of truth: `chatStore.state.convMap` + `convMeta` + `archivedConvs`
- * + `agentStatus`. Default order is "custom agents first (by recency),
- * then service agents". Operator-applied drag order is persisted to
- * localStorage under `meshcore-rail-order` (the V80 monolith key, so
- * existing operators don't lose their layout when the cockpit flips
- * to the Solid port).
- *
- * The empty-state "synthetic onboarding card" renders when there are
- * no convs yet — a stripe-coloured prompt that opens the new-agent
- * flow. It matches the monolith look so the V46 force-rebuild flow
- * is visually consistent.
- */
-
 import { For, Show, createMemo, createSignal } from 'solid-js';
 import { chatStore, ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
 import { isProjectEmpty } from '~/state/server';
 import AgentCard from '~/components/AgentCard';
 import { agentTypeColor, isServiceType } from '~/lib/agent-types';
+import { loadRailOrder, saveRailOrder } from './chat/rail-order';
 
-const RAIL_ORDER_KEY = 'meshcore-rail-order';
-
-function stripe(meta: ConvMeta): string {
-  return agentTypeColor(meta.type);
-}
-
-function isService(meta: ConvMeta | undefined): boolean {
-  return isServiceType(meta?.type);
-}
-
-function loadRailOrder(): string[] {
-  try {
-    const raw = localStorage.getItem(RAIL_ORDER_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((x) => typeof x === 'string') : [];
-  } catch { return []; }
-}
-
-function saveRailOrder(order: string[]): void {
-  try { localStorage.setItem(RAIL_ORDER_KEY, JSON.stringify(order)); } catch { /* quota */ }
-}
+const isService = (meta: ConvMeta | undefined) => isServiceType(meta?.type);
 
 export default function ChatRail(props: { onNewAgent?: () => void }) {
   const [order, setOrder] = createSignal<string[]>(loadRailOrder());
@@ -51,8 +15,8 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
   const orderedConvs = createMemo(() => {
     const all = Object.keys(chatStore.state.convMap).filter((c) => {
       if (chatStore.state.archivedConvs[c]) return false;
-      // Synthetic Coordinator conv retires once initiatives appear AND
-      // the operator hasn't sent any real message in it yet (M6.6).
+      // Synthetic Coordinator card retires once real initiatives appear
+      // AND the operator hasn't sent any real message in it yet (M6.6).
       if (c === ONBOARDING_CONV_ID && !isProjectEmpty() && !chatStore.onboardingHasUserMessages()) return false;
       return true;
     });
@@ -80,8 +44,6 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
     const streaming = list.some((m) => m.kind === 'assistant' && m.streaming);
     return streaming ? ('working' as const) : ('idle' as const);
   };
-
-  const select = (c: string) => chatStore.setActiveConv(c);
 
   const drop = (target: string) => {
     const src = dragSrc();
@@ -120,8 +82,8 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
                 active={chatStore.state.activeConv === c}
                 status={statusOf(c)}
                 pendingReview={false}
-                stripe={stripe(meta())}
-                onSelect={select}
+                stripe={agentTypeColor(meta().type)}
+                onSelect={chatStore.setActiveConv}
                 onDragStart={(id) => setDragSrc(id)}
                 onDragEnd={() => { setDragSrc(null); setDragTgt(null); }}
                 onDragOver={(id) => setDragTgt(id)}
@@ -138,6 +100,7 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
             type="button"
             onClick={() => props.onNewAgent?.()}
             class="text-left rounded-md border border-dashed border-emerald-500/35 bg-emerald-500/5 px-3 py-3 hover:border-emerald-500/55"
+            /* dynamic: stripe colour pulled from the agent-type registry */
             style={{ 'border-left': `3px solid ${agentTypeColor('custom')}` }}
             title="Create the first agent for this cluster"
           >

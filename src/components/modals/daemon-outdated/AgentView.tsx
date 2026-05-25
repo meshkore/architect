@@ -1,4 +1,5 @@
 import { JSX, createSignal } from 'solid-js';
+import { log } from '~/lib/log';
 export { AGENT_PROMPT } from './agent-prompt';
 
 export type AgentViewProps = {
@@ -14,7 +15,7 @@ export function AgentView(props: AgentViewProps): JSX.Element {
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch (err) {
-      console.warn('clipboard write failed', err);
+      log.warn('clipboard write failed', err);
     }
   };
   return (

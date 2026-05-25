@@ -29,26 +29,22 @@ So it now lives at the project root as a peer of `api/`, `daemon/`,
 | Item | Value |
 |---|---|
 | Production URL | <https://architect.meshkore.com> |
-| Cloudflare Pages project | `meshkore-architect` |
+| Cloudflare Pages project | `meshkore-portal` |
 | Account | `875bd2c5943a18d6c520d894ed12905f` (rjj@proars.com) |
-| Build output | `public/` (no build step yet) |
-| DNS | CNAME `architect` → `meshkore-architect.pages.dev` |
+| Build output | `dist/` (`vite build`) |
+| DNS | CNAME `architect` → `meshkore-portal.pages.dev` |
 
-### First-time setup (one-shot, from the dashboard)
-
-1. Create CF Pages project `meshkore-architect` (Direct Upload mode).
-2. Add custom domain `architect.meshkore.com`. CF auto-creates the CNAME
-   in the `meshkore.com` zone.
-3. From the repo: `cd architect && npm run deploy`.
-
-### Subsequent deploys
+### Deploy
 
 ```bash
 cd architect
-npm run deploy
+npm run deploy:prod        # vite build && wrangler pages deploy dist
 ```
 
-Or push to a branch tracked by CF Pages → auto-deploy.
+The `deploy:prod` script is the canonical path (see `package.json`).
+Previous deployments remain in the CF Pages dashboard; roll back with
+`npx wrangler pages deployment rollback <deployment-id>
+--project-name meshkore-portal`.
 
 ## Local development
 
@@ -114,29 +110,31 @@ npm run build         # vite build → dist/, includes dist/health.json
 `healthJsonPlugin` in `vite.config.ts` and exposes
 `{name, version, commit, built_at}` (M0.2).
 
-## Structure (current — Phase 1, monolithic)
+## Structure
 
 ```
 architect/
-├── public/
-│   ├── index.html       ← the entire app (~7k lines, will be split in Phase 3)
-│   └── _headers         ← CF Pages security + cache headers
+├── src/                 ← Solid + TypeScript source
+│   ├── components/      ← Header, ChatPanel, Modals, Wizards, zone panels…
+│   ├── state/           ← signal/store layer (server, ui, chat, daemon, projects)
+│   ├── lib/             ← log, http, ws, agent-types, version, cdn-loaders…
+│   └── App.tsx + main.tsx
+├── public/              ← static assets copied verbatim into dist/
+│   ├── _headers         ← CF Pages security + cache headers
+│   └── _redirects       ← SPA fallback (/*  /index.html  200)
+├── index.html           ← Vite entry; loads src/main.tsx
+├── vite.config.ts       ← Solid plugin + healthJsonPlugin (M0.2)
+├── tailwind.config.js
 ├── package.json
 ├── wrangler.toml
 └── README.md
 ```
 
-## Roadmap
+The V80 vanilla monolith (`public/index.html`, ~11k LOC) was retired
+on 2026-05-26 in M9.2 after M9.1 promoted the Solid build to prod;
+historical source remains in git history.
 
-| Phase | Goal | Status |
-|---|---|---|
-| 0 — prepare | `architect/` folder, configs | done (2026-05-12) |
-| 1 — parallel deploy | `architect.meshkore.com` live next to `meshkore.com/architect` | in progress |
-| 2 — cutover | `/architect*` on webapp 301 → `architect.meshkore.com` | pending |
-| 3 — modularize | Split `index.html` into `src/{shell,modules,daemon,state,utils}/` with Vite | pending |
-| 4 — framework? | Decide vanilla vs Preact vs Svelte after split | future |
-
-Tasks live in `.meshkore/modules/architect/tasks/`.
+Tasks live in `.meshkore/modules/portal/tasks/`.
 
 ## What this module is NOT
 

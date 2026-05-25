@@ -39,15 +39,20 @@ import InitiativesPanel from '~/components/InitiativesPanel';
 import ChatPanel from '~/components/ChatPanel';
 import ChatRail from '~/components/ChatRail';
 import NetworkPanel from '~/components/NetworkPanel';
-import ConfigPanel from '~/components/ConfigPanel';
+import ConfigPanel from '~/components/zones/ConfigPanel';
 import BookmarksPanel from '~/components/zones/BookmarksPanel';
 import CronsPanel from '~/components/zones/CronsPanel';
+import LinksPanel from '~/components/zones/LinksPanel';
+import ProtocolsPanel from '~/components/zones/ProtocolsPanel';
+import DiaryPanel from '~/components/zones/DiaryPanel';
 import { ModalHost } from '~/lib/modal';
 import { TokenUnlockHost } from '~/components/modals/TokenUnlockModal';
 import { DaemonOutdatedHost } from '~/components/modals/DaemonOutdatedModal';
 import { AutoUpdateFlowHost } from '~/components/modals/AutoUpdateFlow';
 import { NewAgentWizardHost, openNewAgentWizard } from '~/components/modals/NewAgentWizard';
 import { AddProjectWizardHost } from '~/components/modals/AddProjectWizard';
+import StoryBanner from '~/components/story/StoryBanner';
+import StoryRunner from '~/components/story/StoryRunner';
 
 export default function App() {
   const [status, setStatus] = createSignal<ConnectionStatus>({ kind: 'probing', message: 'Booting…' });
@@ -137,6 +142,7 @@ export default function App() {
       <AutoUpdateFlowHost />
       <NewAgentWizardHost />
       <AddProjectWizardHost />
+      <StoryRunner />
     </>
   );
 }
@@ -146,7 +152,7 @@ export default function App() {
 type Tab = 'roadmap' | 'chat' | 'network' | 'config';
 
 const HASH_ZONES: readonly Zone[] = ['architect', 'bookmarks', 'crons', 'links', 'protocols', 'diary'];
-const MIGRATED_ZONES: readonly Zone[] = ['bookmarks', 'crons'];
+const MIGRATED_ZONES: readonly Zone[] = ['bookmarks', 'crons', 'links', 'protocols', 'diary'];
 
 function Cockpit(props: {
   status: Extract<ConnectionStatus, { kind: 'connected' }>;
@@ -186,6 +192,7 @@ function Cockpit(props: {
       <ProjectsRail />
       <div class="flex-1 flex flex-col min-w-0">
       <Header activeTab={tab()} onTabChange={setTab} />
+      <StoryBanner />
       <Show when={!MIGRATED_ZONES.includes(zone())} fallback={<ZoneView zone={zone()} />}>
       <div class="bg-gray-950 border-b border-gray-800/60">
         <div class="max-w-[1600px] mx-auto px-5 flex items-center gap-1 h-10">
@@ -219,7 +226,7 @@ function Cockpit(props: {
               <NetworkPanel client={props.status.client} />
             </Match>
             <Match when={tab() === 'config'}>
-              <ConfigPanel client={props.status.client} />
+              <ConfigPanel />
             </Match>
           </Switch>
         </main>
@@ -263,6 +270,15 @@ function ZoneView(props: { zone: Zone }) {
       </Match>
       <Match when={props.zone === 'crons'}>
         <CronsPanel />
+      </Match>
+      <Match when={props.zone === 'links'}>
+        <LinksPanel />
+      </Match>
+      <Match when={props.zone === 'protocols'}>
+        <ProtocolsPanel />
+      </Match>
+      <Match when={props.zone === 'diary'}>
+        <DiaryPanel />
       </Match>
     </Switch>
   );

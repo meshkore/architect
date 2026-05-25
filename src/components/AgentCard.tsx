@@ -64,11 +64,13 @@ export default function AgentCard(props: AgentCardProps) {
         props.dragOver ? '!border-emerald-500/55 !bg-emerald-500/5' : '',
         props.pendingReview ? 'ring-1 ring-amber-400/70 ring-offset-0' : '',
       ].join(' ')}
+      /* dynamic: stripe colour comes from agent-type registry (props.stripe) */
       style={{ 'border-left': `3px solid ${props.stripe}` }}
     >
       <span class="flex items-center gap-1.5 text-[10px] font-mono">
         <span
           class={`px-1.5 py-0.5 rounded text-gray-200 ${props.status === 'working' ? 'animate-pulse-soft' : ''}`}
+          /* dynamic: border tint derived from props.stripe */
           style={{ background: 'rgba(17,24,39,0.7)', border: `1px solid ${props.stripe}55` }}
         >
           {props.meta.agentId}
@@ -96,8 +98,8 @@ export default function AgentCard(props: AgentCardProps) {
         >
           <span class="inline-flex items-center gap-0.5">
             <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft" />
-            <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft" style={{ 'animation-delay': '150ms' }} />
-            <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft" style={{ 'animation-delay': '300ms' }} />
+            <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:150ms]" />
+            <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:300ms]" />
           </span>
           <span class="text-emerald-300">working</span>
         </Show>

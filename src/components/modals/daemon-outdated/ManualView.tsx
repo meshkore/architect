@@ -1,4 +1,5 @@
 import { JSX, createSignal } from 'solid-js';
+import { log } from '~/lib/log';
 
 export type ManualViewProps = {
   shellCmd: string;
@@ -13,7 +14,7 @@ export function ManualView(props: ManualViewProps): JSX.Element {
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch (err) {
-      console.warn('clipboard write failed', err);
+      log.warn('clipboard write failed', err);
     }
   };
   return (

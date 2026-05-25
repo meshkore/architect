@@ -1,10 +1,7 @@
 /**
  * genPrompt — produces the "paste this in your coding agent" payload
- * for the Add Project wizard. Byte-identical to the V79e monolith's
- * `genPrompt()` (architect/public/index.html, line 5295) so the same
- * Claude Code / Cursor / Windsurf flow scaffolds the new cluster.
- *
- * Pure function — no DOM, no fetch. Easy to diff against monolith.
+ * for the Add Project wizard so Claude Code / Cursor / Windsurf can
+ * scaffold the new cluster. Pure function — no DOM, no fetch.
  */
 
 export interface AddProjectAnswers {

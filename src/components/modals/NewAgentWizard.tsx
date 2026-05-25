@@ -1,26 +1,10 @@
-/**
- * NewAgentWizard — single-step "+ new agent" modal (V79p / V80 parity).
- *
- * Operator decision 2026-05-25: no multi-step wizard. One screen:
- *   1. Hero pill row   — General coder (custom), selected by default
- *   2. Separator       — thin dashed border
- *   3. Service pills   — deploy / db / testing / audit / docs / review
- *   4. Title + Model   — grid row (text input + 140px select)
- *   5. Footer          — Cancel + Create agent (modal primitive default)
- *
- * Behaviour: type pills auto-populate Title until the operator types,
- * then the field locks. Enter submits. Pill colours come from
- * `agent-types.ts` (M5.5). The created conv is registered in chatStore
- * via createConv(); the picked type rides every subsequent dispatch as
- * `agent_type` + `agent_id` (M2.4 wiring).
- */
-
 import { For, Show, createSignal } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { Modal } from '~/components/Modal';
 import { chatStore } from '~/state/chat';
 import type { AgentType } from '~/state/chat';
 import { AGENT_TYPES, AGENT_TYPE_ORDER } from '~/lib/agent-types';
+import AgentTypePill from './new-agent/AgentTypePill';
 
 const MODEL_OPTIONS = ['auto', 'opus', 'sonnet', 'haiku'];
 
@@ -29,9 +13,7 @@ interface OpenOpts {
   defaultModel?: string;
 }
 
-interface State extends OpenOpts {
-  open: boolean;
-}
+interface State extends OpenOpts { open: boolean; }
 
 const [state, setState] = createSignal<State>({ open: false });
 
@@ -76,45 +58,13 @@ function NewAgentWizard(props: {
   const create = () => {
     const t = picked();
     const finalTitle = title().trim() || AGENT_TYPES[t].label;
-    chatStore.createConv({
-      type: t,
-      title: finalTitle,
-      model: model(),
-      scope: props.scope,
-    });
+    chatStore.createConv({ type: t, title: finalTitle, model: model(), scope: props.scope });
     props.onClose();
   };
 
   const onClose = (id: string | null) => {
     if (id === 'create') create();
     else props.onClose();
-  };
-
-  const Pill = (p: { type: AgentType; hero?: boolean }) => {
-    const info = AGENT_TYPES[p.type];
-    const active = () => picked() === p.type;
-    return (
-      <button
-        type="button"
-        onClick={() => pickType(p.type)}
-        aria-pressed={active()}
-        class="inline-flex items-center gap-1.5 rounded-full bg-[rgba(11,18,32,0.6)] border transition hover:bg-[rgba(11,18,32,0.9)]"
-        classList={{
-          'px-3 py-1.5 text-[13px]': p.hero,
-          'px-2.5 py-1 text-[12px]': !p.hero,
-          'text-white': active(),
-          'text-gray-300': !active(),
-        }}
-        style={{
-          'border-color': active() ? info.color : 'rgba(75,85,99,0.40)',
-          'border-left': `3px solid ${info.color}`,
-          'box-shadow': active() ? `inset 0 0 0 1px ${info.color}` : 'none',
-        }}
-      >
-        <span aria-hidden="true">{info.emoji}</span>
-        <span>{info.label}</span>
-      </button>
-    );
   };
 
   return (
@@ -131,14 +81,14 @@ function NewAgentWizard(props: {
     >
       <div class="space-y-4">
         <div>
-          <Pill type="custom" hero />
+          <AgentTypePill type="custom" hero picked={picked()} onPick={pickType} />
         </div>
         <div class="pt-3 border-t border-dashed border-gray-700/40 flex flex-wrap gap-1.5">
           <For each={AGENT_TYPE_ORDER.filter((t) => t !== 'custom')}>
-            {(t) => <Pill type={t} />}
+            {(t) => <AgentTypePill type={t} picked={picked()} onPick={pickType} />}
           </For>
         </div>
-        <div class="grid gap-2.5 items-end" style={{ 'grid-template-columns': '1fr 140px' }}>
+        <div class="grid gap-2.5 items-end grid-cols-[1fr_140px]">
           <div>
             <label class="block font-mono text-[10px] uppercase tracking-[0.14em] text-gray-500 mb-1">Title</label>
             <input
