@@ -27,14 +27,23 @@ import { daemonStore } from '~/state/daemon';
 import { serverStore } from '~/state/server';
 import { projectsStore } from '~/state/projects';
 import { chatStore } from '~/state/chat';
+import { attachEventBus } from '~/lib/event-bus';
 import { log } from '~/lib/log';
 import Header from '~/components/Header';
+import ProjectsRail from '~/components/ProjectsRail';
 import ModulesTree from '~/components/ModulesTree';
 import RoadmapList from '~/components/RoadmapList';
 import InitiativesPanel from '~/components/InitiativesPanel';
 import ChatPanel from '~/components/ChatPanel';
+import ChatRail from '~/components/ChatRail';
 import NetworkPanel from '~/components/NetworkPanel';
 import ConfigPanel from '~/components/ConfigPanel';
+import { ModalHost } from '~/lib/modal';
+import { TokenUnlockHost } from '~/components/modals/TokenUnlockModal';
+import { DaemonOutdatedHost } from '~/components/modals/DaemonOutdatedModal';
+import { AutoUpdateFlowHost } from '~/components/modals/AutoUpdateFlow';
+import { NewAgentWizardHost, openNewAgentWizard } from '~/components/modals/NewAgentWizard';
+import { AddProjectWizardHost } from '~/components/modals/AddProjectWizard';
 
 export default function App() {
   const [status, setStatus] = createSignal<ConnectionStatus>({ kind: 'probing', message: 'Booting…' });
@@ -46,11 +55,13 @@ export default function App() {
     void connect(setStatus);
   });
 
+  let detachBus: (() => void) | null = null;
+
   // When status flips to 'connected', wire BOTH the legacy `store` (used
   // by un-migrated components) AND the new bounded stores from M2. The
-  // new WS hub feeds chatStore + triggers serverStore refresh on
-  // `state.rebuilt` — that's how real-time roadmap rendering will work
-  // once M4 ships, with no polling.
+  // event-bus (M5.4) is the single WS → chatStore + serverStore hub,
+  // attached once per connection and detached on cleanup so HMR doesn't
+  // leak listeners (audit §2.3).
   createEffect(() => {
     const s = status();
     if (s.kind !== 'connected') return;
@@ -73,22 +84,13 @@ export default function App() {
     projectsStore.setActive(s.health.port, s.health.cluster_id ?? null);
     chatStore.bindCluster(s.health.cluster_id ?? null);
 
-    // Wire the new WS hub to chatStore + serverStore. Note we don't
-    // double-feed the legacy store — `startLive` already does that.
+    if (detachBus) { detachBus(); detachBus = null; }
     const ws = daemonStore.state.ws;
-    if (ws) {
-      ws.onAny((ev) => {
-        // Anything with a conv id flows into the chat store.
-        if (typeof ev.conv === 'string') chatStore.ingestEvent(ev);
-        // File-write events kick the server snapshot.
-        if (ev.type === 'state.rebuilt' || ev.type === 'task.updated' || ev.type === 'task.created') {
-          void serverStore.refresh(s.client);
-        }
-      });
-    }
+    if (ws) detachBus = attachEventBus(ws, s.client);
   });
 
   onCleanup(() => {
+    if (detachBus) { detachBus(); detachBus = null; }
     stopLive();
     daemonStore.disconnect();
   });
@@ -97,24 +99,32 @@ export default function App() {
   const saveTokenAndRetry = () => { storeToken(token()); retry(); };
 
   return (
-    <Switch>
-      <Match when={status().kind === 'connected'}>
-        <Cockpit
-          status={status() as Extract<ConnectionStatus, { kind: 'connected' }>}
-          selectedModule={selectedModule()}
-          onSelectModule={setSelectedModule}
-        />
-      </Match>
-      <Match when={status().kind !== 'connected'}>
-        <ConnectionGate
-          status={status()}
-          token={token()}
-          onTokenInput={setToken}
-          onRetry={retry}
-          onSubmitToken={saveTokenAndRetry}
-        />
-      </Match>
-    </Switch>
+    <>
+      <Switch>
+        <Match when={status().kind === 'connected'}>
+          <Cockpit
+            status={status() as Extract<ConnectionStatus, { kind: 'connected' }>}
+            selectedModule={selectedModule()}
+            onSelectModule={setSelectedModule}
+          />
+        </Match>
+        <Match when={status().kind !== 'connected'}>
+          <ConnectionGate
+            status={status()}
+            token={token()}
+            onTokenInput={setToken}
+            onRetry={retry}
+            onSubmitToken={saveTokenAndRetry}
+          />
+        </Match>
+      </Switch>
+      <ModalHost />
+      <TokenUnlockHost />
+      <DaemonOutdatedHost />
+      <AutoUpdateFlowHost />
+      <NewAgentWizardHost />
+      <AddProjectWizardHost />
+    </>
   );
 }
 
@@ -129,8 +139,10 @@ function Cockpit(props: {
 }) {
   const [tab, setTab] = createSignal<Tab>('roadmap');
   return (
-    <div class="min-h-screen flex flex-col">
-      <Header health={props.status.health} />
+    <div class="min-h-screen flex">
+      <ProjectsRail />
+      <div class="flex-1 flex flex-col min-w-0">
+      <Header activeTab={tab()} onTabChange={setTab} />
       <div class="bg-gray-950 border-b border-gray-800/60">
         <div class="max-w-[1600px] mx-auto px-5 flex items-center gap-1 h-10">
           <TabButton label="Roadmap" active={tab() === 'roadmap'} onClick={() => setTab('roadmap')} />
@@ -152,8 +164,11 @@ function Cockpit(props: {
               <RoadmapList moduleId={props.selectedModule} />
             </Match>
             <Match when={tab() === 'chat'}>
-              <div class="h-[calc(100vh-12rem)]">
-                <ChatPanel client={props.status.client} />
+              <div class="h-[calc(100vh-12rem)] flex gap-3 min-h-0">
+                <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />
+                <div class="flex-1 min-w-0">
+                  <ChatPanel client={props.status.client} />
+                </div>
               </div>
             </Match>
             <Match when={tab() === 'network'}>
@@ -189,6 +204,7 @@ function Cockpit(props: {
             </Match>
           </Switch>
         </aside>
+      </div>
       </div>
     </div>
   );

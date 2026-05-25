@@ -15,6 +15,7 @@ export type Tab = 'roadmap' | 'manage' | 'history' | 'diagrams';
 export type Zone = 'architect' | 'bookmarks' | 'crons' | 'links' | 'protocols' | 'diary';
 export type RailMode = 'full' | 'short';
 export type WsTab = 'tasks' | 'context' | 'diagrams' | 'modules';
+export type ModulesPill = 'all' | 'work' | 'stb';
 
 export interface UIStoreState {
   activeTab: Tab;
@@ -26,6 +27,8 @@ export interface UIStoreState {
   wsTab: WsTab;
   /** "Group by phase" toggle on the expanded initiative card (M4.2 spec). */
   initiativeGroupByPhase: boolean;
+  /** Modules-tree filter pill (V80 monolith parity). */
+  modulesPill: ModulesPill;
 }
 
 // localStorage keys — KEEP IN SYNC with V80 monolith.
@@ -38,6 +41,7 @@ const KEYS = {
   navFilter: 'mc-nav-filter',
   wsTab: 'mc-ws-tab',
   initiativeGroupByPhase: 'mc-initiative-group-by-phase',
+  modulesPill: 'mc-modules-pill',
 } as const;
 
 function readString<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
@@ -95,6 +99,7 @@ const initial: UIStoreState = {
   navFilter: localStorage.getItem(KEYS.navFilter) ?? '',
   wsTab: readString<WsTab>(KEYS.wsTab, 'tasks', ['tasks', 'context', 'diagrams', 'modules']),
   initiativeGroupByPhase: readBool(KEYS.initiativeGroupByPhase, false),
+  modulesPill: readString<ModulesPill>(KEYS.modulesPill, 'all', ['all', 'work', 'stb']),
 };
 
 const [state, setState] = createStore<UIStoreState>(initial);
@@ -139,6 +144,11 @@ function setInitiativeGroupByPhase(v: boolean): void {
   writeStr(KEYS.initiativeGroupByPhase, v ? '1' : '0');
 }
 
+function setModulesPill(p: ModulesPill): void {
+  setState('modulesPill', p);
+  writeStr(KEYS.modulesPill, p);
+}
+
 export const uiStore = {
   state,
   setActiveTab,
@@ -149,6 +159,7 @@ export const uiStore = {
   setNavFilter,
   setWsTab,
   setInitiativeGroupByPhase,
+  setModulesPill,
 };
 
 log.debug('state/ui loaded', state.activeTab, state.activeZone);

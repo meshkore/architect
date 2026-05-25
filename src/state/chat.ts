@@ -24,8 +24,10 @@
 
 import { createStore } from 'solid-js/store';
 import { createSignal } from 'solid-js';
-import type { DaemonEvent } from '~/lib/daemon-client';
+import type { DaemonClient, DaemonEvent, DispatchBody } from '~/lib/daemon-client';
 import { log } from '~/lib/log';
+
+export const ONBOARDING_CONV_ID = '_onboarding_v1';
 
 export type AgentType = 'custom' | 'deploy' | 'db' | 'testing' | 'audit' | 'docs' | 'review';
 
@@ -54,6 +56,8 @@ export interface ChatMsg {
   streaming?: boolean;
   stream_id?: string;
   cancelled?: boolean;
+  _placeholder_user?: boolean;
+  _placeholder?: boolean;
 }
 
 export interface ChatStoreState {
@@ -153,6 +157,41 @@ function setActiveConv(conv: string | null): void {
   setState('activeConv', conv);
 }
 
+/**
+ * Create an empty conversation with metadata and select it. Used by the
+ * NewAgentWizard (M6.5). Slug mirrors V79's `newConvSlugFromScope`:
+ * scope-encoded for custom agents, type+timestamp for services. Returns
+ * the slug so the caller can focus the composer.
+ */
+function createConv(opts: {
+  type: AgentType;
+  title: string;
+  model: string;
+  scope?: { module?: string | null; taskId?: string | null };
+}): string {
+  const stamp = new Date().toISOString().slice(5, 16).replace(/[:T-]/g, '').toLowerCase();
+  let slug: string;
+  if (opts.type === 'custom') {
+    const tid = opts.scope?.taskId?.trim();
+    const mod = opts.scope?.module?.trim();
+    if (tid) slug = `${(mod || 'general')}-${tid.toLowerCase()}-${stamp}`;
+    else if (mod) slug = `${mod}-${stamp}`;
+    else slug = `general-${stamp}`;
+  } else {
+    slug = `${opts.type}-${Date.now().toString(36).slice(-5)}`;
+  }
+  if (!state.convMap[slug]) setState('convMap', slug, []);
+  ensureConvMeta(slug, { type: opts.type, title: opts.title, model: opts.model });
+  setState('activeConv', slug);
+  return slug;
+}
+
+function setConvTitle(conv: string, title: string): void {
+  ensureConvMeta(conv);
+  setState('convMeta', conv, 'title', title);
+  saveConvMeta();
+}
+
 function archiveConv(conv: string): void {
   setState('archivedConvs', conv, true);
 }
@@ -194,14 +233,23 @@ function ingestEvent(ev: DaemonEvent): void {
   const arr = state.convMap[conv] ?? [];
   if (ev.type === 'chat.user') {
     const text = typeof ev.text === 'string' ? ev.text : '';
+    const author = typeof ev.author === 'string' ? ev.author : undefined;
+    // Replace any optimistic placeholder with the canonical echo so the
+    // bubble isn't duplicated (timestamps differ between client + daemon).
+    const phIdx = arr.findIndex(
+      (m) => m.kind === 'user' && m._placeholder_user && m.text === text && (!author || m.author === author),
+    );
+    if (phIdx >= 0) {
+      setState('convMap', conv, phIdx, {
+        author,
+        ts: typeof ev.ts === 'string' ? ev.ts : undefined,
+        _placeholder_user: undefined,
+      });
+      return;
+    }
     setState('convMap', conv, [
       ...arr,
-      {
-        kind: 'user',
-        text,
-        author: typeof ev.author === 'string' ? ev.author : undefined,
-        ts: typeof ev.ts === 'string' ? ev.ts : undefined,
-      },
+      { kind: 'user', text, author, ts: typeof ev.ts === 'string' ? ev.ts : undefined },
     ]);
     return;
   }
@@ -264,16 +312,76 @@ function ingestEvent(ev: DaemonEvent): void {
   }
 }
 
+export interface DispatchOpts {
+  conv: string;
+  text: string;
+  author?: string;
+  images?: Array<{ dataURL: string; mediaType: string }>;
+  contextDocs?: Array<{ filename: string; content: string }>;
+  scope?: { module?: string; taskId?: string; initiative?: string };
+}
+
+export type DispatchOutcome =
+  | { ok: true; conv: string }
+  | { ok: false; status: number; error?: string };
+
+/**
+ * Optimistically push a user bubble, POST /chat/dispatch, and reconcile.
+ * The ChatComposer (M5.3) calls this. WS echoes replace the placeholder
+ * in `ingestEvent`. On failure the placeholder is dropped so the user
+ * can edit + resend.
+ */
+async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promise<DispatchOutcome> {
+  const { conv, text, author, images = [], contextDocs = [], scope = {} } = opts;
+  const localTs = new Date().toISOString();
+  const arr = state.convMap[conv] ?? [];
+  setState('convMap', conv, [
+    ...arr,
+    { kind: 'user', text, author, ts: localTs, _placeholder_user: true },
+  ]);
+  const meta = state.convMeta[conv];
+  const body: DispatchBody = { conv, text };
+  if (author) body.author = author;
+  if (meta?.type) body.agent_type = meta.type;
+  if (meta?.agentId) body.agent_id = meta.agentId;
+  if (scope.module) body.module_id = scope.module;
+  if (scope.taskId) body.task_id = scope.taskId;
+  if (scope.initiative) body.initiative_id = scope.initiative;
+  if (images.length) {
+    body.images = images.map((i) => ({
+      type: 'image',
+      media_type: i.mediaType,
+      data: i.dataURL.includes(',') ? i.dataURL.split(',')[1] ?? '' : i.dataURL,
+    }));
+  }
+  if (contextDocs.length) body.context_docs = contextDocs;
+  const res = await client.chatDispatch(body);
+  if (!res.ok) {
+    const list = state.convMap[conv] ?? [];
+    const idx = list.findIndex((m) => m._placeholder_user && m.ts === localTs);
+    if (idx >= 0) {
+      setState('convMap', conv, list.filter((_, i) => i !== idx));
+    }
+    log.warn('chat dispatch failed', res.status, res.body);
+    return { ok: false, status: res.status, error: res.body };
+  }
+  if (!state.activeConv) setState('activeConv', res.data.conv ?? conv);
+  return { ok: true, conv: res.data.conv ?? conv };
+}
+
 export const chatStore = {
   state,
   bindCluster,
   ensureConvMeta,
+  createConv,
   setActiveConv,
+  setConvTitle,
   archiveConv,
   unarchiveConv,
   setAgentStatus,
   clearAgentStatus,
   ingestEvent,
+  dispatchMessage,
 };
 
 log.debug('state/chat loaded');

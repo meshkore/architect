@@ -1,367 +1,242 @@
 /**
- * ChatPanel — conversation rail + active conversation with live streaming.
+ * ChatPanel — central chat column (V80 monolith parity).
  *
- * Event model (mirrors the daemon's spawnCoordinatorChat invariants):
- *   chat.user                → one bubble per event
- *   chat.assistant.final     → one bubble per (conv, stream_id); replaces
- *                              the live delta bubble for that stream
- *   chat.assistant.delta     → live bubble, only shown if no .final yet
- *                              exists for the same stream_id
- *   chat.assistant (legacy)  → one bubble per event
- *   chat.cancelled           → live bubble becomes "cancelled" annotation
+ * Now reads from `chatStore`: activeConv + convMap[active] + convMeta.
+ * The conversation list lives in ChatRail (M5.1); this panel only
+ * cares about a single active conversation.
+ *
+ * Layout:
+ *   - ScopeStrip    : title · edit · history · archive
+ *   - Thread XOR History : the ≡ button swaps the body
+ *   - Composer      : textarea + Send + Stop (Stop only while running)
+ *
+ * Bubble stream model:
+ *   chat.user                → UserBubble (per event, dedup by ts+text)
+ *   chat.assistant.final     → AssistantBubble (replaces the live delta
+ *                              bubble for that stream_id, handled in
+ *                              chatStore.ingestEvent)
+ *   chat.assistant.delta     → live AssistantBubble (streaming flag on)
+ *   chat.cancelled           → live bubble flips to cancelled
+ *   tool.use / tool.result   → ToolUseBubble       (folded by ts)
+ *   task.created/transition/cancelled → TaskLifecycleBubble (folded)
  *
  * Visual ordering rule (operator request 2026-05-18):
- *   While a coordinator turn is live (an assistant.delta has no matching
- *   .final yet), any chat.user events the operator sends *during* that
- *   turn render ABOVE the live bubble — not below in chronological
- *   order. This makes the bottom-most bubble always be the live work,
- *   and matches the daemon's behaviour: those queued prompts are
- *   absorbed into the next chained turn, so the operator's mental
- *   model is "I'm prepending more instructions to a single ongoing
- *   piece of work".
- *
- * Stop button:
- *   Shown while the conversation is running. Calls POST /chat/cancel
- *   with the conv id. The daemon SIGTERMs the live claude child and
- *   drops the pending buffer.
+ *   While a coordinator turn is live, any chat.user events the operator
+ *   sends *during* that turn render ABOVE the live bubble — not below
+ *   in chronological order. The bottom-most bubble is always the live
+ *   work, matching the daemon: those queued prompts are absorbed into
+ *   the next chained turn.
  */
 
 import { For, Show, createMemo, createSignal, createEffect } from 'solid-js';
+import { chatStore, type ChatMsg } from '~/state/chat';
 import { store } from '~/state/store';
 import type { DaemonClient, DaemonEvent } from '~/lib/daemon-client';
 import { log } from '~/lib/log';
+import ChatScopeStrip from '~/components/ChatScopeStrip';
+import ChatHistoryView from '~/components/ChatHistoryView';
+import ChatComposer from '~/components/ChatComposer';
+import {
+  MessageBubble, ToolUseBubble, TaskLifecycleBubble,
+} from '~/components/ChatBubbles';
+import { agentTypeInfo, isServiceType } from '~/lib/agent-types';
+import { daemonStore } from '~/state/daemon';
+import { openTokenUnlockModal } from '~/components/modals/TokenUnlockModal';
+import { openDaemonOutdatedModal } from '~/components/modals/DaemonOutdatedModal';
 
-interface ChatMsg {
-  kind: 'user' | 'assistant';
-  text: string;
-  author?: string;
-  ts?: string;
-  streaming?: boolean;
-  stream_id?: string;
-  cancelled?: boolean;
-}
+type StreamItem =
+  | { kind: 'msg'; ts: string; msg: ChatMsg; prepend?: boolean }
+  | { kind: 'tool'; ts: string; ev: DaemonEvent }
+  | { kind: 'task'; ts: string; ev: DaemonEvent };
 
-interface ConvView {
-  preBubble: ChatMsg[];     // messages before the live bubble started
-  inFlightUsers: ChatMsg[]; // user msgs sent while the live bubble is open
-  liveBubble: ChatMsg | null;
-  liveStreamId: string | null;
-  cancelled: boolean;
-}
+function buildStream(conv: string, msgs: ChatMsg[]): {
+  pre: StreamItem[]; queued: StreamItem[]; live: ChatMsg | null;
+} {
+  // Locate the live bubble (assistant, streaming, last in list).
+  const liveIdx = msgs.findIndex((m) => m.kind === 'assistant' && m.streaming);
+  const live: ChatMsg | null = liveIdx >= 0 ? msgs[liveIdx]! : null;
+  const liveTs = live?.ts ?? null;
 
-function eventsByConv(): Map<string, DaemonEvent[]> {
-  const out = new Map<string, DaemonEvent[]>();
-  const fromSnapshot = (store.snapshot.timeline?.recent ?? []) as DaemonEvent[];
-  const live = store.events();
-  const seen = new Set<string>();
-  const all: DaemonEvent[] = [];
-  for (const ev of [...fromSnapshot, ...live]) {
-    const key = `${ev.type}|${ev['ts'] ?? ''}|${ev['stream_id'] ?? ''}|${ev['author'] ?? ''}|${(ev['text'] ?? '').toString().slice(0, 60)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    all.push(ev);
-  }
-  for (const ev of all) {
-    const t = String(ev.type);
-    if (!t.startsWith('chat.')) continue;
-    const conv = String(ev['conv'] ?? '');
-    if (!conv) continue;
-    if (!out.has(conv)) out.set(conv, []);
-    out.get(conv)!.push(ev);
-  }
-  return out;
-}
+  // Sidecar tool/task events for this conv from the live ring.
+  const events: DaemonEvent[] = (store.events() as DaemonEvent[])
+    .filter((e) => String(e['conv'] ?? '') === conv);
 
-/**
- * Build the view for a single conversation. Sorts events chronologically
- * and then splits user messages by whether they arrived before or during
- * the (single, latest) live assistant bubble.
- */
-function buildConvView(events: DaemonEvent[]): ConvView {
-  const sorted = [...events].sort((a, b) => String(a['ts'] ?? '').localeCompare(String(b['ts'] ?? '')));
+  const pre: StreamItem[] = [];
+  const queued: StreamItem[] = [];
 
-  // Identify the active stream: latest delta whose stream_id has no
-  // matching .final and hasn't been cancelled. Cancellation events
-  // close the stream visually but keep the bubble.
-  const finals = new Set<string>();
-  const cancelledStreams = new Set<string>();
-  for (const e of sorted) {
-    if (e.type === 'chat.assistant.final' && e['stream_id']) finals.add(String(e['stream_id']));
-  }
-  // cancellation isn't carried by a stream_id on the cancel event; the
-  // conv-level cancelled flag below catches that case.
-  void cancelledStreams;
-
-  let liveStreamId: string | null = null;
-  let liveStartTs: string | null = null;
-  let liveBubble: ChatMsg | null = null;
-
-  for (const e of sorted) {
-    if (e.type === 'chat.assistant.delta' && e['stream_id'] && !finals.has(String(e['stream_id']))) {
-      const sid = String(e['stream_id']);
-      // Capture the earliest start ts per stream + latest text per stream.
-      if (!liveStartTs || String(e['ts'] ?? '') < liveStartTs) liveStartTs = String(e['ts'] ?? '');
-      liveStreamId = sid;
-      liveBubble = {
-        kind: 'assistant',
-        text: String(e['text'] ?? ''),
-        author: String(e['author'] ?? 'coordinator'),
-        ts: String(e['ts'] ?? ''),
-        streaming: true,
-        stream_id: sid,
-      };
+  msgs.forEach((m, i) => {
+    if (i === liveIdx) return;
+    const ts = m.ts ?? '';
+    const item: StreamItem = { kind: 'msg', ts, msg: m };
+    if (live && m.kind === 'user' && liveTs && ts > liveTs) {
+      queued.push({ ...item, prepend: true });
+    } else {
+      pre.push(item);
     }
-  }
+  });
 
-  // Was the conversation cancelled? Last chat.cancelled wins for the
-  // currently-open turn (if any).
-  let cancelled = false;
-  for (const e of sorted) {
-    if (e.type === 'chat.cancelled') cancelled = true;
-    if (e.type === 'chat.user' || e.type === 'chat.assistant.final') cancelled = false; // a new turn after the cancel resets the flag
-  }
-
-  const preBubble: ChatMsg[] = [];
-  const inFlightUsers: ChatMsg[] = [];
-
-  for (const e of sorted) {
+  for (const e of events) {
+    const t = String(e.type);
     const ts = String(e['ts'] ?? '');
-    if (e.type === 'chat.user') {
-      const msg: ChatMsg = {
-        kind: 'user', text: String(e['text'] ?? ''),
-        author: String(e['author'] ?? ''), ts,
-      };
-      if (liveStartTs && ts > liveStartTs) inFlightUsers.push(msg);
-      else preBubble.push(msg);
-    } else if (e.type === 'chat.assistant.final') {
-      preBubble.push({
-        kind: 'assistant', text: String(e['text'] ?? ''),
-        author: String(e['author'] ?? 'coordinator'), ts,
-        stream_id: String(e['stream_id'] ?? ''),
-      });
-    } else if (e.type === 'chat.assistant') {
-      preBubble.push({
-        kind: 'assistant', text: String(e['text'] ?? ''),
-        author: String(e['author'] ?? 'coordinator'), ts,
-      });
+    if (t === 'tool.use' || t === 'tool.result') {
+      pre.push({ kind: 'tool', ts, ev: e });
+    } else if (t.startsWith('task.')) {
+      pre.push({ kind: 'task', ts, ev: e });
     }
   }
-
-  if (liveBubble && cancelled) {
-    liveBubble.streaming = false;
-    liveBubble.cancelled = true;
-  }
-
-  return { preBubble, inFlightUsers, liveBubble, liveStreamId, cancelled };
+  pre.sort((a, b) => a.ts.localeCompare(b.ts));
+  return { pre, queued, live };
 }
 
 export default function ChatPanel(props: { client: DaemonClient }) {
-  const convs = createMemo(() => eventsByConv());
-  const [activeConv, setActiveConv] = createSignal<string | null>(null);
-  const [draft, setDraft] = createSignal('');
-  const [sending, setSending] = createSignal(false);
   const [cancelling, setCancelling] = createSignal(false);
+  const [historyOpen, setHistoryOpen] = createSignal(false);
+  let threadEl: HTMLDivElement | undefined;
 
-  // Auto-pick the most recent conversation as active on first load.
-  createEffect(() => {
-    if (activeConv() !== null) return;
-    const c = convs();
-    if (c.size === 0) return;
-    const sorted = [...c.entries()].sort((a, b) => {
-      const at = (a[1][a[1].length - 1]?.['ts'] ?? '') as string;
-      const bt = (b[1][b[1].length - 1]?.['ts'] ?? '') as string;
-      return bt.localeCompare(at);
-    });
-    setActiveConv(sorted[0]?.[0] ?? null);
-  });
-
-  const view = createMemo<ConvView>(() => {
-    const conv = activeConv();
-    if (!conv) return { preBubble: [], inFlightUsers: [], liveBubble: null, liveStreamId: null, cancelled: false };
-    const evs = convs().get(conv) ?? [];
-    return buildConvView(evs);
-  });
-
-  const isRunning = () => view().liveBubble !== null && view().liveBubble!.streaming === true;
-
-  const send = async () => {
-    const text = draft().trim();
-    if (!text || sending()) return;
-    setSending(true);
-    try {
-      const body: { text: string; conv?: string } = { text };
-      if (activeConv()) body.conv = activeConv()!;
-      log.info('chat send', body);
-      const res = await props.client.chatDispatch(body);
-      if (!res.ok) {
-        log.error('chat send failed', res.status, res.body);
-      } else if (res.data.conv && !activeConv()) {
-        // If the server queued the turn (already running), we don't
-        // need to update local state — the chat.user event arrives via
-        // WS and the view re-renders with the message above the live
-        // bubble. Just set the active conv if we didn't have one.
-        setActiveConv(res.data.conv);
-      }
-      setDraft('');
-    } finally {
-      setSending(false);
-    }
+  const conv = () => chatStore.state.activeConv;
+  const meta = () => {
+    const c = conv();
+    return c ? chatStore.state.convMeta[c] : undefined;
   };
+  const msgs = (): ChatMsg[] => {
+    const c = conv();
+    return c ? chatStore.state.convMap[c] ?? [] : [];
+  };
+  const stream = createMemo(() => {
+    const c = conv();
+    if (!c) return { pre: [] as StreamItem[], queued: [] as StreamItem[], live: null as ChatMsg | null };
+    return buildStream(c, msgs());
+  });
+  const isRunning = () => stream().live !== null;
+
+  // Auto-scroll the thread to the bottom on new content.
+  createEffect(() => {
+    void stream();
+    queueMicrotask(() => {
+      if (threadEl && !historyOpen()) threadEl.scrollTop = threadEl.scrollHeight;
+    });
+  });
+  // Close history when the active conv changes.
+  createEffect(() => { void conv(); setHistoryOpen(false); });
 
   const stop = async () => {
-    const conv = activeConv();
-    if (!conv || cancelling()) return;
+    const c = conv();
+    if (!c || cancelling()) return;
     setCancelling(true);
     try {
-      log.info('chat cancel', { conv });
-      const res = await props.client.chatCancel(conv);
+      log.info('chat cancel', { conv: c });
+      const res = await props.client.chatCancel(c);
       if (!res.ok) log.error('chat cancel failed', res.status, res.body);
-    } finally {
-      setCancelling(false);
-    }
+    } finally { setCancelling(false); }
+  };
+
+  const archive = () => {
+    const c = conv();
+    if (!c) return;
+    chatStore.archiveConv(c);
+    chatStore.setActiveConv(null);
+  };
+
+  const rename = (next: string) => {
+    const c = conv();
+    if (!c) return;
+    chatStore.setConvTitle(c, next);
   };
 
   return (
-    <div class="flex flex-col h-full min-h-0">
-      <div class="flex items-center justify-between mb-3 px-2">
-        <h2 class="text-xs font-mono uppercase tracking-wider text-gray-500">Chat</h2>
-        <button
-          type="button"
-          onClick={() => { setActiveConv(null); setDraft(''); }}
-          class="text-xs text-gray-500 hover:text-emerald-400"
-          title="Start a new conversation"
-        >
-          + new
-        </button>
-      </div>
-
-      {/* Conversation list */}
-      <ul class="space-y-1 mb-3 max-h-32 overflow-y-auto pr-1">
-        <For each={[...convs().entries()]}>
-          {([id]) => (
-            <li>
-              <button
-                type="button"
-                onClick={() => setActiveConv(id)}
-                class={`w-full text-left px-2 py-1 rounded text-xs font-mono truncate transition-colors ${
-                  activeConv() === id
-                    ? 'bg-emerald-500/10 text-emerald-300'
-                    : 'text-gray-500 hover:bg-gray-800/60 hover:text-gray-300'
-                }`}
-              >
-                {id}
-              </button>
-            </li>
-          )}
-        </For>
-        <Show when={convs().size === 0}>
-          <li class="text-xs text-gray-600 px-2">No conversations yet.</li>
-        </Show>
-      </ul>
-
-      {/* Messages — preBubble → inFlightUsers → liveBubble (at the bottom) */}
-      <div class="flex-1 min-h-0 overflow-y-auto bg-gray-950/40 border border-gray-800/60 rounded-lg p-3 mb-3 space-y-3">
-        <Show when={activeConv() !== null} fallback={<EmptyChat />}>
-          <For each={view().preBubble}>
-            {(m) => <Bubble msg={m} />}
-          </For>
-          <For each={view().inFlightUsers}>
-            {(m) => <Bubble msg={m} prepend />}
-          </For>
-          <Show when={view().liveBubble}>
-            <Bubble msg={view().liveBubble!} />
-          </Show>
-        </Show>
-      </div>
-
-      {/* Composer */}
-      <div class="flex gap-2 items-end">
-        <textarea
-          value={draft()}
-          onInput={(e) => setDraft((e.currentTarget as HTMLTextAreaElement).value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); }
-          }}
-          placeholder={isRunning()
-            ? 'Add more instructions — they go above the live work and get merged into the next turn…'
-            : activeConv() ? 'Reply…' : 'Start a conversation…'}
-          rows="2"
-          disabled={sending()}
-          class="flex-1 bg-gray-950 border border-gray-800 rounded-md px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500/50 disabled:opacity-60 resize-none"
+    <div class="flex flex-col h-full min-h-0 bg-gray-950/30 border border-gray-800/60 rounded-lg overflow-hidden">
+      <Show when={conv()} fallback={<EmptyChat />}>
+        <ChatScopeStrip
+          conv={conv()!}
+          meta={meta()}
+          historyOpen={historyOpen()}
+          onToggleHistory={() => setHistoryOpen((v) => !v)}
+          onRename={rename}
+          onArchive={archive}
         />
-        <div class="flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={() => void send()}
-            disabled={sending() || draft().trim().length === 0}
-            class="px-3 py-2 rounded-md bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-semibold text-xs transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {sending() ? '…' : 'Send'}
-          </button>
-          <Show when={isRunning()}>
+
+        <Show when={!historyOpen()} fallback={
+          <ChatHistoryView conv={conv()!} onClose={() => setHistoryOpen(false)} />
+        }>
+          <div ref={threadEl} class="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
+            <For each={stream().pre}>
+              {(it) => {
+                if (it.kind === 'msg') return <MessageBubble msg={it.msg} />;
+                if (it.kind === 'tool') return <ToolUseBubble ev={it.ev} />;
+                return <TaskLifecycleBubble ev={it.ev} />;
+              }}
+            </For>
+            <For each={stream().queued}>
+              {(it) => it.kind === 'msg'
+                ? <MessageBubble msg={it.msg} prepend />
+                : null}
+            </For>
+            <Show when={stream().live}>
+              <MessageBubble msg={stream().live!} />
+            </Show>
+          </div>
+        </Show>
+
+        <Show when={isRunning()}>
+          <div class="px-3 pt-2 flex justify-end border-t border-gray-800/60">
             <button
               type="button"
               onClick={() => void stop()}
               disabled={cancelling()}
-              class="px-3 py-2 rounded-md bg-red-500/15 hover:bg-red-500/25 border border-red-500/40 text-red-300 font-semibold text-xs transition-colors disabled:opacity-60"
+              class="px-3 py-1 rounded-md bg-red-500/15 hover:bg-red-500/25 border border-red-500/40 text-red-300 font-semibold text-[11px] transition-colors disabled:opacity-60"
               title="Stop the coordinator. The pending buffer is dropped."
-            >
-              {cancelling() ? '…' : 'Stop'}
-            </button>
-          </Show>
-        </div>
-      </div>
-
-      <Show when={isRunning()}>
-        <p class="text-[11px] text-emerald-400/70 mt-2 px-1 leading-snug">
-          A turn is in progress. Any message you send right now is queued and merged into the next turn instead of starting a new one.
-        </p>
-      </Show>
-      <Show when={view().cancelled}>
-        <p class="text-[11px] text-red-400/80 mt-2 px-1 leading-snug">
-          Turn cancelled. Send a new message to start a fresh turn.
-        </p>
+            >{cancelling() ? 'stopping…' : 'Stop'}</button>
+          </div>
+        </Show>
+        <ChatComposer
+          client={props.client}
+          conv={conv()!}
+          placeholder={isRunning()
+            ? 'Add more instructions — they go above the live work and get merged into the next turn…'
+            : 'Reply…'}
+          onDaemonOutdated={openDaemonOutdatedModal}
+          onTokenRejected={() => {
+            const h = daemonStore.state.health;
+            if (!h) return;
+            openTokenUnlockModal({
+              project: { port: h.port, cluster_id: h.cluster_id ?? null, cluster_name: h.cluster_name ?? null },
+              reason: 'Token rejected by /chat/dispatch — paste a fresh one.',
+              onUnlocked: (token) => { props.client.transport.token = token; },
+            });
+          }}
+        />
+        <Show when={isServiceType(meta()?.type) && msgs().length === 0}>
+          <AgentRoleHint type={meta()!.type} />
+        </Show>
       </Show>
     </div>
   );
 }
 
-function Bubble(props: { msg: ChatMsg; prepend?: boolean }) {
-  const isUser = () => props.msg.kind === 'user';
+function AgentRoleHint(props: { type: import('~/state/chat').AgentType }) {
+  const info = () => agentTypeInfo(props.type);
   return (
-    <div class={`flex flex-col gap-1 ${isUser() ? 'items-end' : 'items-start'}`}>
-      <span class="text-[10px] font-mono text-gray-600 flex items-center gap-1.5">
-        {props.msg.author}
-        <Show when={props.msg.streaming}>
-          <span class="text-emerald-400">· streaming</span>
-        </Show>
-        <Show when={props.msg.cancelled}>
-          <span class="text-red-400">· cancelled</span>
-        </Show>
-        <Show when={props.prepend}>
-          <span class="text-amber-400/80">· queued (merges into next turn)</span>
-        </Show>
+    <div
+      class="mx-3 mb-3 px-3 py-2 rounded-md border text-[11px] leading-snug text-gray-300"
+      style={{
+        'border-color': `${info().color}40`,
+        background: `${info().color}10`,
+      }}
+    >
+      <span class="font-mono text-[10px] mr-1" style={{ color: info().color }}>
+        {info().emoji} {info().label} —
       </span>
-      <div class={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
-        isUser()
-          ? props.prepend
-            ? 'bg-amber-500/10 text-amber-100 border border-amber-500/30'
-            : 'bg-emerald-500/15 text-emerald-100 border border-emerald-500/30'
-          : props.msg.cancelled
-            ? 'bg-red-500/10 text-red-200 border border-red-500/30'
-            : 'bg-gray-900/70 text-gray-200 border border-gray-800'
-      }`}>
-        {props.msg.text}
-        <Show when={props.msg.streaming}>
-          <span class="inline-block w-2 h-3.5 bg-emerald-400 ml-1 align-middle animate-pulse-soft" />
-        </Show>
-      </div>
+      <span>{info().role}</span>
     </div>
   );
 }
 
 function EmptyChat() {
   return (
-    <p class="text-center text-xs text-gray-600 py-8">Pick a conversation or send a message to start one.</p>
+    <div class="flex-1 flex items-center justify-center p-8">
+      <p class="text-center text-xs text-gray-600 max-w-xs">
+        Pick an agent in the rail on the left, or click ＋ to start a new conversation.
+      </p>
+    </div>
   );
 }

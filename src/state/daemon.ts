@@ -105,12 +105,34 @@ function setAutoUpdate(flag: boolean): void {
   setState('autoUpdateEnabled', flag);
 }
 
+/**
+ * Re-fetch /health on the active client and refresh the version gate.
+ * Used by the V47 modal's "I've updated — recheck" button. Returns
+ * true iff the daemon now meets MIN_DAEMON_VERSION.
+ */
+async function recheckHealth(): Promise<boolean> {
+  const client = state.client;
+  if (!client) return false;
+  const r = await client.health();
+  if (!r.ok) return false;
+  const v = parseDaemonVersion(r.data.version);
+  const supportsSelfUpdate = (r.data.features ?? []).includes('self-update');
+  setState({
+    health: r.data,
+    version: v,
+    outdated: !meetsMinimum(v),
+    supportsSelfUpdate,
+  });
+  return !state.outdated;
+}
+
 export const daemonStore = {
   state,
   attachClient,
   disconnect,
   setPhase,
   setAutoUpdate,
+  recheckHealth,
 };
 
 // Convenience selectors for components that just need one slice.

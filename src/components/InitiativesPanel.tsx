@@ -1,59 +1,113 @@
 /**
- * InitiativesPanel — collapsible right rail showing top-level initiatives
- * with task progress per initiative. Same data source as the monolith's
- * initiatives view but minimal.
+ * InitiativesPanel — central roadmap view (M4.2).
+ *
+ * Renders initiatives as cards with expand-to-task-grid layout.
+ * Real-time: reads from `serverStore` memos, which refresh on
+ * `state.rebuilt` / `task.updated` events wired in App.tsx, so
+ * frontmatter mutations propagate without operator action.
  */
 
-import { For, Show } from 'solid-js';
-import { store } from '~/state/store';
+import { For, Show, createSignal, createMemo } from 'solid-js';
+import { allInitiatives, allTasks, isProjectEmpty, type ServerInitiative, type ServerTask } from '~/state/server';
+import InitiativeCard from '~/components/InitiativeCard';
+import EmptyOnboardingPanel from '~/components/EmptyOnboardingPanel';
+
+type StatusFilter = 'all' | 'active' | 'next' | 'backlog';
+
+const FILTERS: { id: StatusFilter; label: string }[] = [
+  { id: 'all',     label: 'all' },
+  { id: 'active',  label: 'active' },
+  { id: 'next',    label: 'next' },
+  { id: 'backlog', label: 'backlog' },
+];
 
 export default function InitiativesPanel() {
+  const [status, setStatus] = createSignal<StatusFilter>('all');
+  const [query, setQuery] = createSignal('');
+
+  const tasksByInitiative = createMemo(() => {
+    const map = new Map<string, ServerTask[]>();
+    for (const t of allTasks()) {
+      if (!t.initiative) continue;
+      const arr = map.get(t.initiative);
+      if (arr) arr.push(t); else map.set(t.initiative, [t]);
+    }
+    return map;
+  });
+
+  const filtered = createMemo<ServerInitiative[]>(() => {
+    const q = query().trim().toLowerCase();
+    const st = status();
+    return allInitiatives().filter((it) => {
+      if (st !== 'all' && it.status !== st) return false;
+      if (!q) return true;
+      const hay = `${it.title} ${it.id} ${it.oneliner ?? ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+  });
+
   return (
-    <aside class="text-sm">
-      <div class="text-xs font-mono uppercase tracking-wider text-gray-500 mb-2 px-2">Initiatives</div>
-      <Show when={store.initiatives().length > 0} fallback={<EmptyInitiatives />}>
-        <ul class="space-y-1.5">
-          <For each={store.initiatives()}>
-            {(it) => (
-              <li class="px-2 py-2 rounded-md bg-gray-900/40 border border-gray-800/60">
-                <div class="flex items-start justify-between gap-2 mb-1">
-                  <span class="text-gray-200 font-medium text-sm truncate">{it.title}</span>
-                  <Show when={it.status}>
-                    <span class="font-mono text-[10px] text-gray-500 uppercase">{it.status}</span>
-                  </Show>
-                </div>
-                <Show when={it.oneliner}>
-                  <p class="text-xs text-gray-500 leading-snug">{it.oneliner}</p>
-                </Show>
-                <ProgressBar id={it.id} />
-              </li>
-            )}
-          </For>
-        </ul>
+    <section class="min-w-0">
+      <Show when={!isProjectEmpty()} fallback={<EmptyOnboardingPanel />}>
+        <header class="flex flex-wrap items-center gap-2 mb-4 sticky top-14 bg-gray-950/80 backdrop-blur-md py-3 -mt-3 z-20">
+          <h2 class="text-sm font-mono uppercase tracking-wider text-gray-500">Initiatives</h2>
+          <input
+            type="text"
+            placeholder="Filter…"
+            value={query()}
+            onInput={(e) => setQuery((e.currentTarget as HTMLInputElement).value)}
+            class="ml-auto bg-gray-900/60 border border-gray-800 rounded-md px-3 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-500/50 w-44"
+          />
+          <div class="flex items-center gap-1">
+            <For each={FILTERS}>
+              {(f) => (
+                <button
+                  type="button"
+                  onClick={() => setStatus(f.id)}
+                  class={`px-2.5 py-1 rounded-md text-[11px] font-mono uppercase tracking-wider transition-colors ${
+                    status() === f.id
+                      ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40'
+                      : 'text-gray-500 hover:text-gray-300 border border-transparent'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              )}
+            </For>
+          </div>
+        </header>
+
+        <Show when={filtered().length > 0} fallback={<NoMatch totalInitiatives={allInitiatives().length} />}>
+          <ul class="space-y-4">
+            <For each={filtered()}>
+              {(it) => (
+                <li>
+                  <InitiativeCard
+                    initiative={it}
+                    tasks={tasksByInitiative().get(it.id) ?? []}
+                  />
+                </li>
+              )}
+            </For>
+          </ul>
+        </Show>
+
+        <p class="text-xs text-gray-600 mt-6">
+          {filtered().length} of {allInitiatives().length} initiatives · {allTasks().length} tasks · live from daemon
+        </p>
       </Show>
-    </aside>
+    </section>
   );
 }
 
-function ProgressBar(props: { id: string }) {
-  const tasks = () => store.tasks().filter((t) => t.initiative === props.id);
-  const done = () => tasks().filter((t) => t.status === 'done').length;
-  const total = () => tasks().length;
-  const pct = () => total() === 0 ? 0 : Math.round((done() / total()) * 100);
+function NoMatch(props: { totalInitiatives: number }) {
   return (
-    <div class="mt-2">
-      <div class="h-1 bg-gray-800 rounded-full overflow-hidden">
-        <div class="h-full bg-emerald-500/70" style={{ width: `${pct()}%` }} />
-      </div>
-      <div class="text-[10px] text-gray-600 mt-1 font-mono">{done()}/{total()} · {pct()}%</div>
+    <div class="text-center py-16 text-gray-500">
+      <p class="text-sm">
+        {props.totalInitiatives === 0
+          ? 'No initiatives loaded yet.'
+          : 'No initiatives match this filter.'}
+      </p>
     </div>
-  );
-}
-
-function EmptyInitiatives() {
-  return (
-    <p class="text-xs text-gray-600 px-2 mt-3 leading-relaxed">
-      No initiatives declared. Add files under <span class="font-mono">.meshkore/roadmap/initiatives/</span> and reload.
-    </p>
   );
 }
