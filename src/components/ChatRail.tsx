@@ -61,17 +61,17 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
   };
 
   return (
-    <div class="flex flex-col gap-2 h-full min-h-0 w-[200px] flex-shrink-0">
-      <div class="flex items-center justify-between px-1">
-        <span class="text-[10px] font-mono uppercase tracking-wider text-gray-500">Agents</span>
+    <aside class="chat-rail-stack">
+      <div class="chat-rail-header">
+        <span class="chat-rail-header-label">Agents</span>
         <button
           type="button"
           onClick={() => props.onNewAgent?.()}
-          class="w-6 h-6 rounded-md border border-emerald-500/30 text-emerald-300 hover:border-emerald-500/55 hover:bg-emerald-500/15 transition flex items-center justify-center text-base leading-none"
+          class="chat-rail-new-btn"
           title="New agent / conversation"
         >＋</button>
       </div>
-      <div class="flex-1 min-h-0 overflow-y-auto pr-1 flex flex-col gap-1.5">
+      <div class="flex-1 min-h-0 overflow-y-auto chat-rail-pinned">
         <For each={orderedConvs()}>
           {(c) => {
             const meta = () => chatStore.ensureConvMeta(c);
@@ -111,6 +111,6 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
           </button>
         </Show>
       </div>
-    </div>
+    </aside>
   );
 }

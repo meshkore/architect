@@ -1,6 +1,7 @@
 /* @import MUST come before @tailwind directives — CSS spec requires
    @import statements at the very top of the stylesheet. Vite/PostCSS
    silently drops them otherwise. */
+@import './styles/cockpit.css';
 @import './styles/projects-rail.css';
 
 @tailwind base;
