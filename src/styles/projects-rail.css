@@ -92,9 +92,13 @@ body.col-reordering .projects-rail-resize {
 .projects-rail-list::-webkit-scrollbar { width: 0; }
 
 /* ── Row wrapper + overlay actions ───────────────────────────────── */
+/* V83 — flex-direction: column so the .proj-row-confirm strip
+   (delete confirmation) can stack BELOW the row. .proj-actions stays
+   position:absolute so it still floats over the row on hover. */
 .proj-row-wrap {
   position: relative;
-  display: flex; align-items: stretch;
+  display: flex;
+  flex-direction: column;
   width: 100%; min-width: 0;
 }
 .proj-row {
@@ -380,3 +384,53 @@ body.col-reordering .projects-rail-resize {
   color: #34d399;
   text-shadow: 0 0 8px rgba(52, 211, 153, 0.8);
 }
+
+/* ── V83 — inline delete confirmation strip ──────────────────────── */
+/* Appears as a second row below the project name when the operator
+   clicks the delete (forget) action. Replaces the prior browser
+   confirm() dialog. The wrap is now flex-direction:column so this
+   strip stacks naturally below .proj-row. */
+.proj-row-confirm {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px 6px 16px;
+  margin-top: 2px;
+  background: rgba(248, 113, 113, 0.08);
+  border-left: 2px solid rgba(248, 113, 113, 0.65);
+  border-radius: 0 6px 6px 0;
+}
+.proj-row-confirm-msg {
+  flex: 1; min-width: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: #fecaca;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.proj-row-confirm-btn {
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid rgba(75, 85, 99, 0.45);
+  color: #cbd5e1;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.proj-row-confirm-btn:hover {
+  color: #f3f4f6;
+  border-color: rgba(148, 163, 184, 0.65);
+  background: rgba(75, 85, 99, 0.20);
+}
+.proj-row-confirm-btn.is-danger {
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.55);
+}
+.proj-row-confirm-btn.is-danger:hover {
+  color: #fee2e2;
+  border-color: rgba(248, 113, 113, 0.95);
+  background: rgba(248, 113, 113, 0.20);
+}
+.projects-rail[data-mode="short"] .proj-row-confirm { display: none; }

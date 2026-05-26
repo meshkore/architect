@@ -75,8 +75,7 @@ export async function switchProject(port: number, key: string): Promise<void> {
 
 /** Forget a project from the rail. Asks for confirmation. Doesn't kill
  *  the daemon — use stopProject for that. */
-async function forgetProject(target: { cluster_id?: string | null; port: number }, display: string, onAfter: () => void): Promise<void> {
-  if (!confirm(`Remove "${display}" from the projects rail?\n\nThis only forgets it locally. The daemon (if running) keeps running. You can re-add the project later by re-scanning ports or pasting its token.`)) return;
+function forgetProjectImmediate(target: { cluster_id?: string | null; port: number }, onAfter: () => void): void {
   kp.forget({ cluster_id: target.cluster_id ?? undefined, port: target.port });
   projectsStore.refresh();
   onAfter();
@@ -98,7 +97,18 @@ export interface ProjectsRailRowProps {
 export default function ProjectsRailRow(props: ProjectsRailRowProps) {
   const [editing, setEditing] = createSignal(false);
   const [val, setVal] = createSignal(props.row.display);
+  // V83 — inline delete confirm strip lives in a second row below the
+  // project name. browser confirm() was a regression; the operator
+  // wants the confirmation in-place so the rail stays uninterrupted.
+  const [confirmingDelete, setConfirmingDelete] = createSignal(false);
   const r = () => props.row;
+
+  // Cancel mouse drag init when clicking on an action button. The
+  // .proj-row sibling is `draggable=true`, and Chrome treats every
+  // mousedown anywhere in the rail row as a possible drag-start. We
+  // stop propagation on the action button's mousedown so the drag
+  // system never sees it, and the click fires normally.
+  const swallowMouseDown = (e: MouseEvent): void => { e.stopPropagation(); };
 
   const commit = (save: boolean): void => {
     if (save) {
@@ -198,15 +208,19 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
           />
         </div>
       </Show>
-      <Show when={!props.short && !editing()}>
+      <Show when={!props.short && !editing() && !confirmingDelete()}>
         <div class="proj-actions">
           <button
             type="button"
             class="proj-action is-edit"
             title="Rename"
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={swallowMouseDown}
             onClick={(e) => {
               e.stopPropagation();
+              e.preventDefault();
               setVal(r().display);
+              setConfirmingDelete(false);
               setEditing(true);
             }}
           >
@@ -220,8 +234,11 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
               type="button"
               class="proj-action is-stop"
               title="Stop daemon"
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={swallowMouseDown}
               onClick={(e) => {
                 e.stopPropagation();
+                e.preventDefault();
                 void stopProject(r().port, r().base, props.onAfterStop);
               }}
             >
@@ -234,15 +251,45 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
             type="button"
             class="proj-action is-delete"
             title="Forget project (remove from rail)"
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={swallowMouseDown}
             onClick={(e) => {
               e.stopPropagation();
-              void forgetProject({ cluster_id: r().cluster_id, port: r().port }, r().display, props.onAfterStop);
+              e.preventDefault();
+              setEditing(false);
+              setConfirmingDelete(true);
             }}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
             </svg>
           </button>
+        </div>
+      </Show>
+      {/* V83 — second-row inline delete confirmation. Expands below
+          the project name. Cancel + Confirm are right-aligned, never
+          stretched. Pressing Esc anywhere on the row also cancels. */}
+      <Show when={confirmingDelete()}>
+        <div
+          class="proj-row-confirm"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span class="proj-row-confirm-msg">Remove from rail?</span>
+          <button
+            type="button"
+            class="proj-row-confirm-btn"
+            onClick={(e) => { e.stopPropagation(); setConfirmingDelete(false); }}
+          >Cancel</button>
+          <button
+            type="button"
+            class="proj-row-confirm-btn is-danger"
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirmingDelete(false);
+              forgetProjectImmediate({ cluster_id: r().cluster_id, port: r().port }, props.onAfterStop);
+            }}
+          >Remove</button>
         </div>
       </Show>
     </div>
