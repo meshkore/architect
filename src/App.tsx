@@ -191,12 +191,17 @@ function Cockpit(props: {
     }
   });
 
+  // Layout (operator-flagged 2026-05-26): Header spans the FULL width
+  // at the top. Underneath, a row hosts the ProjectsRail (leftmost) +
+  // the content column. The rail is INSIDE the content row, never
+  // beside the Header.
   return (
-    <div class="min-h-screen flex">
-      <ProjectsRail />
-      <div class="flex-1 flex flex-col min-w-0">
+    <div class="min-h-screen flex flex-col">
       <Header />
       <StoryBanner />
+      <div class="flex-1 flex min-h-0">
+      <ProjectsRail />
+      <div class="flex-1 flex flex-col min-w-0">
       <Show when={!MIGRATED_ZONES.includes(zone())} fallback={<ZoneView zone={zone()} />}>
       <div class="bg-gray-950 border-b border-gray-800/60">
         <div class="max-w-[1600px] mx-auto px-5 flex items-center gap-1 h-10">
@@ -247,6 +252,7 @@ function Cockpit(props: {
         </aside>
       </div>
       </Show>
+      </div>
       </div>
     </div>
   );
