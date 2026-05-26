@@ -64,6 +64,19 @@ export async function switchProject(port: number, key: string): Promise<void> {
 }
 
 function forgetProjectImmediate(target: { cluster_id?: string | null; port: number }, onAfter: () => void): void {
+  // V84 — if the operator is forgetting the CURRENTLY ACTIVE project,
+  // disconnect the daemon first so the WS doesn't keep firing under
+  // a row that no longer exists. We do this BEFORE wiping localStorage
+  // so daemonStore.disconnect() can use the still-attached client.
+  const active = daemonStore.state.health;
+  const isActive = !!(active && (
+    (target.cluster_id && active.cluster_id === target.cluster_id) ||
+    (!target.cluster_id && active.port === target.port)
+  ));
+  if (isActive) {
+    console.log('[RAIL] forgetting ACTIVE project — disconnecting first');
+    daemonStore.disconnect();
+  }
   kp.forget({ cluster_id: target.cluster_id ?? undefined, port: target.port });
   projectsStore.refresh();
   onAfter();

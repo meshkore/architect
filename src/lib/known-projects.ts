@@ -169,8 +169,17 @@ export function upsert(input: Partial<KnownProject> & { port: number; base: stri
 }
 
 /**
- * Forget a project. By cluster_id when supplied, else by port.
- * No-op if not found.
+ * Forget a project completely — removes the entry from the known
+ * projects list AND scrubs every per-project key from localStorage
+ * (alias, bearer token, chat conv-meta, view state, projects order).
+ *
+ * Called from the rail's Forget action. Returns true when something
+ * was removed from the known list.
+ *
+ * V84 — was previously just removing from `mc-known-projects-v1`,
+ * which left zombie aliases / tokens / view state. The operator
+ * complained about "limpia el localStorage correctamente"; this is
+ * the fix.
  */
 export function forget(target: { cluster_id?: string; port?: number }): boolean {
   const arr = readRaw();
@@ -179,10 +188,66 @@ export function forget(target: { cluster_id?: string; port?: number }): boolean 
   if (idx < 0 && typeof target.port === 'number') {
     idx = arr.findIndex((p) => !p.cluster_id && p.port === target.port);
   }
-  if (idx < 0) return false;
-  arr.splice(idx, 1);
-  writeRaw(arr);
-  return true;
+
+  // Per-cluster key used by aliases / tokens / conv-meta / view state.
+  const clusterKey = target.cluster_id && target.cluster_id.trim().length > 0
+    ? target.cluster_id
+    : `port:${target.port ?? ''}`;
+
+  // 1. Remove from known-projects list.
+  let removed = false;
+  if (idx >= 0) {
+    arr.splice(idx, 1);
+    writeRaw(arr);
+    removed = true;
+  }
+
+  // 2. Scrub alias.
+  try {
+    const raw = localStorage.getItem(ALIAS_KEY);
+    if (raw) {
+      const map = JSON.parse(raw) as Record<string, string>;
+      if (clusterKey in map) {
+        delete map[clusterKey];
+        localStorage.setItem(ALIAS_KEY, JSON.stringify(map));
+      }
+    }
+  } catch { /* quota / parse */ }
+
+  // 3. Scrub per-cluster localStorage keys (chat meta + view state).
+  try { localStorage.removeItem(`mc-conv-meta-v1::${clusterKey}`); } catch { /* ignore */ }
+  try { localStorage.removeItem(`mc-view-v1::${clusterKey}`); } catch { /* ignore */ }
+
+  // 4. Scrub token for this cluster.
+  try {
+    const TOK_KEY = 'meshkore-tokens-v1';
+    const raw = localStorage.getItem(TOK_KEY);
+    if (raw) {
+      const map = JSON.parse(raw) as Record<string, string>;
+      if (clusterKey in map) {
+        delete map[clusterKey];
+        localStorage.setItem(TOK_KEY, JSON.stringify(map));
+      }
+    }
+  } catch { /* ignore */ }
+
+  // 5. Scrub from the operator-saved rail order so the next session
+  //    doesn't carry a phantom slot.
+  try {
+    const ORDER_KEY = 'mc-projects-order-v1';
+    const raw = localStorage.getItem(ORDER_KEY);
+    if (raw) {
+      const list = JSON.parse(raw) as string[];
+      if (Array.isArray(list)) {
+        const next = list.filter((k) => k !== clusterKey);
+        if (next.length !== list.length) {
+          localStorage.setItem(ORDER_KEY, JSON.stringify(next));
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  return removed;
 }
 
 /**
