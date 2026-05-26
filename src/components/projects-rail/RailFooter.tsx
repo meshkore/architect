@@ -15,16 +15,25 @@ import { openAddProjectWizard } from '~/components/modals/AddProjectWizard';
 import { discoverProjects, scanning, setScanning } from './discovery';
 
 export function RailFooter(_props: { short: boolean }) {
-  // V80 had a single rescan button that toggles between idle and
-  // scanning. Click while idle → run a one-shot full scan AND turn on
-  // continuous scan. Click while scanning → stop scan.
-  const onRescanClick = (): void => {
-    if (scanning()) {
-      setScanning(false);
-      return;
-    }
+  // V84 — Rescan is now one-shot. The earlier "click toggles a
+  // continuous scan" behaviour fired discoverProjects every 2.5 s
+  // (20 port probes per tick) forever until the operator clicked
+  // again. When the cockpit is served over HTTPS (hub.meshkore.com),
+  // Chrome's Local Network Access gate flags every fetch to
+  // localhost as an Issue and eventually throttles the page —
+  // 1.9k+ Issues in ~4 minutes was the observed footprint.
+  //
+  // New behaviour: click → run ONE full sweep → clear scanning state
+  // automatically. If the operator wants another sweep, they click
+  // again. Bounded work, no surprises.
+  const onRescanClick = async (): Promise<void> => {
+    if (scanning()) return; // Already running — don't double-fire.
     setScanning(true);
-    void discoverProjects({ fullScan: true });
+    try {
+      await discoverProjects({ fullScan: true });
+    } finally {
+      setScanning(false);
+    }
   };
 
   return (
@@ -43,10 +52,11 @@ export function RailFooter(_props: { short: boolean }) {
 
       <button
         type="button"
-        onClick={onRescanClick}
+        onClick={() => void onRescanClick()}
         class="projects-rail-foot-btn"
         data-state={scanning() ? 'scanning' : 'idle'}
-        title="Rescan for daemons on ports 5570-5589"
+        disabled={scanning()}
+        title="Rescan for daemons on ports 5570-5589 (one sweep)"
       >
         <svg class="rescan-icon-default" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" width="13" height="13">
           <path d="M4 4v6h6M20 20v-6h-6M5 13a8 8 0 1014.5-3.5" />

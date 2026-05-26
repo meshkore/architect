@@ -24,10 +24,10 @@
  * Styling lives entirely in src/styles/projects-rail.css.
  */
 
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createMemo, createSignal, onMount } from 'solid-js';
 import { uiStore } from '~/state/ui';
 import ProjectsRailRow from '~/components/ProjectsRailRow';
-import { PORT_LO, PORT_HI, discoverProjects, scanning } from '~/components/projects-rail/discovery';
+import { PORT_LO, PORT_HI, discoverProjects } from '~/components/projects-rail/discovery';
 import { rows } from '~/components/projects-rail/rows';
 import { RailFooter } from '~/components/projects-rail/RailFooter';
 import { loadProjectsOrder, saveProjectsOrder, applyOrder } from '~/components/projects-rail/order';
@@ -35,7 +35,6 @@ import { loadProjectsOrder, saveProjectsOrder, applyOrder } from '~/components/p
 export { discoverProjects } from '~/components/projects-rail/discovery';
 export { projectsRailScan } from '~/components/projects-rail/discovery';
 
-const SCAN_INTERVAL_MS = 2500;
 const RAIL_MIN_W = 56;
 const RAIL_MAX_W = 280;
 const SHORT_THRESHOLD = 100;
@@ -79,20 +78,14 @@ export default function ProjectsRail() {
     void discoverProjects();
   });
 
-  // Continuous scan timer — only ticks while uiStore says scanning.
-  let scanTimer: ReturnType<typeof setInterval> | null = null;
-  const stopScanTimer = (): void => {
-    if (scanTimer) {
-      clearInterval(scanTimer);
-      scanTimer = null;
-    }
-  };
-  createEffect(() => {
-    stopScanTimer();
-    if (!scanning()) return;
-    scanTimer = setInterval(() => void discoverProjects({ fullScan: true }), SCAN_INTERVAL_MS);
-  });
-  onCleanup(stopScanTimer);
+  // V84 — The earlier continuous scan timer (setInterval every 2.5 s
+  // while `scanning()` was true) ran forever and fired 20 port probes
+  // per tick. When the cockpit is served over HTTPS (hub.meshkore.com)
+  // Chrome's Local Network Access gate flags every fetch to localhost
+  // as a security Issue; the runaway loop accumulated ~2k Issues in
+  // minutes. Rescan is now one-shot, handled inside RailFooter; the
+  // boot scan above is the only automatic discovery this component
+  // performs.
 
   // Drag-resize handle on the right edge.
   let host: HTMLElement | undefined;
