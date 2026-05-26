@@ -1,6 +1,6 @@
 import { For, Show, createMemo, createSignal } from 'solid-js';
 import { chatStore, ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
-import { isProjectEmpty } from '~/state/server';
+// isProjectEmpty no longer needed here — Coordinator is permanent (V82).
 import AgentCard from '~/components/AgentCard';
 import { agentTypeColor, isServiceType } from '~/lib/agent-types';
 import { loadRailOrder, saveRailOrder } from './chat/rail-order';
@@ -13,11 +13,17 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
   const [dragTgt, setDragTgt] = createSignal<string | null>(null);
 
   const orderedConvs = createMemo(() => {
+    // V82 — Coordinator is the always-on agent. It's NEVER hidden from
+    // the rail (even if user has typed no messages yet, even when the
+    // project has initiatives) and it's ALWAYS pinned at the top.
+    // Earlier logic retired the synthetic card once initiatives appeared;
+    // we keep the card permanently because the Coordinator handles
+    // roadmap / cluster comms even after the project is bootstrapped.
+    if (!chatStore.state.convMap[ONBOARDING_CONV_ID]) {
+      chatStore.seedOnboardingConv();
+    }
     const all = Object.keys(chatStore.state.convMap).filter((c) => {
       if (chatStore.state.archivedConvs[c]) return false;
-      // Synthetic Coordinator card retires once real initiatives appear
-      // AND the operator hasn't sent any real message in it yet (M6.6).
-      if (c === ONBOARDING_CONV_ID && !isProjectEmpty() && !chatStore.onboardingHasUserMessages()) return false;
       return true;
     });
     all.forEach((c) => chatStore.ensureConvMeta(c));
@@ -26,12 +32,16 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
       const bLast = (chatStore.state.convMap[b] ?? []).at(-1)?.ts ?? '';
       return bLast.localeCompare(aLast);
     };
-    const custom = all.filter((c) => !isService(chatStore.state.convMeta[c])).sort(byRecency);
-    const services = all.filter((c) => isService(chatStore.state.convMeta[c])).sort(byRecency);
-    const defaults = [...custom, ...services];
-    const positioned = order().filter((id) => all.includes(id));
-    const unpositioned = defaults.filter((id) => !positioned.includes(id));
-    return [...positioned, ...unpositioned];
+    // Coordinator first, then custom, then service agents.
+    const rest = all.filter((c) => c !== ONBOARDING_CONV_ID);
+    const custom = rest.filter((c) => !isService(chatStore.state.convMeta[c])).sort(byRecency);
+    const services = rest.filter((c) => isService(chatStore.state.convMeta[c])).sort(byRecency);
+    const defaults = [ONBOARDING_CONV_ID, ...custom, ...services];
+    // Reorder respects the operator's drag-saved order BUT always keeps
+    // the Coordinator pinned first regardless of `order()`.
+    const positioned = order().filter((id) => all.includes(id) && id !== ONBOARDING_CONV_ID);
+    const unpositioned = defaults.filter((id) => id !== ONBOARDING_CONV_ID && !positioned.includes(id));
+    return [ONBOARDING_CONV_ID, ...positioned, ...unpositioned];
   });
 
   const statusOf = (conv: string) => {

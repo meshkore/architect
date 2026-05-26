@@ -26,7 +26,7 @@ import { startLive, stopLive } from '~/state/live';
 import { daemonStore } from '~/state/daemon';
 import { serverStore, isProjectEmpty } from '~/state/server';
 import { projectsStore } from '~/state/projects';
-import { chatStore } from '~/state/chat';
+import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
 import { nav } from '~/state/nav';
 import { uiStore, type Zone } from '~/state/ui';
 import { attachEventBus } from '~/lib/event-bus';
@@ -74,40 +74,81 @@ export default function App() {
   // event-bus (M5.4) is the single WS → chatStore + serverStore hub,
   // attached once per connection and detached on cleanup so HMR doesn't
   // leak listeners (audit §2.3).
+  // V81 — Watch daemonStore directly instead of just the boot `status`
+  // so hot-swap project changes (daemonStore.switchToPort) also trigger
+  // the side effects. The boot path still calls daemonStore.attachClient
+  // from the connection callback, which then bubbles into this effect.
   createEffect(() => {
     const s = status();
-    if (s.kind !== 'connected') return;
-    log.info('connection established — attaching stores');
-
-    // Legacy path (kept until M9).
-    void store.attach(s.client);
-    startLive(s.client);
-
-    // M2 stores.
-    daemonStore.attachClient(s.client, s.health);
-    void serverStore.refreshNow(s.client);
-    projectsStore.upsert({
-      port: s.health.port,
-      base: s.client.transport.httpBase,
-      cluster_id: s.health.cluster_id ?? undefined,
-      cluster_name: s.health.cluster_name ?? undefined,
-      status: 'live',
-    });
-    projectsStore.setActive(s.health.port, s.health.cluster_id ?? null);
-    chatStore.bindCluster(s.health.cluster_id ?? null);
-
-    if (detachBus) { detachBus(); detachBus = null; }
-    const ws = daemonStore.state.ws;
-    if (ws) detachBus = attachEventBus(ws, s.client);
+    // boot path: keep wiring legacy `store` + `startLive` since those
+    // don't have a daemonStore-driven equivalent yet.
+    if (s.kind === 'connected') {
+      void store.attach(s.client);
+      startLive(s.client);
+      daemonStore.attachClient(s.client, s.health);
+    }
   });
 
-  // V46 / V78b — once the server snapshot lands, drop the synthetic
-  // Coordinator conv if the cluster is genuinely empty. Idempotent;
-  // re-runs are no-ops once seeded.
+  // Single side-effect bus: fires whenever daemonStore swaps in a new
+  // client (boot OR hot-swap). Refresh server snapshot, upsert the
+  // project, bind chat to its cluster, re-attach the event bus.
   createEffect(() => {
-    if (status().kind !== 'connected') return;
+    const client = daemonStore.state.client;
+    const health = daemonStore.state.health;
+    if (!client || !health) return;
+    log.info('daemon bound — running side effects', { port: health.port, cluster: health.cluster_id });
+    void serverStore.refreshNow(client);
+    projectsStore.upsert({
+      port: health.port,
+      base: client.transport.httpBase,
+      cluster_id: health.cluster_id ?? undefined,
+      cluster_name: health.cluster_name ?? undefined,
+      status: 'live',
+    });
+    projectsStore.setActive(health.port, health.cluster_id ?? null);
+    chatStore.bindCluster(health.cluster_id ?? null);
+    if (detachBus) { detachBus(); detachBus = null; }
+    const ws = daemonStore.state.ws;
+    if (ws) detachBus = attachEventBus(ws, client);
+  });
+
+  /** V82 — Pick the conv to land on after a project loads. Prefer the
+   *  most recently active non-archived conv; else seed + return the
+   *  Coordinator. Always returns a conv id (the Coordinator is the
+   *  guaranteed fallback). */
+  function pickDefaultConv(): string {
+    const meta = chatStore.state.convMeta;
+    const archived = chatStore.state.archivedConvs;
+    const candidates = Object.keys(meta).filter((c) => !archived[c]);
+    if (candidates.length > 0) {
+      // Most recently active = last message timestamp on the conv.
+      const byTs = candidates
+        .map((c) => {
+          const msgs = chatStore.state.convMap[c] ?? [];
+          return { c, ts: msgs.at(-1)?.ts ?? '' };
+        })
+        .sort((a, b) => b.ts.localeCompare(a.ts));
+      const first = byTs[0]?.c;
+      if (first) return first;
+    }
+    chatStore.seedOnboardingConv();
+    return ONBOARDING_CONV_ID;
+  }
+
+  // V46 / V78b — once the server snapshot lands, drop the synthetic
+  // Coordinator conv if the cluster is genuinely empty. Then V82: also
+  // auto-activate it as the default conversation if no other conv is
+  // active. The Coordinator is the "always-on" agent for roadmap +
+  // cluster comms; we never let the operator land on an empty chat
+  // panel.
+  createEffect(() => {
+    if (!daemonStore.state.client) return;
     if (!serverStore.state.snapshot) return;
     if (isProjectEmpty()) chatStore.seedOnboardingConv();
+    // Auto-activate: pick most-recent existing conv, else the coordinator.
+    if (chatStore.state.activeConv) return;
+    const next = pickDefaultConv();
+    if (next) chatStore.setActiveConv(next);
   });
 
   onCleanup(() => {

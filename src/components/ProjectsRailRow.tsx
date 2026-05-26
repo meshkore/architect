@@ -1,15 +1,26 @@
 /**
- * ProjectsRailRow — one row in the projects rail (V80 1:1).
+ * ProjectsRailRow — one row in the projects rail (V80 1:1 + V81 hot-swap).
  *
- * Wrapper `.proj-row-wrap` hosts the row + the hover-overlay action
- * buttons. The row itself (`.proj-row`) carries the activity bar,
- * status modifiers, name (or 3-letter initials in short mode), and
- * (for stopped projects) a "START" hint that swaps in for the stop
- * button. State modifiers:
+ * Two render modes:
+ *   - view  → button row with hover-overlay actions (rename · stop · delete).
+ *   - edit  → div row with a real `<input>` (NOT nested inside a button so
+ *             focus + keyboard input behave correctly — the prior version
+ *             nested input-in-button which broke rename in Chrome).
+ *
+ * Actions:
+ *   - Click row  → hot-swap to that project (no full page reload).
+ *   - Pencil     → enter rename mode; commit on Enter / blur, abort on Esc.
+ *   - Stop       → daemon shutdown (only for live daemons).
+ *   - Trash      → confirm + forget. Forgets locally; doesn't kill the daemon.
+ *
+ * Drag-reorder lives at the rail level (ProjectsRail.tsx) so the row only
+ * exposes the conventional HTML5 drag-and-drop attributes + callbacks.
+ *
+ * State modifiers on the wrap / row drive V80 CSS:
  *   .active           → emerald accent + filled background
  *   .is-working       → bouncing slug in the activity bar
  *   .is-pending-review → amber dashed activity bar
- *   .proj-row-wrap.is-stopped → dim blue accent + START hint
+ *   .proj-row-wrap.is-stopped → dim blue accent
  *   .proj-row-wrap.is-new → pulsing NEW badge (cleared on click)
  */
 
@@ -49,19 +60,42 @@ export async function stopProject(port: number, base: string, onAfter: () => voi
   setTimeout(onAfter, 600);
 }
 
-export function switchProject(port: number, key: string): void {
+/** Hot-swap to another project — no page reload (V81). Triggers the
+ *  daemonStore reconnect path so the WS, server snapshot and chat
+ *  cluster binding all re-hydrate against the new daemon. */
+export async function switchProject(port: number, key: string): Promise<void> {
   projectsStore.clearNewBadge(key);
   try {
     localStorage.setItem('meshcore-last-port', String(port));
   } catch {
     /* quota */
   }
-  const url = new URL(window.location.href);
-  url.searchParams.set('host', `localhost:${port}`);
-  window.location.href = url.toString();
+  await daemonStore.switchToPort(port);
 }
 
-export default function ProjectsRailRow(props: { row: RailRowData; short: boolean; onAfterStop: () => void }) {
+/** Forget a project from the rail. Asks for confirmation. Doesn't kill
+ *  the daemon — use stopProject for that. */
+async function forgetProject(target: { cluster_id?: string | null; port: number }, display: string, onAfter: () => void): Promise<void> {
+  if (!confirm(`Remove "${display}" from the projects rail?\n\nThis only forgets it locally. The daemon (if running) keeps running. You can re-add the project later by re-scanning ports or pasting its token.`)) return;
+  kp.forget({ cluster_id: target.cluster_id ?? undefined, port: target.port });
+  projectsStore.refresh();
+  onAfter();
+}
+
+export interface ProjectsRailRowProps {
+  row: RailRowData;
+  short: boolean;
+  onAfterStop: () => void;
+  /** drag-reorder hooks supplied by the parent rail. */
+  onDragStart?: (key: string) => void;
+  onDragOver?: (key: string, e: DragEvent) => void;
+  onDrop?: (key: string, e: DragEvent) => void;
+  onDragEnd?: () => void;
+  dragging?: boolean;
+  dragOver?: boolean;
+}
+
+export default function ProjectsRailRow(props: ProjectsRailRowProps) {
   const [editing, setEditing] = createSignal(false);
   const [val, setVal] = createSignal(props.row.display);
   const r = () => props.row;
@@ -84,6 +118,8 @@ export default function ProjectsRailRow(props: { row: RailRowData; short: boolea
     const cls = ['proj-row-wrap'];
     if (!r().live) cls.push('is-stopped');
     if (r().isNew) cls.push('is-new');
+    if (props.dragging) cls.push('is-dragging');
+    if (props.dragOver) cls.push('is-drag-over');
     return cls.join(' ');
   };
 
@@ -97,38 +133,60 @@ export default function ProjectsRailRow(props: { row: RailRowData; short: boolea
 
   const onRowClick = (): void => {
     if (editing()) return;
-    switchProject(r().port, r().key);
+    void switchProject(r().port, r().key);
   };
 
   return (
     <div
       class={wrapCls()}
       title={`${r().display} · :${r().port}${r().cluster_id ? ' · ' + r().cluster_id : ''}${!r().live ? ' · stopped' : ''}`}
+      draggable={!editing() && !props.short}
+      onDragStart={(e) => {
+        if (editing() || props.short) { e.preventDefault(); return; }
+        e.dataTransfer?.setData('text/plain', r().key);
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+        props.onDragStart?.(r().key);
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        props.onDragOver?.(r().key, e);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        props.onDrop?.(r().key, e);
+      }}
+      onDragEnd={() => props.onDragEnd?.()}
     >
-      <button type="button" class={rowCls()} onClick={onRowClick}>
-        <span class="proj-working-bar" aria-hidden="true" />
-        <Show when={!editing()} fallback={
+      <Show
+        when={editing()}
+        fallback={
+          <button type="button" class={rowCls()} onClick={onRowClick}>
+            <span class="proj-working-bar" aria-hidden="true" />
+            <span class="proj-row-name">{r().display}</span>
+            <span class="proj-row-initials">{r().initials}</span>
+          </button>
+        }
+      >
+        {/* Edit mode — no nested input-in-button. The row becomes a
+            <div> so focus + keyboard events flow to the <input>
+            normally. */}
+        <div class={rowCls()} style={{ cursor: 'text' }}>
+          <span class="proj-working-bar" aria-hidden="true" />
           <input
-            class="proj-row-name"
+            class="proj-row-name proj-row-name--editing"
             value={val()}
             autofocus
             onInput={(e) => setVal(e.currentTarget.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') commit(true);
-              else if (e.key === 'Escape') commit(false);
+              if (e.key === 'Enter') { e.preventDefault(); commit(true); }
+              else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
             }}
             onBlur={() => commit(true)}
             onClick={(e) => e.stopPropagation()}
-            style={{ background: 'transparent', border: 'none', outline: 'none', color: 'inherit', font: 'inherit' }}
           />
-        }>
-          <span class="proj-row-name">{r().display}</span>
-        </Show>
-        <span class="proj-row-initials">{r().initials}</span>
-        <Show when={false}>
-          <span class="proj-row-start">start</span>
-        </Show>
-      </button>
+        </div>
+      </Show>
       <Show when={!props.short && !editing()}>
         <div class="proj-actions">
           <button
@@ -161,6 +219,19 @@ export default function ProjectsRailRow(props: { row: RailRowData; short: boolea
               </svg>
             </button>
           </Show>
+          <button
+            type="button"
+            class="proj-action is-delete"
+            title="Forget project (remove from rail)"
+            onClick={(e) => {
+              e.stopPropagation();
+              void forgetProject({ cluster_id: r().cluster_id, port: r().port }, r().display, props.onAfterStop);
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+            </svg>
+          </button>
         </div>
       </Show>
     </div>

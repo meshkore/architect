@@ -237,6 +237,11 @@ function setConvTitle(conv: string, title: string): void {
 }
 
 function archiveConv(conv: string): void {
+  // V82 — Coordinator is never archivable; it's the always-on agent
+  // for roadmap / cluster comms. Silently ignore archive attempts on
+  // the synthetic conv so a stray click in the UI doesn't strand the
+  // operator without a default chat.
+  if (conv === ONBOARDING_CONV_ID) return;
   setState('archivedConvs', conv, true);
 }
 
