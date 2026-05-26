@@ -136,32 +136,43 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
     void switchProject(r().port, r().key);
   };
 
+  // V82 — drag attributes live on the .proj-row button itself, NOT on
+  // the wrap. Putting draggable=true on the wrap was eating
+  // mousedown/click events on the .proj-actions children (Chrome treats
+  // any click inside a draggable as a possible drag-start). The wrap is
+  // still a drop target via onDragOver/onDrop so reorder works.
   return (
     <div
       class={wrapCls()}
       title={`${r().display} · :${r().port}${r().cluster_id ? ' · ' + r().cluster_id : ''}${!r().live ? ' · stopped' : ''}`}
-      draggable={!editing() && !props.short}
-      onDragStart={(e) => {
-        if (editing() || props.short) { e.preventDefault(); return; }
-        e.dataTransfer?.setData('text/plain', r().key);
-        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-        props.onDragStart?.(r().key);
-      }}
       onDragOver={(e) => {
+        if (editing() || props.short) return;
         e.preventDefault();
         if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
         props.onDragOver?.(r().key, e);
       }}
       onDrop={(e) => {
+        if (editing() || props.short) return;
         e.preventDefault();
         props.onDrop?.(r().key, e);
       }}
-      onDragEnd={() => props.onDragEnd?.()}
     >
       <Show
         when={editing()}
         fallback={
-          <button type="button" class={rowCls()} onClick={onRowClick}>
+          <button
+            type="button"
+            class={rowCls()}
+            onClick={onRowClick}
+            draggable={!props.short}
+            onDragStart={(e) => {
+              if (props.short) { e.preventDefault(); return; }
+              e.dataTransfer?.setData('text/plain', r().key);
+              if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+              props.onDragStart?.(r().key);
+            }}
+            onDragEnd={() => props.onDragEnd?.()}
+          >
             <span class="proj-working-bar" aria-hidden="true" />
             <span class="proj-row-name">{r().display}</span>
             <span class="proj-row-initials">{r().initials}</span>

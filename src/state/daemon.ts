@@ -121,36 +121,38 @@ function setAutoUpdate(flag: boolean): void {
  */
 async function switchToPort(port: number): Promise<boolean> {
   if (state.health?.port === port) return true; // already there
+
+  // V82 — Smooth swap: prepare the new connection BEFORE tearing down
+  // the old one so the cockpit never visibly drops to a disconnected
+  // state mid-switch. Sequence:
+  //   1. probe /health on the new port (old WS still alive, snapshot
+  //      still rendering).
+  //   2. resolve token + build new DaemonClient.
+  //   3. atomic swap: disconnect old WS, attachClient(new) — Solid
+  //      re-renders downstream subscribers in the same tick.
+  // If step 1 or 2 fails, we leave the existing connection untouched.
   const oldToken = state.client?.transport.token ?? '';
-  // Close current connection first so the new attach is the only WS.
-  disconnect();
-  setPhase('connecting');
-  // Probe /health unauthenticated to learn the new daemon's cluster id.
   const probeUrl = `http://localhost:${port}/health`;
   let health: HealthResponse;
   try {
     const r = await fetch(probeUrl);
     if (!r.ok) {
-      setPhase('error', `daemon on :${port} returned ${r.status}`);
       log.warn('switchToPort probe failed', port, r.status);
       return false;
     }
     health = (await r.json()) as HealthResponse;
   } catch (e) {
-    setPhase('no-daemon', e instanceof Error ? e.message : String(e));
     log.warn('switchToPort fetch threw', e);
     return false;
   }
-  // Resolve the cluster's token (per-cluster store, with legacy fallback).
-  // Defer to lib/tokens via dynamic import so we don't introduce a
-  // circular dep at module load.
   const { clusterTokenKey, tokenForCluster } = await import('~/lib/tokens');
   const key = clusterTokenKey({ cluster_id: health.cluster_id ?? null, port });
   const token = tokenForCluster(key) || oldToken;
-  // Build the new client via the same factory App.tsx uses.
   const { localTransport } = await import('~/lib/transport');
   const { DaemonClient } = await import('~/lib/daemon-client');
   const client = new DaemonClient(localTransport(port, token));
+  // Atomic swap.
+  disconnect();
   attachClient(client, health);
   return true;
 }
