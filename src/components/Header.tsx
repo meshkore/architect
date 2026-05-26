@@ -5,8 +5,6 @@ import { daemonStore } from '~/state/daemon';
 import { projectsStore, activeProject } from '~/state/projects';
 import { uiStore, type Zone } from '~/state/ui';
 
-type CockpitTab = 'roadmap' | 'chat' | 'network' | 'config';
-
 const ZONES: { id: Zone; label: string; title: string }[] = [
   { id: 'architect', label: 'Architect', title: 'Architect — project dashboard (modules · roadmap · chat)' },
   { id: 'bookmarks', label: 'Bookmarks', title: 'Bookmarks — quick-access shelf' },
@@ -14,6 +12,7 @@ const ZONES: { id: Zone; label: string; title: string }[] = [
   { id: 'links',     label: 'Links',     title: 'Links — deployment registry' },
   { id: 'protocols', label: 'Protocols', title: 'Protocols — reusable runbooks' },
   { id: 'diary',     label: 'Diary',     title: 'Diary — chronological activity blog' },
+  { id: 'config',    label: 'Config',    title: 'Config — cluster settings' },
 ];
 
 function ZoneIcon(props: { id: Zone }) {
@@ -29,7 +28,7 @@ function ZoneIcon(props: { id: Zone }) {
   );
 }
 
-export default function Header(props: { activeTab: CockpitTab; onTabChange: (t: CockpitTab) => void }) {
+export default function Header() {
   return (
     <header class="sticky top-0 z-40 bg-gray-950/95 backdrop-blur-xl border-b border-gray-800/60 shadow-sm">
       <div class="h-12 flex items-center gap-2 px-3">
@@ -56,19 +55,6 @@ export default function Header(props: { activeTab: CockpitTab; onTabChange: (t: 
           {ZONES.map((z) => (
             <ZoneButton zone={z} />
           ))}
-          <button
-            type="button"
-            onClick={() => props.onTabChange(props.activeTab === 'config' ? 'roadmap' : 'config')}
-            class={`px-2 py-1.5 text-[12px] transition flex items-center gap-1.5 rounded border ${
-              props.activeTab === 'config'
-                ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10'
-                : 'text-gray-500 hover:text-gray-200 border-transparent hover:border-gray-800/60'
-            }`}
-            title="Config — this project's cluster settings"
-          >
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1.08-1.5 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1.08 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" /></svg>
-            <span class="hidden lg:inline">Config</span>
-          </button>
         </div>
 
         <div class="flex-1" />

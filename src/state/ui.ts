@@ -12,7 +12,7 @@ import { createStore } from 'solid-js/store';
 import { log } from '~/lib/log';
 
 export type Tab = 'roadmap' | 'manage' | 'history' | 'diagrams';
-export type Zone = 'architect' | 'bookmarks' | 'crons' | 'links' | 'protocols' | 'diary';
+export type Zone = 'architect' | 'bookmarks' | 'crons' | 'links' | 'protocols' | 'diary' | 'config';
 export type RailMode = 'full' | 'short';
 export type WsTab = 'tasks' | 'context' | 'diagrams' | 'modules';
 export type ModulesPill = 'all' | 'work' | 'stb';

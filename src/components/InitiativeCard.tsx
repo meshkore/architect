@@ -4,7 +4,6 @@ import { sortTasks, groupByPhases } from '~/components/initiative/task-grouping'
 import { TaskGrid, StatusBadge } from '~/components/initiative/TaskGrid';
 import { storyStore } from '~/state/story';
 import { chatStore } from '~/state/chat';
-import { nav } from '~/state/nav';
 import { collectStoryTaskIds } from '~/components/story/StoryRunner';
 import StoryProgressPill from '~/components/story/StoryProgressPill';
 import { log } from '~/lib/log';
@@ -47,7 +46,8 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
       conv,
       taskIds,
     });
-    nav.setCockpitTab('chat');
+    // Chat is the permanent right column now (V80 parity) — no tab
+    // switch needed; activating the conv is enough.
   };
 
   const isRunning = () => storyStore.state.run?.initiativeId === props.initiative.id

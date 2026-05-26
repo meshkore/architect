@@ -38,7 +38,8 @@ import RoadmapList from '~/components/RoadmapList';
 import InitiativesPanel from '~/components/InitiativesPanel';
 import ChatPanel from '~/components/ChatPanel';
 import ChatRail from '~/components/ChatRail';
-import NetworkPanel from '~/components/NetworkPanel';
+import ContextPanel from '~/components/ContextPanel';
+import DiagramsPanel from '~/components/DiagramsPanel';
 import ConfigPanel from '~/components/zones/ConfigPanel';
 import BookmarksPanel from '~/components/zones/BookmarksPanel';
 import CronsPanel from '~/components/zones/CronsPanel';
@@ -149,10 +150,13 @@ export default function App() {
 
 // ─── Cockpit (connected) ───────────────────────────────────────────────────
 
-type Tab = 'roadmap' | 'chat' | 'network' | 'config';
+// V80 parity: the Architect zone has 4 sub-tabs (Roadmap / Tasks / Context /
+// Diagrams) over a three-column layout. The chat panel (with its agents
+// rail INSIDE) is the permanent right column — NOT a sibling tab.
+type Tab = 'roadmap' | 'tasks' | 'context' | 'diagrams';
 
-const HASH_ZONES: readonly Zone[] = ['architect', 'bookmarks', 'crons', 'links', 'protocols', 'diary'];
-const MIGRATED_ZONES: readonly Zone[] = ['bookmarks', 'crons', 'links', 'protocols', 'diary'];
+const HASH_ZONES: readonly Zone[] = ['architect', 'bookmarks', 'crons', 'links', 'protocols', 'diary', 'config'];
+const MIGRATED_ZONES: readonly Zone[] = ['bookmarks', 'crons', 'links', 'protocols', 'diary', 'config'];
 
 function Cockpit(props: {
   status: Extract<ConnectionStatus, { kind: 'connected' }>;
@@ -191,69 +195,55 @@ function Cockpit(props: {
     <div class="min-h-screen flex">
       <ProjectsRail />
       <div class="flex-1 flex flex-col min-w-0">
-      <Header activeTab={tab()} onTabChange={setTab} />
+      <Header />
       <StoryBanner />
       <Show when={!MIGRATED_ZONES.includes(zone())} fallback={<ZoneView zone={zone()} />}>
       <div class="bg-gray-950 border-b border-gray-800/60">
         <div class="max-w-[1600px] mx-auto px-5 flex items-center gap-1 h-10">
           <TabButton label="Roadmap" active={tab() === 'roadmap'} onClick={() => setTab('roadmap')} />
-          <TabButton label="Chat" active={tab() === 'chat'} onClick={() => setTab('chat')} />
-          <TabButton label="Network" active={tab() === 'network'} onClick={() => setTab('network')} />
-          <TabButton label="Config" active={tab() === 'config'} onClick={() => setTab('config')} />
+          <TabButton label="Tasks" active={tab() === 'tasks'} onClick={() => setTab('tasks')} />
+          <TabButton label="Context" active={tab() === 'context'} onClick={() => setTab('context')} />
+          <TabButton label="Diagrams" active={tab() === 'diagrams'} onClick={() => setTab('diagrams')} />
         </div>
       </div>
 
-      <div class="flex-1 max-w-[1600px] mx-auto w-full px-5 py-6 grid grid-cols-1 lg:grid-cols-[220px_1fr_300px] gap-6 min-h-0">
+      {/* V80 three-column layout: modules | center (roadmap/tasks/context/
+          diagrams) | chat panel (permanent right column with its own
+          agents rail inside). Resizable columns via inline grid template
+          driven by uiStore.projectsRailWidth + uiStore.chatRailWidth. */}
+      <div
+        class="flex-1 max-w-[1600px] mx-auto w-full px-5 py-4 grid grid-cols-1 lg:grid-cols-[var(--modules-w)_1fr_var(--chat-w)] gap-4 min-h-0"
+        style={{
+          '--modules-w': `${uiStore.state.projectsRailWidth}px`,
+          '--chat-w': `${uiStore.state.chatRailWidth + 240}px`,
+        }}
+      >
         <aside class="min-w-0">
-          <Show when={tab() === 'roadmap' || tab() === 'chat'}>
-            <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
-          </Show>
+          <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
         </aside>
         <main class="min-w-0">
           <Switch>
             <Match when={tab() === 'roadmap'}>
+              <InitiativesPanel />
+            </Match>
+            <Match when={tab() === 'tasks'}>
               <RoadmapList moduleId={props.selectedModule} />
             </Match>
-            <Match when={tab() === 'chat'}>
-              <div class="h-[calc(100vh-12rem)] flex gap-3 min-h-0">
-                <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />
-                <div class="flex-1 min-w-0">
-                  <ChatPanel client={props.status.client} />
-                </div>
-              </div>
+            <Match when={tab() === 'context'}>
+              <ContextPanel moduleId={props.selectedModule} />
             </Match>
-            <Match when={tab() === 'network'}>
-              <NetworkPanel client={props.status.client} />
-            </Match>
-            <Match when={tab() === 'config'}>
-              <ConfigPanel />
+            <Match when={tab() === 'diagrams'}>
+              <DiagramsPanel moduleId={props.selectedModule} />
             </Match>
           </Switch>
         </main>
-        <aside class="min-w-0">
-          <Switch>
-            <Match when={tab() === 'roadmap'}>
-              <InitiativesPanel />
-            </Match>
-            <Match when={tab() === 'chat'}>
-              <div class="text-xs text-gray-600 px-2 leading-relaxed">
-                <p class="text-gray-400 font-semibold mb-1">Chat tab</p>
-                <p>Coordinator replies stream from the daemon's <span class="font-mono text-emerald-400">/chat/dispatch</span> endpoint over the WebSocket. New messages arrive in real time, no reload needed.</p>
-              </div>
-            </Match>
-            <Match when={tab() === 'network'}>
-              <div class="text-xs text-gray-600 px-2 leading-relaxed">
-                <p class="text-gray-400 font-semibold mb-1">Network tab</p>
-                <p>Each card is one identity declared under <span class="font-mono">.meshkore/agents/</span>. Online state reflects the daemon's process tracker plus live <span class="font-mono">agent.online/offline</span> events.</p>
-              </div>
-            </Match>
-            <Match when={tab() === 'config'}>
-              <div class="text-xs text-gray-600 px-2 leading-relaxed">
-                <p class="text-gray-400 font-semibold mb-1">Config tab</p>
-                <p>Read-only view of the current transport and the last 8 WebSocket events. Useful for verifying the cockpit is talking to the daemon you expect.</p>
-              </div>
-            </Match>
-          </Switch>
+        {/* Chat column: ChatRail (agents list) + ChatPanel (thread +
+            composer), always visible regardless of sub-tab. */}
+        <aside class="min-w-0 flex gap-2 h-[calc(100vh-9rem)] min-h-0">
+          <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />
+          <div class="flex-1 min-w-0">
+            <ChatPanel client={props.status.client} />
+          </div>
         </aside>
       </div>
       </Show>
@@ -279,6 +269,9 @@ function ZoneView(props: { zone: Zone }) {
       </Match>
       <Match when={props.zone === 'diary'}>
         <DiaryPanel />
+      </Match>
+      <Match when={props.zone === 'config'}>
+        <ConfigPanel />
       </Match>
     </Switch>
   );
