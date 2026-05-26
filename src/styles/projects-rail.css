@@ -218,52 +218,63 @@ body.col-reordering .projects-rail-resize {
 }
 .projects-rail[data-mode="short"] .proj-row.active .proj-row-initials { color: #f3f4f6; }
 
-/* ── Hover-overlay action buttons ────────────────────────────────── */
-.proj-actions {
-  position: absolute;
-  top: 50%; right: 6px;
-  transform: translateY(-50%);
-  display: flex; gap: 3px;
-  opacity: 0; pointer-events: none;
-  transition: opacity 120ms;
-  z-index: 2;
+/* ── V85 — Inline action row (replaces the absolute hover overlay) ──
+   The .proj-actions absolute overlay was repeatedly stealing clicks
+   under Chrome's HTML5 drag system. The new row renders inline
+   BELOW the project name when that project is active. No hover, no
+   absolute positioning, no overlap — just a second line in the wrap. */
+.proj-row-actions {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 8px 6px 14px;
+  margin-top: 1px;
 }
-.proj-row-wrap:hover .proj-actions { opacity: 1; pointer-events: auto; }
-.proj-action {
-  width: 22px; height: 22px;
-  display: inline-flex; align-items: center; justify-content: center;
+.proj-row-action {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 7px;
+  background: transparent;
+  border: 1px solid rgba(75, 85, 99, 0.40);
   border-radius: 5px;
-  background: rgba(2, 4, 12, 0.92);
-  border: 1px solid rgba(75, 85, 99, 0.55);
-  backdrop-filter: blur(6px);
+  color: #cbd5e1;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   cursor: pointer;
-  transition: color 120ms, border-color 120ms, background 120ms, transform 120ms;
-  padding: 0;
+  transition: color 120ms, border-color 120ms, background 120ms;
 }
-.proj-action.is-edit { color: #60a5fa; }
-.proj-action.is-stop { color: #f87171; }
-/* V82 — delete (forget) action. Hostile red-tinted to differentiate
-   from is-stop (which kills the daemon). is-delete just forgets the
-   project locally. */
-.proj-action.is-delete { color: #fca5a5; }
-.proj-action.is-edit:hover {
-  color: #bfdbfe;
-  border-color: rgba(96, 165, 250, 0.85);
-  background: rgba(2, 4, 12, 0.98);
-  transform: scale(1.05);
+.proj-row-action svg { flex-shrink: 0; }
+.proj-row-action:hover { color: #f3f4f6; border-color: rgba(148, 163, 184, 0.70); background: rgba(75, 85, 99, 0.20); }
+
+.proj-row-action.is-edit { color: #93c5fd; border-color: rgba(96, 165, 250, 0.35); }
+.proj-row-action.is-edit:hover { color: #dbeafe; border-color: rgba(96, 165, 250, 0.75); background: rgba(96, 165, 250, 0.12); }
+
+.proj-row-action.is-stop { color: #fca5a5; border-color: rgba(248, 113, 113, 0.35); }
+.proj-row-action.is-stop:hover { color: #fee2e2; border-color: rgba(248, 113, 113, 0.75); background: rgba(248, 113, 113, 0.12); }
+
+.proj-row-action.is-delete { color: #fcd5cf; border-color: rgba(252, 165, 165, 0.30); }
+.proj-row-action.is-delete:hover { color: #fee2e2; border-color: rgba(252, 165, 165, 0.70); background: rgba(252, 165, 165, 0.10); }
+
+.proj-row-action.is-save { color: #6ee7b7; border-color: rgba(52, 211, 153, 0.45); }
+.proj-row-action.is-save:hover { color: #d1fae5; border-color: rgba(52, 211, 153, 0.85); background: rgba(52, 211, 153, 0.15); }
+
+.proj-row-action.is-cancel { color: #9ca3af; }
+.proj-row-action.is-cancel:hover { color: #f3f4f6; }
+
+.proj-row-action.is-danger { color: #fca5a5; border-color: rgba(248, 113, 113, 0.45); }
+.proj-row-action.is-danger:hover { color: #fee2e2; border-color: rgba(248, 113, 113, 0.85); background: rgba(248, 113, 113, 0.18); }
+
+.proj-row-prompt {
+  flex: 1; min-width: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: #cbd5e1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.proj-action.is-stop:hover {
-  color: #fecaca;
-  border-color: rgba(248, 113, 113, 0.85);
-  background: rgba(2, 4, 12, 0.98);
-  transform: scale(1.05);
-}
-.proj-action.is-delete:hover {
-  color: #fee2e2;
-  border-color: rgba(252, 165, 165, 0.85);
-  background: rgba(2, 4, 12, 0.98);
-  transform: scale(1.05);
-}
+
+/* Hide the action row entirely in short mode (rail at 56px). */
+.projects-rail[data-mode="short"] .proj-row-actions { display: none; }
 
 /* V82 — inline rename input: render flush with the row, no border. */
 .proj-row-name--editing {

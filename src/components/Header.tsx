@@ -2,8 +2,57 @@
 
 import { Show } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
-import { projectsStore, activeProject } from '~/state/projects';
+import { activeProject } from '~/state/projects';
 import { uiStore, type Zone } from '~/state/ui';
+import { mcModal } from '~/lib/modal';
+
+const BUILD_VERSION = (import.meta.env.VITE_BUILD_VERSION as string | undefined) ?? 'dev';
+const BUILD_COMMIT  = (import.meta.env.VITE_BUILD_COMMIT  as string | undefined) ?? '';
+const BUILD_DATE    = (import.meta.env.VITE_BUILD_DATE    as string | undefined) ?? '';
+
+function openAboutModal(): void {
+  const port = daemonStore.state.health?.port;
+  const cluster = daemonStore.state.health?.cluster_name ?? daemonStore.state.health?.cluster_id ?? '—';
+  const daemonV = daemonStore.state.health?.version ?? '—';
+  void mcModal({
+    title: 'MeshKore Architect',
+    subtitle: 'Operator cockpit for MeshKore clusters',
+    body: () => (
+      <div class="flex flex-col gap-3.5 py-2">
+        <div class="flex items-center gap-2.5">
+          <span class="font-mono text-[11px] text-gray-500 tracking-widest uppercase">build</span>
+          <span class="font-mono text-base text-emerald-400 font-bold">{BUILD_VERSION}</span>
+          <Show when={BUILD_COMMIT}>
+            <span class="font-mono text-[10px] text-gray-600">· {BUILD_COMMIT.slice(0, 7)}</span>
+          </Show>
+          <Show when={BUILD_DATE}>
+            <span class="font-mono text-[10px] text-gray-600">· {BUILD_DATE.slice(0, 10)}</span>
+          </Show>
+        </div>
+        <div class="h-px bg-gray-700/30" />
+        <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[12px]">
+          <span class="font-mono text-[10px] text-gray-500 uppercase tracking-wider self-center">Cluster</span>
+          <span class="text-gray-200">{cluster}</span>
+          <span class="font-mono text-[10px] text-gray-500 uppercase tracking-wider self-center">Daemon</span>
+          <span class="text-gray-200 font-mono text-[11px]">{daemonV}</span>
+          <span class="font-mono text-[10px] text-gray-500 uppercase tracking-wider self-center">Port</span>
+          <span class="text-gray-200 font-mono text-[11px]">{port ? `localhost:${port}` : '—'}</span>
+        </div>
+        <div class="h-px bg-gray-700/30" />
+        <div class="text-[12.5px] text-gray-300 leading-relaxed">
+          Web cockpit for any MeshKore cluster. Connects to your local Python daemon — your roadmap, docs and credentials stay on your machine.
+        </div>
+        <div class="flex flex-col gap-1.5 text-[12px]">
+          <a href="https://meshkore.com/architect" target="_blank" rel="noopener" class="text-emerald-400 hover:underline">→ meshkore.com/architect</a>
+          <a href="https://meshkore.com/standard" target="_blank" rel="noopener" class="text-emerald-400 hover:underline">→ The MeshKore standard</a>
+          <a href="https://meshkore.com/docs" target="_blank" rel="noopener" class="text-emerald-400 hover:underline">→ Documentation</a>
+          <a href="https://github.com/meshkore" target="_blank" rel="noopener" class="text-emerald-400 hover:underline">→ GitHub</a>
+        </div>
+      </div>
+    ),
+    buttons: [{ id: 'ok', label: 'Close', primary: true }],
+  });
+}
 
 const ZONES: { id: Zone; label: string; title: string }[] = [
   { id: 'architect', label: 'Architect', title: 'Architect — project dashboard (modules · roadmap · chat)' },
@@ -33,8 +82,8 @@ export default function Header() {
     <header class="sticky top-0 z-40 bg-gray-950/95 backdrop-blur-xl border-b border-gray-800/60 shadow-sm">
       <div class="h-12 flex items-center gap-2 px-3">
 
-        {/* LEFT — logo */}
-        <button type="button" class="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 hover:bg-emerald-500/25 transition-colors" title="MeshKore Architect" onClick={() => void projectsStore.refresh()}>
+        {/* LEFT — logo (V63: click → About modal with build version) */}
+        <button type="button" class="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 hover:bg-emerald-500/25 transition-colors" title="MeshKore Architect — click for build info" onClick={openAboutModal}>
           <svg class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" aria-hidden="true">
             <g stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none">
               <line x1="12" y1="12" x2="12" y2="3.5" /><line x1="12" y1="12" x2="20.5" y2="12" /><line x1="12" y1="12" x2="12" y2="20.5" /><line x1="12" y1="12" x2="3.5" y2="12" />

@@ -1,24 +1,30 @@
 /**
- * ProjectsRailRow — one row in the projects rail.
+ * ProjectsRailRow — V85.
  *
- * Two render modes: view (button) and edit (div + input). Drag-reorder
- * lives on the row button so the .proj-actions overlay (a sibling
- * inside `.proj-row-wrap`) doesn't get its clicks eaten by Chrome's
- * HTML5 drag subsystem.
+ * Refactored to drop the hover overlay completely. Chrome's HTML5
+ * drag + position:absolute overlay combination kept stealing clicks
+ * across five attempts. Now:
  *
- * Action buttons + delete-confirm strip live in their own files
- * (RowActions, RowConfirmStrip) so this file stays focused on row
- * layout and the rename signal.
+ *   - The row is a plain <div>. No draggable on it (drag-reorder
+ *     temporarily off — restored once we move it to a dedicated
+ *     drag-handle in a follow-up).
+ *   - For the ACTIVE project only, an action row renders below the
+ *     name. It always shows [Edit] [Stop if live] [Delete].
+ *   - Click Edit → name swaps to <input>, action row becomes
+ *     [Save] [Cancel].
+ *   - Click Delete → action row becomes "Remove from rail? [Cancel] [Confirm]".
+ *   - Click Stop → action row becomes "Shutdown daemon? [Cancel] [Confirm]".
+ *
+ * Inactive rows render plain — click to switch. The active marker
+ * (green left bar) is the visual selection indicator.
  */
 
-import { Show, createSignal, onCleanup, onMount } from 'solid-js';
+import { Show, createSignal } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { projectsStore } from '~/state/projects';
 import { serverStore } from '~/state/server';
 import { chatStore } from '~/state/chat';
 import * as kp from '~/lib/known-projects';
-import RowActions from '~/components/projects-rail/RowActions';
-import RowConfirmStrip from '~/components/projects-rail/RowConfirmStrip';
 
 export type RailRowData = {
   key: string;
@@ -35,8 +41,9 @@ export type RailRowData = {
   pendingReview?: boolean;
 };
 
+type RowMode = 'idle' | 'editing' | 'confirm-delete' | 'confirm-stop';
+
 export async function stopProject(port: number, base: string, onAfter: () => void): Promise<void> {
-  if (!confirm(`Stop the daemon on port ${port}?\n\nThis terminates the daemon and every agent it spawned on this machine. No signal is sent to the cluster.`)) return;
   const activePort = daemonStore.state.health?.port ?? null;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (port === activePort) {
@@ -58,25 +65,11 @@ export async function switchProject(port: number, key: string): Promise<void> {
   const ok = await daemonStore.switchToPort(port);
   console.log('[RAIL] switchProject result', { port, key, ok });
   if (!ok) {
-    // Surface the silent failure so the operator knows why the
-    // columns didn't refresh. Common case: clicking a stopped row
-    // (no daemon listening on that port).
     alert(`No daemon answering on port ${port}.\n\nThe project is stopped or the port changed. Start it with \`meshcore start\` in the repo folder, then click again.`);
   }
 }
 
 function forgetProjectImmediate(target: { cluster_id?: string | null; port: number }, onAfter: () => void): void {
-  // V84 + MP1/MP2/MP3 — Forget is a full cluster eviction:
-  //   1. Compute the clusterKey (cluster_id, else port:N fallback).
-  //   2. Disconnect the daemon instance for that key — closes its
-  //      WebSocket. Other projects' WSes stay open.
-  //   3. Drop server snapshot for the cluster from serverStore.
-  //   4. Drop chat slice (convMap, agent status, archived convs) for
-  //      the cluster from chatStore in-memory cache.
-  //   5. kp.forget() wipes every per-project localStorage key
-  //      (known-projects entry, alias, token, conv-meta, view state,
-  //      projects-order).
-  //   6. projectsStore.refresh re-reads the disk so the row vanishes.
   const clusterKey = target.cluster_id && target.cluster_id.trim().length > 0
     ? target.cluster_id
     : `port:${target.port}`;
@@ -93,40 +86,17 @@ export interface ProjectsRailRowProps {
   row: RailRowData;
   short: boolean;
   onAfterStop: () => void;
-  onDragStart?: (key: string) => void;
-  onDragOver?: (key: string, e: DragEvent) => void;
-  onDrop?: (key: string, e: DragEvent) => void;
-  onDragEnd?: () => void;
-  dragging?: boolean;
-  dragOver?: boolean;
 }
 
 export default function ProjectsRailRow(props: ProjectsRailRowProps) {
-  const [editing, setEditing] = createSignal(false);
-  const [val, setVal] = createSignal(props.row.display);
-  const [confirmingDelete, setConfirmingDelete] = createSignal(false);
+  const [mode, setMode] = createSignal<RowMode>('idle');
+  const [nameDraft, setNameDraft] = createSignal(props.row.display);
   const r = () => props.row;
-
-  const commit = (save: boolean): void => {
-    if (save) {
-      const k: kp.KnownProject = {
-        port: r().port,
-        base: r().base,
-        last_seen: new Date().toISOString(),
-        cluster_id: r().cluster_id ?? undefined,
-      };
-      kp.setAlias(k, val().trim());
-      projectsStore.refresh();
-    }
-    setEditing(false);
-  };
 
   const wrapCls = (): string => {
     const cls = ['proj-row-wrap'];
     if (!r().live) cls.push('is-stopped');
     if (r().isNew) cls.push('is-new');
-    if (props.dragging) cls.push('is-dragging');
-    if (props.dragOver) cls.push('is-drag-over');
     return cls.join(' ');
   };
 
@@ -138,78 +108,51 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
     return cls.join(' ');
   };
 
-  // V84 — Click is owned by the WRAP, not by an inner <button>. The
-  // wrap's onClick uses `event.target.closest` to skip clicks that
-  // landed on actions / confirm strip / edit input. We also keep a
-  // verbose console trace because the operator has reported this
-  // path failing repeatedly and we need raw evidence next time it
-  // happens.
-  const onWrapClick = (e: MouseEvent): void => {
+  const onRowClick = (e: MouseEvent): void => {
+    // If the click landed inside the action row or the inline input,
+    // let those handlers do their thing — don't trigger a switch.
     const t = e.target as HTMLElement | null;
-    const insideOverlay = !!(t && t.closest('.proj-actions, .proj-row-confirm, .proj-row-name--editing'));
-    console.log('[RAIL] wrap click', {
-      key: r().key,
-      port: r().port,
-      live: r().live,
-      active: r().active,
-      editing: editing(),
-      confirmingDelete: confirmingDelete(),
-      targetTag: t?.tagName,
-      targetClass: t?.className,
-      insideOverlay,
-      bodyResizing: document.body.classList.contains('resizing'),
-    });
-    if (editing()) return;
-    if (insideOverlay) return;
+    if (t && t.closest('.proj-row-actions, .proj-row-name--editing')) return;
+    if (mode() === 'editing') return;
     void switchProject(r().port, r().key);
   };
 
-  // V84b — native DOM fallback: attach a parallel `click` listener
-  // directly on the wrap element. If Solid's delegated onClick is the
-  // problem (event delegation quirk, re-render race), the native one
-  // still fires. Both call the same handler with the same guards.
-  let wrapEl: HTMLDivElement | undefined;
-  onMount(() => {
-    if (!wrapEl) return;
-    const nativeHandler = (e: Event): void => {
-      console.log('[RAIL] NATIVE click fired', { target: (e.target as HTMLElement)?.tagName });
-      onWrapClick(e as MouseEvent);
-    };
-    wrapEl.addEventListener('click', nativeHandler);
-    onCleanup(() => wrapEl?.removeEventListener('click', nativeHandler));
-  });
+  const commit = (save: boolean): void => {
+    if (save) {
+      const k: kp.KnownProject = {
+        port: r().port,
+        base: r().base,
+        last_seen: new Date().toISOString(),
+        cluster_id: r().cluster_id ?? undefined,
+      };
+      kp.setAlias(k, nameDraft().trim());
+      projectsStore.refresh();
+    }
+    setMode('idle');
+  };
+
+  const confirmDelete = (): void => {
+    setMode('idle');
+    forgetProjectImmediate({ cluster_id: r().cluster_id, port: r().port }, props.onAfterStop);
+  };
+
+  const confirmStop = (): void => {
+    setMode('idle');
+    void stopProject(r().port, r().base, props.onAfterStop);
+  };
+
+  const showActions = (): boolean => !props.short && r().active;
 
   return (
     <div
-      ref={(el) => (wrapEl = el)}
       class={wrapCls()}
       title={`${r().display} · :${r().port}${r().cluster_id ? ' · ' + r().cluster_id : ''}${!r().live ? ' · stopped' : ''}`}
-      onDragOver={(e) => {
-        if (editing() || props.short) return;
-        e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-        props.onDragOver?.(r().key, e);
-      }}
-      onDrop={(e) => {
-        if (editing() || props.short) return;
-        e.preventDefault();
-        props.onDrop?.(r().key, e);
-      }}
+      onClick={onRowClick}
     >
       <Show
-        when={editing()}
+        when={mode() === 'editing'}
         fallback={
-          <div
-            class={rowCls()}
-            draggable={!props.short}
-            onDragStart={(e) => {
-              if (props.short) { e.preventDefault(); return; }
-              e.dataTransfer?.setData('text/plain', r().key);
-              if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-              props.onDragStart?.(r().key);
-            }}
-            onDragEnd={() => props.onDragEnd?.()}
-          >
+          <div class={rowCls()}>
             <span class="proj-working-bar" aria-hidden="true" />
             <span class="proj-row-name">{r().display}</span>
             <span class="proj-row-initials">{r().initials}</span>
@@ -220,36 +163,97 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
           <span class="proj-working-bar" aria-hidden="true" />
           <input
             class="proj-row-name proj-row-name--editing"
-            value={val()}
+            value={nameDraft()}
             autofocus
-            onInput={(e) => setVal(e.currentTarget.value)}
+            onInput={(e) => setNameDraft(e.currentTarget.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') { e.preventDefault(); commit(true); }
               else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
             }}
-            onBlur={() => commit(true)}
             onClick={(e) => e.stopPropagation()}
           />
         </div>
       </Show>
-      <Show when={!props.short && !editing() && !confirmingDelete()}>
-        <RowActions
-          live={r().live}
-          port={r().port}
-          base={r().base}
-          onAfterStop={props.onAfterStop}
-          onEdit={() => { setVal(r().display); setConfirmingDelete(false); setEditing(true); }}
-          onDelete={() => { setEditing(false); setConfirmingDelete(true); }}
-        />
-      </Show>
-      <Show when={confirmingDelete()}>
-        <RowConfirmStrip
-          onCancel={() => setConfirmingDelete(false)}
-          onConfirm={() => {
-            setConfirmingDelete(false);
-            forgetProjectImmediate({ cluster_id: r().cluster_id, port: r().port }, props.onAfterStop);
-          }}
-        />
+
+      {/* Action row — only on active project in full mode. Morphs
+          between idle / editing / confirm-delete / confirm-stop. */}
+      <Show when={showActions()}>
+        <div class="proj-row-actions">
+          <Show when={mode() === 'idle'}>
+            <button
+              type="button"
+              class="proj-row-action is-edit"
+              title="Rename"
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log('[RAIL] EDIT click', { port: r().port });
+                setNameDraft(r().display);
+                setMode('editing');
+              }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+              <span>rename</span>
+            </button>
+            <Show when={r().live}>
+              <button
+                type="button"
+                class="proj-row-action is-stop"
+                title="Shutdown daemon"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  console.log('[RAIL] STOP click', { port: r().port });
+                  setMode('confirm-stop');
+                }}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                </svg>
+                <span>stop</span>
+              </button>
+            </Show>
+            <button
+              type="button"
+              class="proj-row-action is-delete"
+              title="Forget project"
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log('[RAIL] DELETE click', { port: r().port });
+                setMode('confirm-delete');
+              }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+              </svg>
+              <span>forget</span>
+            </button>
+          </Show>
+
+          <Show when={mode() === 'editing'}>
+            <button type="button" class="proj-row-action is-cancel"
+              onClick={(e) => { e.stopPropagation(); commit(false); }}>cancel</button>
+            <button type="button" class="proj-row-action is-save"
+              onClick={(e) => { e.stopPropagation(); commit(true); }}>save</button>
+          </Show>
+
+          <Show when={mode() === 'confirm-delete'}>
+            <span class="proj-row-prompt">remove from rail?</span>
+            <button type="button" class="proj-row-action is-cancel"
+              onClick={(e) => { e.stopPropagation(); setMode('idle'); }}>cancel</button>
+            <button type="button" class="proj-row-action is-danger"
+              onClick={(e) => { e.stopPropagation(); confirmDelete(); }}>remove</button>
+          </Show>
+
+          <Show when={mode() === 'confirm-stop'}>
+            <span class="proj-row-prompt">shutdown daemon?</span>
+            <button type="button" class="proj-row-action is-cancel"
+              onClick={(e) => { e.stopPropagation(); setMode('idle'); }}>cancel</button>
+            <button type="button" class="proj-row-action is-danger"
+              onClick={(e) => { e.stopPropagation(); confirmStop(); }}>shutdown</button>
+          </Show>
+        </div>
       </Show>
     </div>
   );

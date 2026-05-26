@@ -24,13 +24,13 @@
  * Styling lives entirely in src/styles/projects-rail.css.
  */
 
-import { For, Show, createMemo, createSignal, onMount } from 'solid-js';
+import { For, Show, createMemo, onMount } from 'solid-js';
 import { uiStore } from '~/state/ui';
 import ProjectsRailRow from '~/components/ProjectsRailRow';
 import { PORT_LO, PORT_HI, discoverProjects } from '~/components/projects-rail/discovery';
 import { rows } from '~/components/projects-rail/rows';
 import { RailFooter } from '~/components/projects-rail/RailFooter';
-import { loadProjectsOrder, saveProjectsOrder, applyOrder } from '~/components/projects-rail/order';
+import { loadProjectsOrder, applyOrder } from '~/components/projects-rail/order';
 
 export { discoverProjects } from '~/components/projects-rail/discovery';
 export { projectsRailScan } from '~/components/projects-rail/discovery';
@@ -45,34 +45,13 @@ export default function ProjectsRail() {
   const width = () => uiStore.state.projectsRailWidth;
   const mode = (): 'full' | 'short' => (width() < SHORT_THRESHOLD ? 'short' : 'full');
 
-  // V82 — drag-reorder state. `order` is the operator-saved sequence;
-  // `dragSrc` / `dragOver` track the in-flight drag so rows can render
-  // their .is-dragging / .is-drag-over modifiers.
-  const [order, setOrder] = createSignal<string[]>(loadProjectsOrder());
-  const [dragSrc, setDragSrc] = createSignal<string | null>(null);
-  const [dragOver, setDragOver] = createSignal<string | null>(null);
+  // V85 — drag-reorder is OFF in this iteration. We still respect
+  // the operator-saved order from localStorage so previously-set
+  // sequences persist; rebuilding drag with the new layout (no
+  // absolute overlay) is a follow-up that needs a dedicated grip
+  // handle, not full-row draggable.
+  const order = (): string[] => loadProjectsOrder();
   const orderedRows = createMemo(() => applyOrder(rows(), order()));
-
-  const handleDragStart = (key: string): void => { setDragSrc(key); };
-  const handleDragOver = (targetKey: string): void => {
-    if (dragSrc() && dragSrc() !== targetKey) setDragOver(targetKey);
-  };
-  const handleDrop = (targetKey: string): void => {
-    const src = dragSrc();
-    if (!src || src === targetKey) { setDragSrc(null); setDragOver(null); return; }
-    const current = orderedRows().map((r) => r.key);
-    const srcIdx = current.indexOf(src);
-    const tgtIdx = current.indexOf(targetKey);
-    if (srcIdx < 0 || tgtIdx < 0) { setDragSrc(null); setDragOver(null); return; }
-    const next = current.slice();
-    next.splice(srcIdx, 1);
-    next.splice(tgtIdx, 0, src);
-    setOrder(next);
-    saveProjectsOrder(next);
-    setDragSrc(null);
-    setDragOver(null);
-  };
-  const handleDragEnd = (): void => { setDragSrc(null); setDragOver(null); };
 
   onMount(() => {
     void discoverProjects();
@@ -151,12 +130,6 @@ export default function ProjectsRail() {
                 row={r}
                 short={mode() === 'short'}
                 onAfterStop={() => void discoverProjects()}
-                onDragStart={handleDragStart}
-                onDragOver={(key) => handleDragOver(key)}
-                onDrop={(key) => handleDrop(key)}
-                onDragEnd={handleDragEnd}
-                dragging={dragSrc() === r.key}
-                dragOver={dragOver() === r.key}
               />
             )}
           </For>
