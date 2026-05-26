@@ -106,7 +106,8 @@ export default function App() {
 
   onCleanup(() => {
     if (detachBus) { detachBus(); detachBus = null; }
-    daemonStore.disconnect();
+    // MP1 — close every parallel daemon connection on app unmount.
+    daemonStore.disconnectAll();
   });
 
   const retry = () => { log.info('manual retry'); void connect(setStatus); };

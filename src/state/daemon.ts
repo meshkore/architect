@@ -1,19 +1,23 @@
 /**
- * state/daemon.ts — reactive store for the daemon connection.
+ * state/daemon.ts — multi-instance daemon store (MP1).
  *
- * Owns: transport config, the `DaemonClient`, the `DaemonWS`, daemon
- * version + the version gate, and the connection state machine the
- * header pill renders.
+ * Holds one `DaemonInstance` per project the operator has touched in
+ * this session. Each instance has its own DaemonClient + DaemonWS,
+ * so projects keep their WebSockets open even when the operator is
+ * looking at a different project. Switching projects is just a
+ * pointer swap — no disconnect, no re-fetch.
  *
- * Why a dedicated store: connection state is read by many components
- * (header pill, version-mismatch modal, every dispatch handler) and
- * written from a single bootstrap path (lib/connection.ts). Solid's
- * `createStore` keeps reads cheap and writes path-localised.
+ * Backwards-compat facade: `state.client`, `state.ws`, `state.health`,
+ * `state.wsState`, `state.version`, `state.outdated`,
+ * `state.supportsSelfUpdate` still resolve to the ACTIVE instance,
+ * so the ~30 existing readers don't have to change. Components that
+ * want per-instance data (e.g. the rail rendering each row's WS
+ * state) can read `state.instances` directly.
  *
- * Cleanup: callers MUST invoke `daemon.disconnect()` on unmount
- * (`onCleanup`) — it closes the WS, cancels pending reconnects, and
- * frees the client. Without this we leak sockets across HMR / route
- * changes (audit §2.3).
+ * Cleanup contract: `disconnectAll()` on app unmount closes every WS.
+ * Individual instances are removed by `forget(clusterKey)` (from the
+ * rail's Forget action) or replaced when an operator re-adds a
+ * project at a new port.
  */
 
 import { createStore } from 'solid-js/store';
@@ -31,23 +35,46 @@ export type ConnectionPhase =
   | 'no-daemon'
   | 'error';
 
+/** A single project's live connection. One per cluster_id (or port:N
+ *  fallback before cluster_id is known). */
+export interface DaemonInstance {
+  clusterKey: string;
+  port: number;
+  client: DaemonClient;
+  ws: DaemonWS;
+  wsState: DaemonWSState;
+  health: HealthResponse;
+  version: DaemonVersion | null;
+  outdated: boolean;
+  supportsSelfUpdate: boolean;
+}
+
 export interface DaemonStoreState {
+  /** All live (or recently-live) instances, keyed by clusterKey. */
+  instances: Record<string, DaemonInstance>;
+  /** Which instance is currently rendered in the cockpit. */
+  activeId: string | null;
+
+  // Boot-time state machine. Drives ConnectionGate vs Cockpit.
   phase: ConnectionPhase;
   errorMessage: string;
+
+  // Backwards-compat singleton view — always mirrors the active
+  // instance. Readers across the cockpit use these without caring
+  // about the underlying map.
   client: DaemonClient | null;
   ws: DaemonWS | null;
   wsState: DaemonWSState;
   health: HealthResponse | null;
   version: DaemonVersion | null;
-  /** Version gate — true when the daemon is older than MIN_DAEMON_VERSION. */
   outdated: boolean;
-  /** `cluster.yaml.daemon.auto_update: true` (read from /state). */
   autoUpdateEnabled: boolean;
-  /** Daemon advertises `self-update` in its /health features list. */
   supportsSelfUpdate: boolean;
 }
 
 const initial: DaemonStoreState = {
+  instances: {},
+  activeId: null,
   phase: 'idle',
   errorMessage: '',
   client: null,
@@ -62,39 +89,134 @@ const initial: DaemonStoreState = {
 
 const [state, setState] = createStore<DaemonStoreState>(initial);
 
+function clusterKeyFor(health: HealthResponse, port: number): string {
+  const cid = health.cluster_id?.trim();
+  return cid && cid.length > 0 ? cid : `port:${port}`;
+}
+
+/** Push the active instance's data into the singleton facade so old
+ *  readers stay reactive without code changes. */
+function syncFacade(): void {
+  const id = state.activeId;
+  const inst = id ? state.instances[id] : null;
+  if (!inst) {
+    setState({
+      client: null,
+      ws: null,
+      wsState: 'idle',
+      health: null,
+      version: null,
+      outdated: false,
+      supportsSelfUpdate: false,
+    });
+    return;
+  }
+  setState({
+    client: inst.client,
+    ws: inst.ws,
+    wsState: inst.wsState,
+    health: inst.health,
+    version: inst.version,
+    outdated: inst.outdated,
+    supportsSelfUpdate: inst.supportsSelfUpdate,
+  });
+}
+
+/**
+ * Attach a freshly-connected daemon. Creates a new instance OR
+ * updates an existing one (when the operator re-probes the same
+ * cluster on a different port). Sets it active.
+ *
+ * Existing instances for OTHER clusters are left alone — their WS
+ * stays open. That's the parallel-multi-project win.
+ */
 function attachClient(client: DaemonClient, health: HealthResponse): void {
   const v = parseDaemonVersion(health.version);
   const supportsSelfUpdate = (health.features ?? []).includes('self-update');
-  setState({
+  const port = health.port;
+  const key = clusterKeyFor(health, port);
+
+  // Replace any prior instance under the same key (re-attach scenario).
+  const prior = state.instances[key];
+  if (prior && prior !== undefined) {
+    try { prior.ws.close(); } catch { /* already closed */ }
+  }
+
+  const ws = new DaemonWS(client.transport);
+  // Wire wsState updates so the rail and header can render per-instance.
+  ws.onState((s) => {
+    if (state.instances[key]) {
+      setState('instances', key, 'wsState', s);
+      if (state.activeId === key) setState('wsState', s);
+    }
+  });
+
+  const inst: DaemonInstance = {
+    clusterKey: key,
+    port,
     client,
+    ws,
+    wsState: 'idle',
     health,
     version: v,
     outdated: !meetsMinimum(v),
     supportsSelfUpdate,
+  };
+  setState('instances', key, inst);
+  setState({
+    activeId: key,
     phase: 'connected',
     errorMessage: '',
   });
-  // Start the WS feed.
-  const ws = new DaemonWS(client.transport);
-  ws.onState((s) => setState('wsState', s));
-  setState('ws', ws);
+  syncFacade();
   ws.connect();
 }
 
-function disconnect(): void {
-  if (state.ws) {
-    state.ws.close();
+/**
+ * Disconnect ONE instance (close its WS + remove from the map).
+ * If it was active, fall back to any other live instance, or idle.
+ * Used by `forget(clusterKey)` from the rail.
+ */
+function disconnectInstance(key: string): void {
+  const inst = state.instances[key];
+  if (!inst) return;
+  try { inst.ws.close(); } catch { /* already closed */ }
+  // Drop from map.
+  setState('instances', (prev) => {
+    const next = { ...prev };
+    delete next[key];
+    return next;
+  });
+  if (state.activeId === key) {
+    const fallback = Object.keys(state.instances)[0] ?? null;
+    setState('activeId', fallback);
+    if (!fallback) setState('phase', 'idle');
+  }
+  syncFacade();
+}
+
+/**
+ * Close every instance. Called once on app unmount.
+ */
+function disconnectAll(): void {
+  for (const key of Object.keys(state.instances)) {
+    try { state.instances[key]?.ws.close(); } catch { /* ignore */ }
   }
   setState({
-    client: null,
-    ws: null,
-    wsState: 'idle',
-    health: null,
-    version: null,
-    outdated: false,
-    supportsSelfUpdate: false,
+    instances: {},
+    activeId: null,
     phase: 'idle',
   });
+  syncFacade();
+}
+
+/**
+ * Legacy single-tenant `disconnect()`. Kept for callers that still
+ * mean "close the active connection" — internally just disconnects
+ * the active instance.
+ */
+function disconnect(): void {
+  if (state.activeId) disconnectInstance(state.activeId);
 }
 
 function setPhase(phase: ConnectionPhase, errorMessage = ''): void {
@@ -106,37 +228,34 @@ function setAutoUpdate(flag: boolean): void {
 }
 
 /**
- * Hot-swap the connection to a different daemon port — no page reload.
+ * Switch the cockpit to another project, OPENING a parallel WS if
+ * we haven't seen it before, or just flipping the pointer if we
+ * already have an instance for it.
  *
- * Tears down the current WS, probes /health on the new port, attaches
- * a fresh client (which spins up a new WS), and lets the App's
- * `connection.connected` effect run the cluster-bind side effects
- * (serverStore.refresh, projectsStore.upsert, chatStore.bindCluster,
- * eventBus re-attach). Returns true on success.
- *
- * The caller is responsible for surfacing failure to the operator
- * (e.g. via a toast). On success the cockpit visually flips to the
- * new project's data within a few hundred milliseconds without losing
- * the page.
+ * Returns true on success. Never closes other projects' WS.
  */
 async function switchToPort(port: number): Promise<boolean> {
-  console.log('[RAIL] switchToPort entry', { port, current: state.health?.port ?? null });
+  console.log('[RAIL] switchToPort entry', { port, current: state.health?.port ?? null, instances: Object.keys(state.instances) });
   log.info('switchToPort requested', { port, current: state.health?.port ?? null });
-  if (state.health?.port === port) {
-    console.log('[RAIL] switchToPort no-op (already there)');
-    log.debug('switchToPort no-op — already on this port');
+
+  // Already-attached instance for this port? Just flip the pointer.
+  const existing = Object.entries(state.instances).find(([, i]) => i.port === port);
+  if (existing) {
+    const [key, inst] = existing;
+    console.log('[RAIL] switchToPort reusing existing instance', { key, port });
+    if (state.activeId !== key) {
+      setState({ activeId: key, phase: 'connected', errorMessage: '' });
+      syncFacade();
+      // If the WS for this instance went 'fatal' or 'closed' while it
+      // was in the background, kick a reconnect now that it's active.
+      if (inst.wsState === 'fatal' || inst.wsState === 'closed') {
+        try { inst.ws.connect(); } catch { /* ignore */ }
+      }
+    }
     return true;
   }
 
-  // V82 — Smooth swap: prepare the new connection BEFORE tearing down
-  // the old one so the cockpit never visibly drops to a disconnected
-  // state mid-switch. Sequence:
-  //   1. probe /health on the new port (old WS still alive, snapshot
-  //      still rendering).
-  //   2. resolve token + build new DaemonClient.
-  //   3. atomic swap: disconnect old WS, attachClient(new) — Solid
-  //      re-renders downstream subscribers in the same tick.
-  // If step 1 or 2 fails, we leave the existing connection untouched.
+  // New project — probe /health, build a client, attach.
   const oldToken = state.client?.transport.token ?? '';
   const probeUrl = `http://localhost:${port}/health`;
   let health: HealthResponse;
@@ -156,21 +275,13 @@ async function switchToPort(port: number): Promise<boolean> {
     return false;
   }
   const { clusterTokenKey, tokenForCluster } = await import('~/lib/tokens');
-  const key = clusterTokenKey({ cluster_id: health.cluster_id ?? null, port });
-  const token = tokenForCluster(key) || oldToken;
+  const tokenKey = clusterTokenKey({ cluster_id: health.cluster_id ?? null, port });
+  const token = tokenForCluster(tokenKey) || oldToken;
   const { localTransport } = await import('~/lib/transport');
   const { DaemonClient } = await import('~/lib/daemon-client');
   const client = new DaemonClient(localTransport(port, token));
-  // Atomic swap. Also drop stale snapshot up front so the cockpit
-  // visually flushes the OLD project's data while the new one loads,
-  // rather than briefly showing it under the new project's name. The
-  // App.tsx side-effect bus will run chatStore.bindCluster +
-  // serverStore.refreshNow once attachClient lands.
-  const { serverStore } = await import('~/state/server');
-  serverStore.clear();
-  disconnect();
   attachClient(client, health);
-  console.log('[RAIL] switchToPort attached', { port, cluster_id: health.cluster_id ?? null });
+  console.log('[RAIL] switchToPort attached new instance', { port, cluster_id: health.cluster_id ?? null });
   log.info('switchToPort attached', { port, cluster_id: health.cluster_id ?? null });
   return true;
 }
@@ -181,18 +292,20 @@ async function switchToPort(port: number): Promise<boolean> {
  * true iff the daemon now meets MIN_DAEMON_VERSION.
  */
 async function recheckHealth(): Promise<boolean> {
-  const client = state.client;
-  if (!client) return false;
-  const r = await client.health();
+  const id = state.activeId;
+  const inst = id ? state.instances[id] : null;
+  if (!inst) return false;
+  const r = await inst.client.health();
   if (!r.ok) return false;
   const v = parseDaemonVersion(r.data.version);
   const supportsSelfUpdate = (r.data.features ?? []).includes('self-update');
-  setState({
+  setState('instances', id!, {
     health: r.data,
     version: v,
     outdated: !meetsMinimum(v),
     supportsSelfUpdate,
   });
+  syncFacade();
   return !state.outdated;
 }
 
@@ -200,6 +313,8 @@ export const daemonStore = {
   state,
   attachClient,
   disconnect,
+  disconnectAll,
+  disconnectInstance,
   setPhase,
   setAutoUpdate,
   recheckHealth,
@@ -213,5 +328,4 @@ export const daemonVersion = (): DaemonVersion | null => state.version;
 export const isDaemonConnected = (): boolean => state.phase === 'connected';
 export const isDaemonOutdated = (): boolean => state.outdated;
 
-// Module-load log helps trace boot order in dev.
-log.debug('state/daemon module loaded');
+log.debug('state/daemon module loaded (MP1 multi-instance)');
