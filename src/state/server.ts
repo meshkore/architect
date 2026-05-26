@@ -83,27 +83,79 @@ export interface ServerStoreState {
   error: string | null;
 }
 
-const initial: ServerStoreState = {
+// ── Per-cluster state (MP2) ──────────────────────────────────────────
+
+/** One snapshot slot per cluster. `state.snapshot` (facade below)
+ *  always reflects the currently-active cluster. */
+interface ClusterSlice {
+  snapshot: ServerSnapshot | null;
+  lastRefresh: string | null;
+  refreshing: boolean;
+  error: string | null;
+}
+
+const emptySlice: ClusterSlice = {
   snapshot: null,
   lastRefresh: null,
   refreshing: false,
   error: null,
 };
 
-const [state, setState] = createStore<ServerStoreState>(initial);
+interface ServerStoreInternal {
+  byCluster: Record<string, ClusterSlice>;
+  // Facade — points at byCluster[active] so existing readers don't
+  // need to change.
+  snapshot: ServerSnapshot | null;
+  lastRefresh: string | null;
+  refreshing: boolean;
+  error: string | null;
+}
 
-let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-let inFlight: Promise<void> | null = null;
+const initial: ServerStoreInternal = {
+  byCluster: {},
+  snapshot: null,
+  lastRefresh: null,
+  refreshing: false,
+  error: null,
+};
 
-async function doRefresh(client: DaemonClient): Promise<void> {
-  setState({ refreshing: true, error: null });
+const [state, setState] = createStore<ServerStoreInternal>(initial);
+
+// One debounce timer + in-flight promise per cluster so a /state
+// rebuild storm on cluster A doesn't slow down cluster B.
+const refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const inFlight = new Map<string, Promise<void>>();
+
+// Active cluster pointer — set from App.tsx whenever daemonStore's
+// activeId changes. Kept here (not imported from daemonStore) to
+// avoid the import cycle: daemonStore is the source of truth, this
+// is just a cached pointer the facade reads.
+let activeClusterKey: string | null = null;
+
+function syncFacade(): void {
+  const slice = activeClusterKey ? state.byCluster[activeClusterKey] ?? emptySlice : emptySlice;
+  setState({
+    snapshot: slice.snapshot,
+    lastRefresh: slice.lastRefresh,
+    refreshing: slice.refreshing,
+    error: slice.error,
+  });
+}
+
+function writeSlice(key: string, patch: Partial<ClusterSlice>): void {
+  setState('byCluster', key, (prev) => ({ ...(prev ?? emptySlice), ...patch }));
+  if (key === activeClusterKey) syncFacade();
+}
+
+async function doRefresh(client: DaemonClient, key: string): Promise<void> {
+  writeSlice(key, { refreshing: true, error: null });
   const res = await client.state();
   if (!res.ok) {
-    log.warn('server.refresh failed', res.status, res.body);
-    setState({ refreshing: false, error: res.error ?? res.body.slice(0, 200) });
+    log.warn('server.refresh failed', { cluster: key, status: res.status, body: res.body });
+    writeSlice(key, { refreshing: false, error: res.error ?? res.body.slice(0, 200) });
     return;
   }
-  setState({
+  writeSlice(key, {
     snapshot: res.data as ServerSnapshot,
     lastRefresh: new Date().toISOString(),
     refreshing: false,
@@ -111,43 +163,74 @@ async function doRefresh(client: DaemonClient): Promise<void> {
   });
 }
 
-/**
- * Debounced refresh. Multiple back-to-back calls coalesce into one
- * `/state` fetch (200 ms quiet window).
- */
-function refresh(client: DaemonClient): Promise<void> {
-  if (refreshTimer !== null) clearTimeout(refreshTimer);
+/** Debounced per-cluster refresh. Two back-to-back calls on the same
+ *  cluster coalesce; different clusters don't interfere. */
+function refresh(client: DaemonClient, key: string): Promise<void> {
+  const existing = refreshTimers.get(key);
+  if (existing) clearTimeout(existing);
   return new Promise((resolve) => {
-    refreshTimer = setTimeout(() => {
-      refreshTimer = null;
-      if (inFlight) {
-        // Already running — chain a follow-up so we end with fresh data.
-        inFlight = inFlight.then(() => doRefresh(client));
-      } else {
-        inFlight = doRefresh(client).finally(() => {
-          inFlight = null;
-        });
-      }
-      inFlight.finally(resolve);
+    const timer = setTimeout(() => {
+      refreshTimers.delete(key);
+      const running = inFlight.get(key);
+      const next = running ? running.then(() => doRefresh(client, key)) : doRefresh(client, key);
+      inFlight.set(key, next.finally(() => {
+        if (inFlight.get(key) === next) inFlight.delete(key);
+      }));
+      next.finally(resolve);
     }, 200);
+    refreshTimers.set(key, timer);
   });
 }
 
 /** Force-refresh, bypassing the debounce. */
-function refreshNow(client: DaemonClient): Promise<void> {
-  if (refreshTimer !== null) {
-    clearTimeout(refreshTimer);
-    refreshTimer = null;
+function refreshNow(client: DaemonClient, key: string): Promise<void> {
+  const timer = refreshTimers.get(key);
+  if (timer) {
+    clearTimeout(timer);
+    refreshTimers.delete(key);
   }
-  if (inFlight) return inFlight;
-  inFlight = doRefresh(client).finally(() => {
-    inFlight = null;
+  const running = inFlight.get(key);
+  if (running) return running;
+  const p = doRefresh(client, key).finally(() => {
+    if (inFlight.get(key) === p) inFlight.delete(key);
   });
-  return inFlight;
+  inFlight.set(key, p);
+  return p;
 }
 
-function clear(): void {
+/** Set which cluster the facade reads from. Called by App.tsx
+ *  whenever daemonStore.state.activeId changes. */
+function setActiveCluster(key: string | null): void {
+  activeClusterKey = key;
+  syncFacade();
+}
+
+/** Drop one cluster's snapshot (used by the Forget action). */
+function clearForCluster(key: string): void {
+  setState('byCluster', (prev) => {
+    const next = { ...prev };
+    delete next[key];
+    return next;
+  });
+  const t = refreshTimers.get(key);
+  if (t) { clearTimeout(t); refreshTimers.delete(key); }
+  inFlight.delete(key);
+  if (key === activeClusterKey) syncFacade();
+}
+
+/** Drop EVERY snapshot. Called on app unmount. */
+function clearAll(): void {
+  for (const [, t] of refreshTimers) clearTimeout(t);
+  refreshTimers.clear();
+  inFlight.clear();
+  activeClusterKey = null;
   setState(initial);
+}
+
+/** Legacy `clear()` — wipe the active cluster's slice. Existing
+ *  callers that meant "reset the current view" still work. */
+function clear(): void {
+  if (activeClusterKey) clearForCluster(activeClusterKey);
 }
 
 export const serverStore = {
@@ -155,9 +238,12 @@ export const serverStore = {
   refresh,
   refreshNow,
   clear,
+  clearForCluster,
+  clearAll,
+  setActiveCluster,
 };
 
-// ── Derived selectors ────────────────────────────────────────────────
+// ── Derived selectors (read from the facade = active cluster) ────────
 
 export const allTasks = createMemo<ServerTask[]>(() => state.snapshot?.roadmap?.tasks ?? []);
 
@@ -178,4 +264,4 @@ export const isProjectEmpty = createMemo<boolean>(() => {
   return inis.length === 0 && tasks.length === 0;
 });
 
-log.debug('state/server loaded');
+log.debug('state/server loaded (MP2 per-cluster)');

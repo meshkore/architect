@@ -135,7 +135,9 @@ export default function StoryRunner() {
         if (!r2 || r2.status !== 'running') return;
         log.info('story: grace expired, advancing optimistically');
         storyStore.advance();
-        void serverStore.refreshNow(daemonStore.state.client!);
+        const c = daemonStore.state.client;
+        const id = daemonStore.state.activeId;
+        if (c && id) void serverStore.refreshNow(c, id);
         void dispatchCurrent();
       }, ADVANCE_GRACE_MS);
     });

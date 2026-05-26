@@ -26,12 +26,13 @@ export default function EmptyOnboardingPanel() {
 
   async function rebuild() {
     const client = daemonStore.state.client;
-    if (!client) { setMsg('No daemon client'); return; }
+    const activeId = daemonStore.state.activeId;
+    if (!client || !activeId) { setMsg('No daemon client'); return; }
     setBusy(true); setMsg(null);
     try {
       const res = await client.reload();
       if (!res.ok) { setMsg(`Reload failed (${res.status})`); return; }
-      await serverStore.refreshNow(client);
+      await serverStore.refreshNow(client, activeId);
       setMsg('Rebuilt.');
     } catch (e) {
       log.warn('reload failed', e);

@@ -102,7 +102,11 @@ export default function Cockpit(props: {
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path d="M12 4v16M4 12h16" /></svg>
                     </button>
                     <button type="button" title="Reload state" class="text-gray-500 hover:text-emerald-400 transition px-1 py-0.5 rounded hover:bg-emerald-500/10"
-                      onClick={() => { const c = daemonStore.state.client; if (c) void serverStore.refreshNow(c); }}>
+                      onClick={() => {
+                        const c = daemonStore.state.client;
+                        const id = daemonStore.state.activeId;
+                        if (c && id) void serverStore.refreshNow(c, id);
+                      }}>
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 4v6h6M20 20v-6h-6M5 13a8 8 0 1014.5-3.5M19 11a8 8 0 00-14.5 3.5" /></svg>
                     </button>
                   </div>

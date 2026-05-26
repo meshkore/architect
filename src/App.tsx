@@ -62,21 +62,24 @@ export default function App() {
     if (s.kind === 'connected') daemonStore.attachClient(s.client, s.health);
   });
 
-  // Unified side-effect bus — runs on boot AND on every hot-swap.
+  // Unified side-effect bus — runs on boot AND on every project
+  // switch. With MP1+MP2 in place: switching to an already-attached
+  // project just flips daemonStore.activeId, which re-fires this
+  // effect with the existing client. serverStore.setActiveCluster
+  // flips its facade to the cached snapshot for that cluster
+  // (instant), and refreshNow ensures freshness in the background.
   createEffect(() => {
     const client = daemonStore.state.client;
     const health = daemonStore.state.health;
-    if (!client || !health) return;
-    console.log('[RAIL] side-effect bus firing', { port: health.port, cluster: health.cluster_id });
+    const activeId = daemonStore.state.activeId;
+    if (!client || !health || !activeId) return;
+    console.log('[RAIL] side-effect bus firing', { port: health.port, cluster: health.cluster_id, activeId });
     log.info('daemon bound — running side effects', { port: health.port, cluster: health.cluster_id });
-    // V84 — only the legacy snapshot `store` is wired here. The WS
-    // is owned by `daemonStore.ws` (DaemonWS). The previous
-    // `startLive`/`stopLive` from `~/state/live` opened a SECOND WS
-    // on top of DaemonWS — under mixed content (HTTPS page → ws://
-    // localhost) both reconnect loops accumulated Chrome LNA Issues
-    // at ~8/min, hitting 1.9k+ in a session.
     void store.attach(client);
-    void serverStore.refreshNow(client);
+    // MP2 — point the server-store facade at this cluster's slice
+    // (instant), then kick a /state refresh (debounced).
+    serverStore.setActiveCluster(activeId);
+    void serverStore.refreshNow(client, activeId);
     projectsStore.upsert({
       port: health.port,
       base: client.transport.httpBase,
@@ -89,7 +92,7 @@ export default function App() {
     viewStore.bindCluster(health.cluster_id ?? null);
     if (detachBus) { detachBus(); detachBus = null; }
     const ws = daemonStore.state.ws;
-    if (ws) detachBus = attachEventBus(ws, client);
+    if (ws) detachBus = attachEventBus(ws, client, activeId);
   });
 
   // Once the server snapshot lands, fall back to the Coordinator conv
