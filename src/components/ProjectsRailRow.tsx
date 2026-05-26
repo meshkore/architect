@@ -19,7 +19,7 @@
  * (green left bar) is the visual selection indicator.
  */
 
-import { Show, createSignal } from 'solid-js';
+import { Show, createEffect, createSignal, onMount } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { projectsStore } from '~/state/projects';
 import { serverStore } from '~/state/server';
@@ -92,6 +92,17 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
   const [mode, setMode] = createSignal<RowMode>('idle');
   const [nameDraft, setNameDraft] = createSignal(props.row.display);
   const r = () => props.row;
+
+  // Diagnostics for the "buttons don't visibly work" report. If the
+  // row is being remounted every click, we'll see "[RAIL] row MOUNT"
+  // immediately after a setMode call → state reset. If mode actually
+  // changes and stays, we'll see the effect log without a mount.
+  onMount(() => {
+    console.log('[RAIL] row MOUNT', { key: r().key, port: r().port, active: r().active });
+  });
+  createEffect(() => {
+    console.log('[RAIL] row mode →', mode(), { key: r().key, active: r().active });
+  });
 
   const wrapCls = (): string => {
     const cls = ['proj-row-wrap'];
@@ -191,11 +202,10 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
                 setMode('editing');
               }}
             >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                 <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
                 <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
               </svg>
-              <span>rename</span>
             </button>
             <Show when={r().live}>
               <button
@@ -208,10 +218,9 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
                   setMode('confirm-stop');
                 }}
               >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                   <rect x="6" y="6" width="12" height="12" rx="1.5" />
                 </svg>
-                <span>stop</span>
               </button>
             </Show>
             <button
@@ -224,33 +233,32 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
                 setMode('confirm-delete');
               }}
             >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                 <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
               </svg>
-              <span>forget</span>
             </button>
           </Show>
 
           <Show when={mode() === 'editing'}>
-            <button type="button" class="proj-row-action is-cancel"
+            <button type="button" class="proj-row-action is-cancel has-label"
               onClick={(e) => { e.stopPropagation(); commit(false); }}>cancel</button>
-            <button type="button" class="proj-row-action is-save"
+            <button type="button" class="proj-row-action is-save has-label"
               onClick={(e) => { e.stopPropagation(); commit(true); }}>save</button>
           </Show>
 
           <Show when={mode() === 'confirm-delete'}>
-            <span class="proj-row-prompt">remove from rail?</span>
-            <button type="button" class="proj-row-action is-cancel"
-              onClick={(e) => { e.stopPropagation(); setMode('idle'); }}>cancel</button>
-            <button type="button" class="proj-row-action is-danger"
+            <span class="proj-row-prompt">remove?</span>
+            <button type="button" class="proj-row-action is-cancel has-label"
+              onClick={(e) => { e.stopPropagation(); setMode('idle'); }}>no</button>
+            <button type="button" class="proj-row-action is-danger has-label"
               onClick={(e) => { e.stopPropagation(); confirmDelete(); }}>remove</button>
           </Show>
 
           <Show when={mode() === 'confirm-stop'}>
-            <span class="proj-row-prompt">shutdown daemon?</span>
-            <button type="button" class="proj-row-action is-cancel"
-              onClick={(e) => { e.stopPropagation(); setMode('idle'); }}>cancel</button>
-            <button type="button" class="proj-row-action is-danger"
+            <span class="proj-row-prompt">shutdown?</span>
+            <button type="button" class="proj-row-action is-cancel has-label"
+              onClick={(e) => { e.stopPropagation(); setMode('idle'); }}>no</button>
+            <button type="button" class="proj-row-action is-danger has-label"
               onClick={(e) => { e.stopPropagation(); confirmStop(); }}>shutdown</button>
           </Show>
         </div>
