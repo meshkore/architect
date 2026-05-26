@@ -175,11 +175,10 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
     phase: 'connected',
     errorMessage: '',
   });
+  console.log('[RAIL] attachClient: post-setState', { activeId: state.activeId, instances: Object.keys(state.instances) });
   syncFacade();
+  console.log('[RAIL] attachClient: post-syncFacade', { facadePort: state.health?.port, facadeCluster: state.health?.cluster_id });
   ws.connect();
-  // MP4 — attach a per-instance event-bus so background events
-  // (chat, state.rebuilt, task.*) update this cluster's slice even
-  // when the operator is looking at another project.
   const detachBus = attachEventBus(ws, client, key);
   busDetachers.set(key, detachBus);
 }

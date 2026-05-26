@@ -63,22 +63,26 @@ export default function App() {
     if (s.kind === 'connected') daemonStore.attachClient(s.client, s.health);
   });
 
-  // Unified side-effect bus — runs on boot AND on every project
-  // switch. With MP1+MP2 in place: switching to an already-attached
-  // project just flips daemonStore.activeId, which re-fires this
-  // effect with the existing client. serverStore.setActiveCluster
-  // flips its facade to the cached snapshot for that cluster
-  // (instant), and refreshNow ensures freshness in the background.
+  // V85c — Side-effect bus now tracks `activeId` directly (the source
+  // of truth in daemonStore). The previous version read client + health
+  // off the facade; in production the facade fields could remain
+  // reference-equal across switches under certain setState orderings,
+  // and the effect would silently fail to re-fire. Active-id tracking
+  // is unambiguous: every switch is a setState({activeId}) — Solid
+  // sees that and re-runs this body deterministically.
   createEffect(() => {
-    const client = daemonStore.state.client;
-    const health = daemonStore.state.health;
     const activeId = daemonStore.state.activeId;
-    if (!client || !health || !activeId) return;
+    console.log('[RAIL] effect: activeId =', activeId);
+    if (!activeId) return;
+    const inst = daemonStore.state.instances[activeId];
+    if (!inst) {
+      console.log('[RAIL] effect: no instance for activeId, bail');
+      return;
+    }
+    const { client, health } = inst;
     console.log('[RAIL] side-effect bus firing', { port: health.port, cluster: health.cluster_id, activeId });
     log.info('daemon bound — running side effects', { port: health.port, cluster: health.cluster_id });
     void store.attach(client);
-    // MP2 — point the server-store facade at this cluster's slice
-    // (instant), then kick a /state refresh (debounced).
     serverStore.setActiveCluster(activeId);
     void serverStore.refreshNow(client, activeId);
     projectsStore.upsert({
