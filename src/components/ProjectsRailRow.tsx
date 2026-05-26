@@ -11,7 +11,7 @@
  * layout and the rename signal.
  */
 
-import { Show, createSignal } from 'solid-js';
+import { Show, createSignal, onCleanup, onMount } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { projectsStore } from '~/state/projects';
 import * as kp from '~/lib/known-projects';
@@ -50,9 +50,17 @@ export async function stopProject(port: number, base: string, onAfter: () => voi
 }
 
 export async function switchProject(port: number, key: string): Promise<void> {
+  console.log('[RAIL] switchProject called', { port, key });
   projectsStore.clearNewBadge(key);
   try { localStorage.setItem('meshcore-last-port', String(port)); } catch { /* quota */ }
-  await daemonStore.switchToPort(port);
+  const ok = await daemonStore.switchToPort(port);
+  console.log('[RAIL] switchProject result', { port, key, ok });
+  if (!ok) {
+    // Surface the silent failure so the operator knows why the
+    // columns didn't refresh. Common case: clicking a stopped row
+    // (no daemon listening on that port).
+    alert(`No daemon answering on port ${port}.\n\nThe project is stopped or the port changed. Start it with \`meshcore start\` in the repo folder, then click again.`);
+  }
 }
 
 function forgetProjectImmediate(target: { cluster_id?: string | null; port: number }, onAfter: () => void): void {
@@ -110,26 +118,52 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
     return cls.join(' ');
   };
 
-  // V84 — Click is owned by the WRAP, not by an inner <button>. Two
-  // earlier rounds wrapping the row in a draggable <button> kept eating
-  // the .proj-actions clicks no matter how many stopPropagation /
-  // preventDefault handlers we added (Chrome's HTML5 drag intercepts
-  // child mouse events on draggable=true elements in ways CSS sibling
-  // overlays can't reliably escape). Solution: the row body is a
-  // plain <div>, and the wrap's onClick checks `event.target.closest`
-  // for the actions / confirm strip / edit input before navigating.
+  // V84 — Click is owned by the WRAP, not by an inner <button>. The
+  // wrap's onClick uses `event.target.closest` to skip clicks that
+  // landed on actions / confirm strip / edit input. We also keep a
+  // verbose console trace because the operator has reported this
+  // path failing repeatedly and we need raw evidence next time it
+  // happens.
   const onWrapClick = (e: MouseEvent): void => {
-    if (editing()) return;
     const t = e.target as HTMLElement | null;
-    if (t && t.closest('.proj-actions, .proj-row-confirm, .proj-row-name--editing')) return;
+    const insideOverlay = !!(t && t.closest('.proj-actions, .proj-row-confirm, .proj-row-name--editing'));
+    console.log('[RAIL] wrap click', {
+      key: r().key,
+      port: r().port,
+      live: r().live,
+      active: r().active,
+      editing: editing(),
+      confirmingDelete: confirmingDelete(),
+      targetTag: t?.tagName,
+      targetClass: t?.className,
+      insideOverlay,
+      bodyResizing: document.body.classList.contains('resizing'),
+    });
+    if (editing()) return;
+    if (insideOverlay) return;
     void switchProject(r().port, r().key);
   };
 
+  // V84b — native DOM fallback: attach a parallel `click` listener
+  // directly on the wrap element. If Solid's delegated onClick is the
+  // problem (event delegation quirk, re-render race), the native one
+  // still fires. Both call the same handler with the same guards.
+  let wrapEl: HTMLDivElement | undefined;
+  onMount(() => {
+    if (!wrapEl) return;
+    const nativeHandler = (e: Event): void => {
+      console.log('[RAIL] NATIVE click fired', { target: (e.target as HTMLElement)?.tagName });
+      onWrapClick(e as MouseEvent);
+    };
+    wrapEl.addEventListener('click', nativeHandler);
+    onCleanup(() => wrapEl?.removeEventListener('click', nativeHandler));
+  });
+
   return (
     <div
+      ref={(el) => (wrapEl = el)}
       class={wrapCls()}
       title={`${r().display} · :${r().port}${r().cluster_id ? ' · ' + r().cluster_id : ''}${!r().live ? ' · stopped' : ''}`}
-      onClick={onWrapClick}
       onDragOver={(e) => {
         if (editing() || props.short) return;
         e.preventDefault();

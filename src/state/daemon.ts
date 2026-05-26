@@ -120,8 +120,10 @@ function setAutoUpdate(flag: boolean): void {
  * the page.
  */
 async function switchToPort(port: number): Promise<boolean> {
+  console.log('[RAIL] switchToPort entry', { port, current: state.health?.port ?? null });
   log.info('switchToPort requested', { port, current: state.health?.port ?? null });
   if (state.health?.port === port) {
+    console.log('[RAIL] switchToPort no-op (already there)');
     log.debug('switchToPort no-op — already on this port');
     return true;
   }
@@ -139,13 +141,17 @@ async function switchToPort(port: number): Promise<boolean> {
   const probeUrl = `http://localhost:${port}/health`;
   let health: HealthResponse;
   try {
+    console.log('[RAIL] switchToPort probing', probeUrl);
     const r = await fetch(probeUrl);
     if (!r.ok) {
+      console.warn('[RAIL] switchToPort probe non-OK', { port, status: r.status });
       log.warn('switchToPort probe failed', port, r.status);
       return false;
     }
     health = (await r.json()) as HealthResponse;
+    console.log('[RAIL] switchToPort probe OK', { port, cluster_id: health.cluster_id });
   } catch (e) {
+    console.warn('[RAIL] switchToPort fetch threw', { port, error: e instanceof Error ? e.message : String(e) });
     log.warn('switchToPort fetch threw', port, e);
     return false;
   }
@@ -164,6 +170,7 @@ async function switchToPort(port: number): Promise<boolean> {
   serverStore.clear();
   disconnect();
   attachClient(client, health);
+  console.log('[RAIL] switchToPort attached', { port, cluster_id: health.cluster_id ?? null });
   log.info('switchToPort attached', { port, cluster_id: health.cluster_id ?? null });
   return true;
 }

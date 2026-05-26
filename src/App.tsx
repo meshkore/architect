@@ -68,6 +68,7 @@ export default function App() {
     const client = daemonStore.state.client;
     const health = daemonStore.state.health;
     if (!client || !health) return;
+    console.log('[RAIL] side-effect bus firing', { port: health.port, cluster: health.cluster_id });
     log.info('daemon bound — running side effects', { port: health.port, cluster: health.cluster_id });
     void store.attach(client);
     stopLive();

@@ -26,7 +26,7 @@ export default function RowActions(props: RowActionsProps) {
         type="button"
         class="proj-action is-edit"
         title="Rename"
-        onClick={props.onEdit}
+        onClick={() => { console.log('[RAIL] EDIT click', { port: props.port }); props.onEdit(); }}
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
@@ -38,7 +38,10 @@ export default function RowActions(props: RowActionsProps) {
           type="button"
           class="proj-action is-stop"
           title="Shutdown daemon (terminates the local process and any agents it spawned)"
-          onClick={() => void stopProject(props.port, props.base, props.onAfterStop)}
+          onClick={() => {
+            console.log('[RAIL] STOP click', { port: props.port, base: props.base });
+            void stopProject(props.port, props.base, props.onAfterStop);
+          }}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
             <rect x="6" y="6" width="12" height="12" rx="1.5" />
@@ -49,7 +52,7 @@ export default function RowActions(props: RowActionsProps) {
         type="button"
         class="proj-action is-delete"
         title="Forget project (remove from rail, keeps daemon alive)"
-        onClick={props.onDelete}
+        onClick={() => { console.log('[RAIL] DELETE click', { port: props.port }); props.onDelete(); }}
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
