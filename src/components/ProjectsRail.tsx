@@ -1,26 +1,62 @@
+/**
+ * ProjectsRail — leftmost column (V80 1:1).
+ *
+ * Two modes driven by `data-mode`:
+ *   - "full"  → 180 px, project names + add-project / rescan labels.
+ *   - "short" → 56 px, 3-letter initial pills + icon-only footer.
+ * The mode is computed from `uiStore.projectsRailWidth` and persisted
+ * to localStorage by uiStore. Drag handle on the right edge resizes
+ * between RAIL_MIN_W and RAIL_MAX_W.
+ *
+ * Structure (matches V80 monolith line-for-line):
+ *   <aside.projects-rail data-mode="…">
+ *     <div.projects-rail-resize />            ← 4 px drag handle
+ *     <div.projects-rail-head>
+ *       <span.projects-rail-title>Projects</span>
+ *       <button.projects-rail-btn>(« or »)</button>
+ *     </div>
+ *     <div.projects-rail-list>
+ *       <ProjectsRailRow … />…
+ *     </div>
+ *     <RailFooter />                          ← add project + rescan
+ *   </aside>
+ *
+ * Styling lives entirely in src/styles/projects-rail.css.
+ */
+
 import { For, Show, createEffect, onCleanup, onMount } from 'solid-js';
 import { uiStore } from '~/state/ui';
 import ProjectsRailRow from '~/components/ProjectsRailRow';
 import { PORT_LO, PORT_HI, discoverProjects, scanning } from '~/components/projects-rail/discovery';
 import { rows } from '~/components/projects-rail/rows';
-import { RailFooter, ScanIndicator } from '~/components/projects-rail/RailFooter';
+import { RailFooter } from '~/components/projects-rail/RailFooter';
 
 export { discoverProjects } from '~/components/projects-rail/discovery';
 export { projectsRailScan } from '~/components/projects-rail/discovery';
 
 const SCAN_INTERVAL_MS = 2500;
-const RAIL_MIN_W = 40;
-const RAIL_MAX_W = 360;
+const RAIL_MIN_W = 56;
+const RAIL_MAX_W = 280;
 const SHORT_THRESHOLD = 100;
+const FULL_W = 180;
+const SHORT_W = 56;
 
 export default function ProjectsRail() {
   const width = () => uiStore.state.projectsRailWidth;
-  const short = () => width() < SHORT_THRESHOLD;
+  const mode = (): 'full' | 'short' => (width() < SHORT_THRESHOLD ? 'short' : 'full');
 
-  onMount(() => { void discoverProjects(); });
+  onMount(() => {
+    void discoverProjects();
+  });
 
+  // Continuous scan timer — only ticks while uiStore says scanning.
   let scanTimer: ReturnType<typeof setInterval> | null = null;
-  const stopScanTimer = (): void => { if (scanTimer) { clearInterval(scanTimer); scanTimer = null; } };
+  const stopScanTimer = (): void => {
+    if (scanTimer) {
+      clearInterval(scanTimer);
+      scanTimer = null;
+    }
+  };
   createEffect(() => {
     stopScanTimer();
     if (!scanning()) return;
@@ -28,10 +64,12 @@ export default function ProjectsRail() {
   });
   onCleanup(stopScanTimer);
 
+  // Drag-resize handle on the right edge.
   let host: HTMLElement | undefined;
   const onResizeDown = (e: PointerEvent): void => {
     if (e.button !== 0 || !host) return;
     e.preventDefault();
+    document.body.classList.add('col-reordering');
     const startX = e.clientX;
     const startW = host.getBoundingClientRect().width;
     const onMove = (ev: PointerEvent): void => {
@@ -41,38 +79,57 @@ export default function ProjectsRail() {
     const onUp = (): void => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      document.body.classList.remove('col-reordering');
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
   };
 
-  const toggle = (): void => uiStore.setProjectsRailWidth(short() ? 180 : 56);
+  // Toggle between the two canonical widths.
+  const toggle = (): void => {
+    uiStore.setProjectsRailWidth(mode() === 'short' ? FULL_W : SHORT_W);
+  };
 
   return (
-    // dynamic: width is a live signal driven by the drag-resize handler
-    <aside ref={(el) => (host = el)} class="relative flex-shrink-0 bg-gray-950 border-r border-gray-800/60 flex flex-col" style={{ width: `${width()}px` }} aria-label="Open projects on this machine">
-      <div class="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-emerald-500/30" onPointerDown={onResizeDown} title="Drag to resize" />
-      <div class="flex items-center justify-between px-2 py-1.5 border-b border-gray-800/60">
-        <Show when={!short()}><span class="text-[10px] font-mono uppercase tracking-wider text-gray-500">Projects</span></Show>
-        <button type="button" onClick={toggle} class="p-0.5 text-gray-500 hover:text-gray-200" title="Toggle rail width">
-          <Show when={!short()} fallback={
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 5l7 7-7 7M4 5l7 7-7 7" /></svg>
-          }>
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5l-7 7 7 7M20 5l-7 7 7 7" /></svg>
-          </Show>
+    <aside
+      ref={(el) => (host = el)}
+      class="projects-rail"
+      data-mode={mode()}
+      aria-label="Open projects on this machine"
+    >
+      <div class="projects-rail-resize" onPointerDown={onResizeDown} title="Drag to resize" />
+      <div class="projects-rail-head">
+        <span class="projects-rail-title">Projects</span>
+        <button type="button" class="projects-rail-btn" onClick={toggle} title="Toggle rail width">
+          <svg class="rail-icon-collapse" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" width="14" height="14">
+            <path d="M11 5l-7 7 7 7M20 5l-7 7 7 7" />
+          </svg>
+          <svg class="rail-icon-expand" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" width="14" height="14">
+            <path d="M13 5l7 7-7 7M4 5l7 7-7 7" />
+          </svg>
         </button>
       </div>
-      <div class="flex-1 overflow-y-auto p-1 flex flex-col gap-0.5">
-        <Show when={rows().length > 0} fallback={
-          <Show when={!short()}>
-            <div class="text-[11px] text-gray-500 p-2 leading-relaxed">No daemons on :{PORT_LO}–{PORT_HI}. Start <code class="font-mono text-emerald-300">meshcore start</code> in any <code class="font-mono">.meshkore/</code> repo.</div>
-          </Show>
-        }>
-          <For each={rows()}>{(r) => <ProjectsRailRow row={r} short={short()} onAfterStop={() => void discoverProjects()} />}</For>
+      <div class="projects-rail-list">
+        <Show
+          when={rows().length > 0}
+          fallback={
+            <Show when={mode() === 'full'}>
+              <div class="projects-rail-empty">
+                No daemons on :{PORT_LO}–{PORT_HI}. Start{' '}
+                <code class="font-mono" style={{ color: 'var(--text-strong)' }}>meshcore start</code>{' '}
+                in any <code class="font-mono">.meshkore/</code> repo.
+              </div>
+            </Show>
+          }
+        >
+          <For each={rows()}>
+            {(r) => (
+              <ProjectsRailRow row={r} short={mode() === 'short'} onAfterStop={() => void discoverProjects()} />
+            )}
+          </For>
         </Show>
       </div>
-      <ScanIndicator short={short()} />
-      <RailFooter short={short()} />
+      <RailFooter short={mode() === 'short'} />
     </aside>
   );
 }

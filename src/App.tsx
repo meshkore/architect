@@ -191,69 +191,81 @@ function Cockpit(props: {
     }
   });
 
-  // Layout (operator-flagged 2026-05-26): Header spans the FULL width
-  // at the top. Underneath, a row hosts the ProjectsRail (leftmost) +
-  // the content column. The rail is INSIDE the content row, never
-  // beside the Header.
+  // Layout (operator decision 2026-05-26): four truly independent
+  // top-level columns under a full-width header.
+  //
+  //   ┌─────────────────────────────────────────────────────────────┐
+  //   │  Header                                          full width │
+  //   │  StoryBanner                                     full width │
+  //   ├──────────┬──────────┬───────────────────────┬───────────────┤
+  //   │ PROJECTS │ MODULES  │ ROADMAP column        │ CHAT column   │
+  //   │ (rail)   │ (tree)   │ ┌─ Roadmap/Tasks/    │ ┌AGENTS│chat ┐│
+  //   │          │          │ │  Context/Diagrams  │ │ rail │ pane││
+  //   │          │          │ └ tab content       │ └──────┴─────┘│
+  //   └──────────┴──────────┴───────────────────────┴───────────────┘
+  //
+  // Each column is its own panel with bg-panel; the canvas
+  // (bg-canvas) is visible between them through `gap-3` (12 px) so
+  // the columns read as separate cards floating on the desk.
   return (
-    <div class="min-h-screen flex flex-col">
+    <div class="min-h-screen flex flex-col bg-canvas">
       <Header />
       <StoryBanner />
-      <div class="flex-1 flex min-h-0">
-      <ProjectsRail />
-      <div class="flex-1 flex flex-col min-w-0">
       <Show when={!MIGRATED_ZONES.includes(zone())} fallback={<ZoneView zone={zone()} />}>
-      <div class="bg-gray-950 border-b border-gray-800/60">
-        <div class="max-w-[1600px] mx-auto px-5 flex items-center gap-1 h-10">
-          <TabButton label="Roadmap" active={tab() === 'roadmap'} onClick={() => setTab('roadmap')} />
-          <TabButton label="Tasks" active={tab() === 'tasks'} onClick={() => setTab('tasks')} />
-          <TabButton label="Context" active={tab() === 'context'} onClick={() => setTab('context')} />
-          <TabButton label="Diagrams" active={tab() === 'diagrams'} onClick={() => setTab('diagrams')} />
-        </div>
-      </div>
+        <div class="flex-1 flex gap-3 min-h-0 p-3">
+          {/* Column 1 — Projects rail (resizable 56/180 px). */}
+          <ProjectsRail />
 
-      {/* V80 three-column layout: modules | center (roadmap/tasks/context/
-          diagrams) | chat panel (permanent right column with its own
-          agents rail inside). Resizable columns via inline grid template
-          driven by uiStore.projectsRailWidth + uiStore.chatRailWidth. */}
-      <div
-        class="flex-1 max-w-[1600px] mx-auto w-full px-5 py-4 grid grid-cols-1 lg:grid-cols-[var(--modules-w)_1fr_var(--chat-w)] gap-4 min-h-0"
-        style={{
-          '--modules-w': `${uiStore.state.projectsRailWidth}px`,
-          '--chat-w': `${uiStore.state.chatRailWidth + 240}px`,
-        }}
-      >
-        <aside class="min-w-0">
-          <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
-        </aside>
-        <main class="min-w-0">
-          <Switch>
-            <Match when={tab() === 'roadmap'}>
-              <InitiativesPanel />
-            </Match>
-            <Match when={tab() === 'tasks'}>
-              <RoadmapList moduleId={props.selectedModule} />
-            </Match>
-            <Match when={tab() === 'context'}>
-              <ContextPanel moduleId={props.selectedModule} />
-            </Match>
-            <Match when={tab() === 'diagrams'}>
-              <DiagramsPanel moduleId={props.selectedModule} />
-            </Match>
-          </Switch>
-        </main>
-        {/* Chat column: ChatRail (agents list) + ChatPanel (thread +
-            composer), always visible regardless of sub-tab. */}
-        <aside class="min-w-0 flex gap-2 h-[calc(100vh-9rem)] min-h-0">
-          <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />
-          <div class="flex-1 min-w-0">
-            <ChatPanel client={props.status.client} />
-          </div>
-        </aside>
-      </div>
+          {/* Column 2 — Modules tree. */}
+          <aside
+            class="flex-shrink-0 min-w-0 overflow-hidden rounded-panel bg-panel shadow-panel"
+            style={{ width: `${uiStore.state.projectsRailWidth + 60}px` }}
+          >
+            <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
+          </aside>
+
+          {/* Column 3 — Roadmap column with internal sub-tabs
+              (Roadmap / Tasks / Context / Diagrams). */}
+          <main class="flex-1 min-w-0 flex flex-col overflow-hidden rounded-panel bg-panel shadow-panel">
+            <div class="border-b border-soft">
+              <div class="flex items-center gap-1 h-10 px-3">
+                <TabButton label="Roadmap" active={tab() === 'roadmap'} onClick={() => setTab('roadmap')} />
+                <TabButton label="Tasks" active={tab() === 'tasks'} onClick={() => setTab('tasks')} />
+                <TabButton label="Context" active={tab() === 'context'} onClick={() => setTab('context')} />
+                <TabButton label="Diagrams" active={tab() === 'diagrams'} onClick={() => setTab('diagrams')} />
+              </div>
+            </div>
+            <div class="flex-1 min-h-0 overflow-y-auto">
+              <Switch>
+                <Match when={tab() === 'roadmap'}>
+                  <InitiativesPanel />
+                </Match>
+                <Match when={tab() === 'tasks'}>
+                  <RoadmapList moduleId={props.selectedModule} />
+                </Match>
+                <Match when={tab() === 'context'}>
+                  <ContextPanel moduleId={props.selectedModule} />
+                </Match>
+                <Match when={tab() === 'diagrams'}>
+                  <DiagramsPanel moduleId={props.selectedModule} />
+                </Match>
+              </Switch>
+            </div>
+          </main>
+
+          {/* Column 4 — Chat column: AGENTS rail + conversation panel
+              live INSIDE this single top-level column (V80 parity). */}
+          <aside
+            class="flex-shrink-0 min-w-0 flex gap-0 overflow-hidden rounded-panel bg-panel shadow-panel"
+            style={{ width: `${uiStore.state.chatRailWidth + 260}px` }}
+          >
+            <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />
+            <div class="flex-1 min-w-0">
+              <ChatPanel client={props.status.client} />
+            </div>
+          </aside>
+        </div>
       </Show>
-      </div>
-      </div>
     </div>
   );
 }

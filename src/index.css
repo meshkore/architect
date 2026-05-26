@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+/* V80 1:1 component stylesheets — kept separate from Tailwind utilities
+   so the CSS reads like the original cockpit. */
+@import './styles/projects-rail.css';
+
 /* ─── Visual hierarchy tokens — ported from V80 monolith ──────────────
    Layered backgrounds give the eye discrete "places". Tier 0 = canvas
    (the desk), Tier 1 = panels (the 3 columns), Tier 2 = bar (header),
