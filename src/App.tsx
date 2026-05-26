@@ -27,7 +27,6 @@ import { serverStore, isProjectEmpty } from '~/state/server';
 import { projectsStore } from '~/state/projects';
 import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
 import { viewStore } from '~/state/view';
-import { attachEventBus } from '~/lib/event-bus';
 import { log } from '~/lib/log';
 import { applyStoredLayout } from '~/components/Splitter';
 import { ModalHost } from '~/lib/modal';
@@ -51,7 +50,9 @@ export default function App() {
     void connect(setStatus);
   });
 
-  let detachBus: (() => void) | null = null;
+  // MP4 — event buses are now owned by each DaemonInstance inside
+  // daemonStore.attachClient / disconnectInstance, so this App-level
+  // detachBus is no longer needed.
 
   // Boot path → daemonStore. From there the unified side-effect bus
   // below picks up the new client and runs every rebind. We do NOT
@@ -90,9 +91,6 @@ export default function App() {
     projectsStore.setActive(health.port, health.cluster_id ?? null);
     chatStore.bindCluster(health.cluster_id ?? null);
     viewStore.bindCluster(health.cluster_id ?? null);
-    if (detachBus) { detachBus(); detachBus = null; }
-    const ws = daemonStore.state.ws;
-    if (ws) detachBus = attachEventBus(ws, client, activeId);
   });
 
   // Once the server snapshot lands, fall back to the Coordinator conv
@@ -108,8 +106,7 @@ export default function App() {
   });
 
   onCleanup(() => {
-    if (detachBus) { detachBus(); detachBus = null; }
-    // MP1 — close every parallel daemon connection on app unmount.
+    // Per-instance buses are detached inside disconnectAll().
     daemonStore.disconnectAll();
   });
 

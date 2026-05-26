@@ -219,6 +219,115 @@ function clearClusterChat(clusterId: string): void {
   }
 }
 
+/**
+ * MP4 — Apply a chat event to a NON-ACTIVE cluster's cached slice.
+ * Same semantics as ingestEvent (placeholder dedup, streaming
+ * upsert, cancel handling) but mutates the plain JS object rather
+ * than the reactive store. When the operator switches back to this
+ * cluster via bindCluster, the slice is restored and the events
+ * become visible.
+ *
+ * Active-cluster events still flow through `ingestEvent` (above),
+ * which uses setState so the UI updates in real time.
+ */
+function ingestEventForCluster(clusterKey: string, ev: DaemonEvent): void {
+  if (activeClusterId() === clusterKey) {
+    ingestEvent(ev);
+    return;
+  }
+  const conv = typeof ev.conv === 'string' ? ev.conv : null;
+  if (!conv) return;
+  let slice = clusterSnapshots.get(clusterKey);
+  if (!slice) {
+    slice = {
+      convMap: {},
+      activeConv: null,
+      agentStatus: {},
+      archivedConvs: {},
+      convMeta: {},
+      convTitleOverrides: {},
+    };
+    clusterSnapshots.set(clusterKey, slice);
+  }
+  const arr = slice.convMap[conv] ?? [];
+
+  if (ev.type === 'chat.user') {
+    const text = typeof ev.text === 'string' ? ev.text : '';
+    const author = typeof ev.author === 'string' ? ev.author : undefined;
+    const phIdx = arr.findIndex(
+      (m) => m.kind === 'user' && m._placeholder_user && m.text === text && (!author || m.author === author),
+    );
+    if (phIdx >= 0) {
+      const next = arr.slice();
+      const prev = next[phIdx]!;
+      next[phIdx] = { ...prev, author, ts: typeof ev.ts === 'string' ? ev.ts : undefined, _placeholder_user: undefined };
+      slice.convMap[conv] = next;
+      return;
+    }
+    slice.convMap[conv] = [...arr, { kind: 'user', text, author, ts: typeof ev.ts === 'string' ? ev.ts : undefined }];
+    return;
+  }
+  if (ev.type === 'chat.assistant.delta') {
+    const streamId = typeof ev.stream_id === 'string' ? ev.stream_id : undefined;
+    const text = typeof ev.text === 'string' ? ev.text : '';
+    if (!streamId) return;
+    const idx = arr.findIndex((m) => m.kind === 'assistant' && m.stream_id === streamId);
+    const cleaned = stripRememberLines(text);
+    if (idx >= 0) {
+      const next = arr.slice();
+      const prev = next[idx]!;
+      next[idx] = { ...prev, text: cleaned, streaming: true };
+      slice.convMap[conv] = next;
+    } else {
+      slice.convMap[conv] = [
+        ...arr,
+        {
+          kind: 'assistant',
+          text: cleaned,
+          author: typeof ev.author === 'string' ? ev.author : undefined,
+          ts: typeof ev.ts === 'string' ? ev.ts : undefined,
+          streaming: true,
+          stream_id: streamId,
+        },
+      ];
+    }
+    return;
+  }
+  if (ev.type === 'chat.assistant.final') {
+    const streamId = typeof ev.stream_id === 'string' ? ev.stream_id : undefined;
+    const text = typeof ev.text === 'string' ? ev.text : '';
+    const cleaned = stripRememberLines(text);
+    const idx = arr.findIndex((m) => m.kind === 'assistant' && streamId !== undefined && m.stream_id === streamId);
+    if (idx >= 0) {
+      const next = arr.slice();
+      const prev = next[idx]!;
+      next[idx] = { ...prev, text: cleaned, streaming: false };
+      slice.convMap[conv] = next;
+    } else {
+      slice.convMap[conv] = [
+        ...arr,
+        {
+          kind: 'assistant',
+          text: cleaned,
+          author: typeof ev.author === 'string' ? ev.author : undefined,
+          ts: typeof ev.ts === 'string' ? ev.ts : undefined,
+          streaming: false,
+          stream_id: streamId,
+        },
+      ];
+    }
+    return;
+  }
+  if (ev.type === 'chat.cancelled') {
+    const last = arr[arr.length - 1];
+    if (last && last.kind === 'assistant' && last.streaming) {
+      const next = arr.slice();
+      next[arr.length - 1] = { ...last, streaming: false, cancelled: true };
+      slice.convMap[conv] = next;
+    }
+  }
+}
+
 function nextAgentId(): string {
   const used = new Set(Object.values(state.convMeta).map((m) => m.agentId));
   for (let i = 1; i < 1000; i += 1) {
@@ -522,6 +631,7 @@ export const chatStore = {
   setAgentStatus,
   clearAgentStatus,
   ingestEvent,
+  ingestEventForCluster,
   dispatchMessage,
 };
 

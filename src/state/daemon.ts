@@ -24,6 +24,7 @@ import { createStore } from 'solid-js/store';
 import type { DaemonClient, HealthResponse } from '~/lib/daemon-client';
 import { DaemonWS, type DaemonWSState } from '~/lib/ws';
 import { parseDaemonVersion, meetsMinimum, type DaemonVersion } from '~/lib/version';
+import { attachEventBus } from '~/lib/event-bus';
 import { log } from '~/lib/log';
 
 export type ConnectionPhase =
@@ -48,6 +49,10 @@ export interface DaemonInstance {
   outdated: boolean;
   supportsSelfUpdate: boolean;
 }
+
+// MP4 — event-bus detachers kept OUTSIDE the reactive store, keyed
+// by clusterKey. Solid's createStore shouldn't track closures.
+const busDetachers = new Map<string, () => void>();
 
 export interface DaemonStoreState {
   /** All live (or recently-live) instances, keyed by clusterKey. */
@@ -139,6 +144,8 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
   // Replace any prior instance under the same key (re-attach scenario).
   const prior = state.instances[key];
   if (prior && prior !== undefined) {
+    const priorDetach = busDetachers.get(key);
+    if (priorDetach) { priorDetach(); busDetachers.delete(key); }
     try { prior.ws.close(); } catch { /* already closed */ }
   }
 
@@ -170,6 +177,11 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
   });
   syncFacade();
   ws.connect();
+  // MP4 — attach a per-instance event-bus so background events
+  // (chat, state.rebuilt, task.*) update this cluster's slice even
+  // when the operator is looking at another project.
+  const detachBus = attachEventBus(ws, client, key);
+  busDetachers.set(key, detachBus);
 }
 
 /**
@@ -180,6 +192,13 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
 function disconnectInstance(key: string): void {
   const inst = state.instances[key];
   if (!inst) return;
+  // Detach the event-bus FIRST so a late WS-close event doesn't
+  // try to write to a disposed cluster slice.
+  const detachBus = busDetachers.get(key);
+  if (detachBus) {
+    detachBus();
+    busDetachers.delete(key);
+  }
   try { inst.ws.close(); } catch { /* already closed */ }
   // Drop from map.
   setState('instances', (prev) => {
@@ -199,6 +218,11 @@ function disconnectInstance(key: string): void {
  * Close every instance. Called once on app unmount.
  */
 function disconnectAll(): void {
+  // Detach every bus first.
+  for (const [, detach] of busDetachers) {
+    try { detach(); } catch { /* ignore */ }
+  }
+  busDetachers.clear();
   for (const key of Object.keys(state.instances)) {
     try { state.instances[key]?.ws.close(); } catch { /* ignore */ }
   }

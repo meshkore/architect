@@ -57,7 +57,11 @@ export function attachEventBus(ws: DaemonWS, client: DaemonClient, clusterKey: s
     const t = ev.type;
     if (!t) return;
     if (t.startsWith(CHAT_TYPE_PREFIX) && typeof ev.conv === 'string') {
-      chatStore.ingestEvent(ev);
+      // MP4 — route to the right cluster's slice. When the cluster
+      // is active, this is a normal ingestEvent (reactive setState);
+      // when inactive, it mutates the cached slice so the operator
+      // sees the messages on switch back.
+      chatStore.ingestEventForCluster(clusterKey, ev);
       return;
     }
     if (SNAPSHOT_REFRESH_TYPES.has(t)) {
