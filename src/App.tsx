@@ -22,7 +22,6 @@ import {
   type ConnectionStatus,
 } from '~/lib/connection';
 import { store } from '~/state/store';
-import { startLive, stopLive } from '~/state/live';
 import { daemonStore } from '~/state/daemon';
 import { serverStore, isProjectEmpty } from '~/state/server';
 import { projectsStore } from '~/state/projects';
@@ -70,9 +69,13 @@ export default function App() {
     if (!client || !health) return;
     console.log('[RAIL] side-effect bus firing', { port: health.port, cluster: health.cluster_id });
     log.info('daemon bound — running side effects', { port: health.port, cluster: health.cluster_id });
+    // V84 — only the legacy snapshot `store` is wired here. The WS
+    // is owned by `daemonStore.ws` (DaemonWS). The previous
+    // `startLive`/`stopLive` from `~/state/live` opened a SECOND WS
+    // on top of DaemonWS — under mixed content (HTTPS page → ws://
+    // localhost) both reconnect loops accumulated Chrome LNA Issues
+    // at ~8/min, hitting 1.9k+ in a session.
     void store.attach(client);
-    stopLive();
-    startLive(client);
     void serverStore.refreshNow(client);
     projectsStore.upsert({
       port: health.port,
@@ -103,7 +106,6 @@ export default function App() {
 
   onCleanup(() => {
     if (detachBus) { detachBus(); detachBus = null; }
-    stopLive();
     daemonStore.disconnect();
   });
 

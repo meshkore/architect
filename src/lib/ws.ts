@@ -44,6 +44,11 @@ export type EventListener = (ev: DaemonEvent) => void;
 export type StateListener = (s: DaemonWSState) => void;
 
 const BACKOFF_MS = [500, 1000, 2000, 5000]; // capped at 5000 after step 3
+// V84 — cap reconnect attempts so a daemon that's dead / a mixed-
+// content scenario (https page reaching ws://localhost) doesn't fire
+// a forever loop that piles up Chrome LNA Issues. After this many
+// consecutive failures, transition to 'fatal' and stop dialing.
+const MAX_RETRY_ATTEMPTS = 6;
 
 export class DaemonWS {
   private socket: WebSocket | null = null;
@@ -115,6 +120,21 @@ export class DaemonWS {
     this.setState(this.retryStep === 0 ? 'connecting' : 'reconnecting');
     const url = new URL('/events', this.transport.wsBase);
     if (this.transport.token) url.searchParams.set('token', this.transport.token);
+
+    // V84 — mixed-content guard. If the cockpit is served over HTTPS
+    // (hub.meshkore.com) but the daemon is plain `ws://localhost`,
+    // every browser blocks the WS handshake AND every attempt fires
+    // a Chrome Local Network Access "Issue". Two managers stacking on
+    // that was generating ~8 Issues/min → 1.9k in a session. Bail on
+    // the first attempt rather than spinning a reconnect loop.
+    if (typeof window !== 'undefined' && window.location.protocol === 'https:' && url.protocol === 'ws:') {
+      console.warn('[WS] refusing ws:// dial from https origin (mixed content)', url.toString());
+      log.warn('ws refused — mixed content (https page → ws://)');
+      this.setState('fatal');
+      return;
+    }
+
+    console.log('[WS] dial', { url: url.toString(), attempt: this.retryStep });
     log.debug('ws dial', url.toString());
     let socket: WebSocket;
     try {
@@ -164,6 +184,12 @@ export class DaemonWS {
 
   private scheduleReconnect(): void {
     if (this.wantClose) return;
+    if (this.retryStep >= MAX_RETRY_ATTEMPTS) {
+      console.warn('[WS] max retries reached — stopping', { attempts: this.retryStep });
+      log.warn('ws max retries reached — giving up');
+      this.setState('fatal');
+      return;
+    }
     const idx = Math.min(this.retryStep, BACKOFF_MS.length - 1);
     const delay = BACKOFF_MS[idx] ?? 5000;
     this.retryStep += 1;
