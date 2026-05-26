@@ -77,6 +77,7 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
           onClick={() => setExpanded(!expanded())}
           class="flex-1 flex items-center gap-3 min-w-0 text-left"
         >
+          <span class="font-mono text-[10px] text-emerald-300/80 bg-emerald-500/10 border border-emerald-500/20 rounded px-1.5 py-0.5 flex-shrink-0 uppercase tracking-wider" title="Initiative ID — reference this in chat">{props.initiative.id}</span>
           <h3 class="text-sm font-semibold text-gray-100 truncate">{props.initiative.title}</h3>
           <Show when={props.initiative.status}>
             <StatusBadge status={props.initiative.status as string} />
