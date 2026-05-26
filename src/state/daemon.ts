@@ -120,7 +120,11 @@ function setAutoUpdate(flag: boolean): void {
  * the page.
  */
 async function switchToPort(port: number): Promise<boolean> {
-  if (state.health?.port === port) return true; // already there
+  log.info('switchToPort requested', { port, current: state.health?.port ?? null });
+  if (state.health?.port === port) {
+    log.debug('switchToPort no-op — already on this port');
+    return true;
+  }
 
   // V82 — Smooth swap: prepare the new connection BEFORE tearing down
   // the old one so the cockpit never visibly drops to a disconnected
@@ -142,7 +146,7 @@ async function switchToPort(port: number): Promise<boolean> {
     }
     health = (await r.json()) as HealthResponse;
   } catch (e) {
-    log.warn('switchToPort fetch threw', e);
+    log.warn('switchToPort fetch threw', port, e);
     return false;
   }
   const { clusterTokenKey, tokenForCluster } = await import('~/lib/tokens');
@@ -151,9 +155,16 @@ async function switchToPort(port: number): Promise<boolean> {
   const { localTransport } = await import('~/lib/transport');
   const { DaemonClient } = await import('~/lib/daemon-client');
   const client = new DaemonClient(localTransport(port, token));
-  // Atomic swap.
+  // Atomic swap. Also drop stale snapshot up front so the cockpit
+  // visually flushes the OLD project's data while the new one loads,
+  // rather than briefly showing it under the new project's name. The
+  // App.tsx side-effect bus will run chatStore.bindCluster +
+  // serverStore.refreshNow once attachClient lands.
+  const { serverStore } = await import('~/state/server');
+  serverStore.clear();
   disconnect();
   attachClient(client, health);
+  log.info('switchToPort attached', { port, cluster_id: health.cluster_id ?? null });
   return true;
 }
 

@@ -80,23 +80,28 @@ export default function App() {
   // from the connection callback, which then bubbles into this effect.
   createEffect(() => {
     const s = status();
-    // boot path: keep wiring legacy `store` + `startLive` since those
-    // don't have a daemonStore-driven equivalent yet.
-    if (s.kind === 'connected') {
-      void store.attach(s.client);
-      startLive(s.client);
-      daemonStore.attachClient(s.client, s.health);
-    }
+    // Boot path: hand the connection to daemonStore. From there the
+    // unified side-effect bus below fires and runs the rest. We no
+    // longer call `store.attach` / `startLive` here so a hot-swap can
+    // re-run the same rebind logic without duplicating it.
+    if (s.kind === 'connected') daemonStore.attachClient(s.client, s.health);
   });
 
-  // Single side-effect bus: fires whenever daemonStore swaps in a new
-  // client (boot OR hot-swap). Refresh server snapshot, upsert the
-  // project, bind chat to its cluster, re-attach the event bus.
+  // Unified side-effect bus: fires whenever daemonStore swaps in a new
+  // client (boot OR hot-swap). Everything that depends on the active
+  // daemon — legacy store, live stream, server snapshot, projects
+  // upsert, chat cluster binding, event bus — rebinds here.
   createEffect(() => {
     const client = daemonStore.state.client;
     const health = daemonStore.state.health;
     if (!client || !health) return;
     log.info('daemon bound — running side effects', { port: health.port, cluster: health.cluster_id });
+    // Legacy `store` + `startLive` — fire on every swap so panels that
+    // still read from the monolith store (RoadmapList, NetworkPanel)
+    // see the new project's data.
+    void store.attach(client);
+    stopLive();
+    startLive(client);
     void serverStore.refreshNow(client);
     projectsStore.upsert({
       port: health.port,
@@ -271,7 +276,7 @@ function Cockpit(props: {
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path d="M12 4v16M4 12h16" /></svg>
                     </button>
                     <button type="button" title="Reload state" class="text-gray-500 hover:text-emerald-400 transition px-1 py-0.5 rounded hover:bg-emerald-500/10"
-                      onClick={() => { const c = props.status.client; if (c) void serverStore.refreshNow(c); }}>
+                      onClick={() => { const c = daemonStore.state.client; if (c) void serverStore.refreshNow(c); }}>
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 4v6h6M20 20v-6h-6M5 13a8 8 0 1014.5-3.5M19 11a8 8 0 00-14.5 3.5" /></svg>
                     </button>
                   </div>
@@ -309,7 +314,7 @@ function Cockpit(props: {
                   <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />
                   <Splitter resize="chat-rail" title="Drag to resize agent rail" />
                   <div class="chat-main flex-1 flex flex-col min-h-0">
-                    <ChatPanel client={props.status.client} />
+                    <ChatPanel />
                   </div>
                 </div>
               </div>

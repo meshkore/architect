@@ -14,7 +14,6 @@
  */
 
 import { For, Show, createSignal } from 'solid-js';
-import type { DaemonClient } from '~/lib/daemon-client';
 import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
 import { isProjectEmpty } from '~/state/server';
@@ -26,8 +25,10 @@ const MAX_IMAGES = 6;
 type PendingImg = { dataURL: string; mediaType: string };
 type PendingDoc = { filename: string; content: string };
 
+// V83 — drop the `client` prop. Read the current DaemonClient reactively
+// from daemonStore so dispatching follows project hot-swaps without the
+// parent having to feed a fresh client down.
 export default function ChatComposer(props: {
-  client: DaemonClient;
   conv: string;
   placeholder?: string;
   onTokenRejected?: (draft: string) => void;
@@ -63,6 +64,8 @@ export default function ChatComposer(props: {
     const text = draft().trim();
     if (sending() || (!text && imgs().length === 0 && docs().length === 0)) return;
     if (daemonStore.state.outdated) { props.onDaemonOutdated?.(); return; }
+    const cli = daemonStore.state.client;
+    if (!cli) return;
     setSending(true);
     const sentImgs = imgs();
     const sentDocs = docs();
@@ -75,7 +78,7 @@ export default function ChatComposer(props: {
       contextDocs.unshift({ filename: 'meshkore_coordinator_bootstrap.md', content: onboardingBootstrapBrief() });
     }
     setDraft(''); setImgs([]); setDocs([]); grow();
-    const res = await chatStore.dispatchMessage(props.client, {
+    const res = await chatStore.dispatchMessage(cli, {
       conv: props.conv, text, author: 'architect', images: sentImgs, contextDocs,
     });
     setSending(false);

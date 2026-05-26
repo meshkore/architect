@@ -1,6 +1,5 @@
 import { Show, createMemo, createSignal, createEffect } from 'solid-js';
 import { chatStore, type ChatMsg } from '~/state/chat';
-import type { DaemonClient } from '~/lib/daemon-client';
 import { log } from '~/lib/log';
 import ChatScopeStrip from '~/components/ChatScopeStrip';
 import ChatHistoryView from '~/components/ChatHistoryView';
@@ -14,7 +13,12 @@ import { openTokenUnlockModal } from '~/components/modals/TokenUnlockModal';
 import { openDaemonOutdatedModal } from '~/components/modals/DaemonOutdatedModal';
 import { buildStream, type StreamItem } from '~/lib/chat-stream';
 
-export default function ChatPanel(props: { client: DaemonClient }) {
+// V83 — drop the `client` prop. Read the current DaemonClient
+// reactively from daemonStore so chat actions follow project
+// hot-swaps (daemonStore.switchToPort) without the parent having to
+// re-pass a fresh client.
+export default function ChatPanel() {
+  const client = () => daemonStore.state.client;
   const [cancelling, setCancelling] = createSignal(false);
   const [historyOpen, setHistoryOpen] = createSignal(false);
   const [memoryOpen, setMemoryOpen] = createSignal(false);
@@ -46,11 +50,12 @@ export default function ChatPanel(props: { client: DaemonClient }) {
 
   const stop = async () => {
     const c = conv();
-    if (!c || cancelling()) return;
+    const cli = client();
+    if (!c || !cli || cancelling()) return;
     setCancelling(true);
     try {
       log.info('chat cancel', { conv: c });
-      const res = await props.client.chatCancel(c);
+      const res = await cli.chatCancel(c);
       if (!res.ok) log.error('chat cancel failed', res.status, res.body);
     } finally { setCancelling(false); }
   };
@@ -69,11 +74,12 @@ export default function ChatPanel(props: { client: DaemonClient }) {
 
   const onTokenRejected = () => {
     const h = daemonStore.state.health;
-    if (!h) return;
+    const cli = client();
+    if (!h || !cli) return;
     openTokenUnlockModal({
       project: { port: h.port, cluster_id: h.cluster_id ?? null, cluster_name: h.cluster_name ?? null },
       reason: 'Token rejected by /chat/dispatch — paste a fresh one.',
-      onUnlocked: (token) => { props.client.transport.token = token; },
+      onUnlocked: (token) => { cli.transport.token = token; },
     });
   };
 
@@ -106,7 +112,6 @@ export default function ChatPanel(props: { client: DaemonClient }) {
           <StopBar cancelling={cancelling()} onStop={() => void stop()} />
         </Show>
         <ChatComposer
-          client={props.client}
           conv={conv()!}
           placeholder={isRunning()
             ? 'Add more instructions — they go above the live work and get merged into the next turn…'

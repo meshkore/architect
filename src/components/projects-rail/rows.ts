@@ -18,27 +18,40 @@ export const rows = createMemo<RailRowData[]>(() => {
   const known = projectsStore.state.list;
   const livePortSet = livePorts();
   const liveById = liveClusters();
-  const activePort = daemonStore.state.health?.port ?? null;
+  const activeHealth = daemonStore.state.health;
+  const activePort = activeHealth?.port ?? null;
+  const activeClusterId = activeHealth?.cluster_id ?? null;
   const newIds = new Set(projectsStore.state.newClusterIds);
   const result: RailRowData[] = [];
   const seenPorts = new Set<number>();
   const seenClusters = new Set<string>();
   for (const k of known) {
     const liveProbe = k.cluster_id ? liveById.get(k.cluster_id) : null;
-    const isLive = !!liveProbe || (!k.cluster_id && livePortSet.has(k.port));
+    // V83 — a row is also live if it IS the currently-bound daemon
+    // project (matched by cluster_id when known, else by port). Without
+    // this, the boot project appears stopped until discovery's 2.5 s
+    // sweep finishes, and the green active bar never lights up.
+    const portCandidate = liveProbe?.port ?? k.port;
+    const isActiveBinding =
+      (k.cluster_id && activeClusterId && k.cluster_id === activeClusterId) ||
+      (!k.cluster_id && activePort !== null && portCandidate === activePort);
+    const isLive = !!liveProbe || (!k.cluster_id && livePortSet.has(k.port)) || isActiveBinding;
     if (!isLive) {
       // V79o suppression: hide stale rows only when the cluster (or its
       // port, when no cluster_id is known) is occupied by something live.
       if (k.cluster_id && liveById.has(k.cluster_id)) continue;
       if (!k.cluster_id && livePortSet.has(k.port)) continue;
     }
-    const port = liveProbe?.port ?? k.port;
+    const port = portCandidate;
     if (seenPorts.has(port)) continue;
     if (k.cluster_id && seenClusters.has(k.cluster_id)) continue;
     seenPorts.add(port);
     if (k.cluster_id) seenClusters.add(k.cluster_id);
     const alias = kp.getAlias(k);
     const display = alias || k.cluster_name || k.cluster_id || `:${port}`;
+    const active =
+      (k.cluster_id && activeClusterId && k.cluster_id === activeClusterId) ||
+      (!k.cluster_id && activePort !== null && port === activePort);
     result.push({
       key: k.cluster_id ?? `port:${port}`,
       port, base: liveProbe?.base ?? k.base,
@@ -46,7 +59,7 @@ export const rows = createMemo<RailRowData[]>(() => {
       cluster_name: k.cluster_name ?? null,
       display, initials: initialsFor(display),
       live: isLive,
-      active: isLive && port === activePort,
+      active: !!active,
       isNew: newIds.has(k.cluster_id ?? `port:${port}`),
     });
   }
