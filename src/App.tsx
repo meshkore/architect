@@ -216,10 +216,10 @@ function Cockpit(props: {
           {/* Column 1 — Projects rail (resizable 56/180 px). */}
           <ProjectsRail />
 
-          {/* Column 2 — Modules tree. */}
+          {/* Column 2 — Modules tree. Fixed 240 px. */}
           <aside
-            class="flex-shrink-0 min-w-0 overflow-hidden rounded-panel bg-panel shadow-panel"
-            style={{ width: `${uiStore.state.projectsRailWidth + 60}px` }}
+            class="flex-shrink-0 overflow-hidden rounded-panel bg-panel shadow-panel"
+            style={{ width: '240px', 'min-width': '240px' }}
           >
             <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
           </aside>
@@ -254,13 +254,14 @@ function Cockpit(props: {
           </main>
 
           {/* Column 4 — Chat column: AGENTS rail + conversation panel
-              live INSIDE this single top-level column (V80 parity). */}
+              live INSIDE this single top-level column (V80 parity).
+              Width = 200 px rail + 320 px panel minimum = 520 px. */}
           <aside
-            class="flex-shrink-0 min-w-0 flex gap-0 overflow-hidden rounded-panel bg-panel shadow-panel"
-            style={{ width: `${uiStore.state.chatRailWidth + 260}px` }}
+            class="flex-shrink-0 flex gap-0 overflow-hidden rounded-panel bg-panel shadow-panel"
+            style={{ width: '520px', 'min-width': '520px' }}
           >
             <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />
-            <div class="flex-1 min-w-0">
+            <div class="flex-1 min-w-0 border-l border-soft">
               <ChatPanel client={props.status.client} />
             </div>
           </aside>

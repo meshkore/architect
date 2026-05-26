@@ -47,9 +47,9 @@ export default function InitiativesPanel() {
   });
 
   return (
-    <section class="min-w-0">
+    <section class="min-w-0 p-4">
       <Show when={!isProjectEmpty()} fallback={<EmptyOnboardingPanel />}>
-        <header class="flex flex-wrap items-center gap-2 mb-4 sticky top-14 bg-gray-950/80 backdrop-blur-md py-3 -mt-3 z-20">
+        <header class="flex flex-wrap items-center gap-2 mb-4">
           <h2 class="text-sm font-mono uppercase tracking-wider text-gray-500">Initiatives</h2>
           <input
             type="text"

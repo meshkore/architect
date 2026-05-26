@@ -1,10 +1,11 @@
+/* @import MUST come before @tailwind directives — CSS spec requires
+   @import statements at the very top of the stylesheet. Vite/PostCSS
+   silently drops them otherwise. */
+@import './styles/projects-rail.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* V80 1:1 component stylesheets — kept separate from Tailwind utilities
-   so the CSS reads like the original cockpit. */
-@import './styles/projects-rail.css';
 
 /* ─── Visual hierarchy tokens — ported from V80 monolith ──────────────
    Layered backgrounds give the eye discrete "places". Tier 0 = canvas
