@@ -2,11 +2,63 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Visual hierarchy tokens — ported from V80 monolith ──────────────
+   Layered backgrounds give the eye discrete "places". Tier 0 = canvas
+   (the desk), Tier 1 = panels (the 3 columns), Tier 2 = bar (header),
+   Tier 3 = cards inside panels. Borders are stronger between columns
+   than within. The canvas (#161d29) is BRIGHTER than panels and cards
+   so cards/panels read as objects sitting on the desk — V78f decision.
+
+   Use the semantic Tailwind utilities first (bg-canvas, bg-panel,
+   text-muted, border-col, …) — they're declared in tailwind.config.js
+   and resolve to the same CSS custom properties.
+
+   The five-tier text scale is also surfaced as Tailwind utilities
+   (text-primary, text-strong, text-body, text-muted, text-faint).
+   The V68 remap of `text-gray-{500,600,700}` is preserved below so
+   legacy markup migrated from the V80 monolith stays legible. */
+:root {
+  /* Backgrounds */
+  --bg-canvas:      #161d29;
+  --bg-page:        #161d29;
+  --bg-panel:       #0a0f17;
+  --bg-panel-alt:   #0a0f17;
+  --bg-bar:         #060a12;
+  --bg-card:        #0e141f;
+  --bg-card-hover:  #161e2c;
+  --bg-input:       #0a101b;
+
+  /* Borders */
+  --border-col:      rgba(120,130,150,0.22);
+  --border-col-glow: rgba(120,130,150,0.10);
+  --border-bar:      rgba(120,130,150,0.28);
+  --border-soft:     rgba(60,75,110,0.55);
+
+  /* Panel chrome */
+  --panel-radius:   12px;
+  --panel-gap:      10px;
+  --panel-shadow:   0 12px 32px rgba(0,0,0,0.70), 0 0 0 1px rgba(30,50,100,0.30);
+  --bar-shadow:     0 10px 24px rgba(0,0,0,0.70), inset 0 1px 0 rgba(255,255,255,0.04);
+  --shadow-card:    0 1px 0 rgba(255,255,255,0.04) inset, 0 2px 6px rgba(0,0,0,0.50);
+  --shadow-card-hov:0 1px 0 rgba(255,255,255,0.06) inset, 0 8px 22px rgba(0,0,0,0.65);
+
+  /* Text — V68 five-tier scale */
+  --text-primary: #f3f4f6;
+  --text-strong:  #e5e7eb;
+  --text-body:    #d1d5db;
+  --text-muted:   #9ca3af;
+  --text-faint:   #6b7280;
+  --icon-default: #d1d5db;
+  --icon-muted:   #9ca3af;
+}
+
 @layer base {
   html, body {
+    background: var(--bg-canvas);
+    color: var(--text-strong);
     font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  body { @apply bg-gray-950 text-gray-100 antialiased; }
   /* Mono utility (also exists as Tailwind `font-mono`). Kept as a named
      class so static HTML in error fallbacks can use it without Tailwind. */
   .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
@@ -19,5 +71,29 @@
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
+  }
+
+  /* V68 — Architect text color overrides (legacy Tailwind classes
+     remapped one tier brighter so existing markup stays legible on
+     the lifted canvas). New code should use text-muted / text-faint
+     directly. */
+  .text-gray-500 { color: var(--text-muted) !important; }
+  .text-gray-600 { color: var(--text-faint)  !important; }
+  .text-gray-700 { color: var(--text-faint)  !important; }
+  .hover\:text-gray-100:hover { color: var(--text-primary) !important; }
+  .hover\:text-gray-200:hover { color: var(--text-strong)  !important; }
+  .hover\:text-gray-300:hover { color: var(--text-body)    !important; }
+
+  /* V25 — uppercase + tracking-wider labels (section captions) read
+     too dim in default Tailwind. Bump to slate-300 + semibold. */
+  .uppercase.tracking-wider.text-gray-500,
+  .uppercase.tracking-wider.text-gray-600,
+  .uppercase.tracking-wider.text-gray-700 {
+    color: #cbd5e1 !important;
+    font-weight: 600;
+  }
+  .uppercase.tracking-wider.text-gray-500:hover,
+  .uppercase.tracking-wider.text-gray-600:hover {
+    color: var(--text-primary) !important;
   }
 }
