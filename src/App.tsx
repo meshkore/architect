@@ -54,6 +54,7 @@ import { NewAgentWizardHost, openNewAgentWizard } from '~/components/modals/NewA
 import { AddProjectWizardHost } from '~/components/modals/AddProjectWizard';
 import StoryBanner from '~/components/story/StoryBanner';
 import StoryRunner from '~/components/story/StoryRunner';
+import Splitter, { applyStoredLayout } from '~/components/Splitter';
 
 export default function App() {
   const [status, setStatus] = createSignal<ConnectionStatus>({ kind: 'probing', message: 'Booting…' });
@@ -62,6 +63,7 @@ export default function App() {
 
   onMount(() => {
     log.info('App.onMount — starting connection probe');
+    applyStoredLayout(); // Hydrate :root --col-nav / --col-chat / --chat-rail-w from localStorage.
     void connect(setStatus);
   });
 
@@ -211,8 +213,7 @@ function Cockpit(props: {
                 <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
               </aside>
 
-              {/* Splitter — drag wiring follow-up. */}
-              <div class="splitter splitter-col-nav" title="Drag to resize" />
+              <Splitter resize="col-nav" />
 
               {/* COL 2 — Workspace (V80 .left-col): subtab-bar +
                   ws-panel content. */}
@@ -258,15 +259,14 @@ function Cockpit(props: {
                 </Switch>
               </aside>
 
-              {/* Splitter. */}
-              <div class="splitter splitter-col-chat" title="Drag to resize" />
+              <Splitter resize="col-chat" />
 
               {/* COL 3 — Chat (V80 .center-col): chat-body = rail-stack
                   + splitter + chat-main. */}
               <div class="center-col col" id="chat-col">
                 <div class="chat-body flex-1 flex min-h-0">
                   <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />
-                  <div class="splitter splitter-chat-rail" title="Drag to resize agent rail" />
+                  <Splitter resize="chat-rail" title="Drag to resize agent rail" />
                   <div class="chat-main flex-1 flex flex-col min-h-0">
                     <ChatPanel client={props.status.client} />
                   </div>

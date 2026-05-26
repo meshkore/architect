@@ -98,15 +98,23 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
         <Show when={orderedConvs().length === 0}>
           <button
             type="button"
-            onClick={() => props.onNewAgent?.()}
+            onClick={() => {
+              // V46 onboarding flow: clicking the synthetic Coordinator
+              // card seeds + activates the onboarding conv so the chat
+              // opens with the welcome bubble + composer. The "+" button
+              // up top is the wizard path; the empty-state card is the
+              // "talk to the coordinator now" shortcut.
+              chatStore.seedOnboardingConv();
+              chatStore.setActiveConv(ONBOARDING_CONV_ID);
+            }}
             class="text-left rounded-md border border-dashed border-emerald-500/35 bg-emerald-500/5 px-3 py-3 hover:border-emerald-500/55"
             /* dynamic: stripe colour pulled from the agent-type registry */
             style={{ 'border-left': `3px solid ${agentTypeColor('custom')}` }}
-            title="Create the first agent for this cluster"
+            title="Talk to the Coordinator — kicks off the project's roadmap"
           >
             <div class="text-[11px] font-mono text-emerald-300 mb-1">⬢ General coder</div>
             <div class="text-[11px] text-gray-400 leading-snug">
-              No agents yet. Click ＋ above (or this card) to start the first conversation.
+              No agents yet. Click here to talk to the Coordinator and scaffold the roadmap, or use ＋ above to create a typed agent.
             </div>
           </button>
         </Show>

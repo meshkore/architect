@@ -1,0 +1,130 @@
+/**
+ * Splitter — 4 px drag handle between V80 .three-col tracks.
+ *
+ * V80 stores the column widths in CSS custom properties on :root
+ * (`--col-nav`, `--col-chat`, `--chat-rail-w`). The three-col grid
+ * template reads from those. We replicate the same scheme — drag
+ * updates the var, persisted to localStorage so widths survive
+ * reloads.
+ *
+ * Sign convention (V80):
+ *   - `col-nav`  → drag right grows the leftmost column.
+ *   - `col-chat` → drag right SHRINKS the chat (it lives on the
+ *                  right edge); sign flipped.
+ *   - `chat-rail`→ drag right grows the rail; sign +1.
+ */
+
+import { onMount, onCleanup } from 'solid-js';
+
+const VAR: Record<string, string> = {
+  'col-nav': '--col-nav',
+  'col-chat': '--col-chat',
+  'chat-rail': '--chat-rail-w',
+};
+
+const STORE_KEY = 'mc-layout-v1';
+
+interface LayoutBounds {
+  min: number;
+  max: number;
+  default: number;
+}
+
+const BOUNDS: Record<string, LayoutBounds> = {
+  'col-nav':   { min: 160, max: 360, default: 220 },
+  'col-chat':  { min: 280, max: 700, default: 420 },
+  'chat-rail': { min: 140, max: 320, default: 200 },
+};
+
+function loadLayout(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, number> = {};
+    for (const k of Object.keys(BOUNDS)) {
+      const v = parsed[k];
+      if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveLayout(layout: Record<string, number>): void {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(layout));
+  } catch {
+    /* quota */
+  }
+}
+
+function clamp(key: string, px: number): number {
+  const b = BOUNDS[key];
+  if (!b) return px;
+  return Math.max(b.min, Math.min(b.max, px));
+}
+
+let initialised = false;
+const layout: Record<string, number> = {};
+
+/** Apply the layout map to the :root CSS variables. Public so app boot
+ *  can call it once to hydrate from localStorage before paint. */
+export function applyStoredLayout(): void {
+  if (initialised) return;
+  initialised = true;
+  const saved = loadLayout();
+  for (const key of Object.keys(BOUNDS) as Array<keyof typeof BOUNDS>) {
+    layout[key] = saved[key] ?? BOUNDS[key]!.default;
+  }
+  for (const [k, v] of Object.entries(layout)) {
+    document.documentElement.style.setProperty(VAR[k]!, `${v}px`);
+  }
+}
+
+export default function Splitter(props: { resize: 'col-nav' | 'col-chat' | 'chat-rail'; class?: string; title?: string }) {
+  let host: HTMLDivElement | undefined;
+
+  onMount(() => {
+    applyStoredLayout();
+    if (!host) return;
+    const onDown = (e: PointerEvent): void => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      host!.classList.add('dragging');
+      document.body.classList.add('resizing');
+      const startX = e.clientX;
+      const startPx = layout[props.resize] ?? BOUNDS[props.resize]!.default;
+      // col-chat lives on the right edge: dragging right SHRINKS it.
+      const sign = props.resize === 'col-chat' ? -1 : 1;
+
+      const onMove = (ev: PointerEvent): void => {
+        const dx = ev.clientX - startX;
+        const next = clamp(props.resize, Math.round(startPx + sign * dx));
+        layout[props.resize] = next;
+        document.documentElement.style.setProperty(VAR[props.resize]!, `${next}px`);
+      };
+      const onUp = (): void => {
+        host!.classList.remove('dragging');
+        document.body.classList.remove('resizing');
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        saveLayout(layout);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    };
+    host.addEventListener('pointerdown', onDown);
+    onCleanup(() => host?.removeEventListener('pointerdown', onDown));
+  });
+
+  return (
+    <div
+      ref={host}
+      class={`splitter splitter-${props.resize} ${props.class ?? ''}`}
+      data-resize={props.resize}
+      title={props.title ?? 'Drag to resize'}
+    />
+  );
+}

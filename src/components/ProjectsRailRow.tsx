@@ -125,7 +125,7 @@ export default function ProjectsRailRow(props: { row: RailRowData; short: boolea
           <span class="proj-row-name">{r().display}</span>
         </Show>
         <span class="proj-row-initials">{r().initials}</span>
-        <Show when={!r().live}>
+        <Show when={false}>
           <span class="proj-row-start">start</span>
         </Show>
       </button>
