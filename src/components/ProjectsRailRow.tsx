@@ -110,8 +110,18 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
     return cls.join(' ');
   };
 
-  const onRowClick = (): void => {
+  // V84 — Click is owned by the WRAP, not by an inner <button>. Two
+  // earlier rounds wrapping the row in a draggable <button> kept eating
+  // the .proj-actions clicks no matter how many stopPropagation /
+  // preventDefault handlers we added (Chrome's HTML5 drag intercepts
+  // child mouse events on draggable=true elements in ways CSS sibling
+  // overlays can't reliably escape). Solution: the row body is a
+  // plain <div>, and the wrap's onClick checks `event.target.closest`
+  // for the actions / confirm strip / edit input before navigating.
+  const onWrapClick = (e: MouseEvent): void => {
     if (editing()) return;
+    const t = e.target as HTMLElement | null;
+    if (t && t.closest('.proj-actions, .proj-row-confirm, .proj-row-name--editing')) return;
     void switchProject(r().port, r().key);
   };
 
@@ -119,6 +129,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
     <div
       class={wrapCls()}
       title={`${r().display} · :${r().port}${r().cluster_id ? ' · ' + r().cluster_id : ''}${!r().live ? ' · stopped' : ''}`}
+      onClick={onWrapClick}
       onDragOver={(e) => {
         if (editing() || props.short) return;
         e.preventDefault();
@@ -134,10 +145,8 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
       <Show
         when={editing()}
         fallback={
-          <button
-            type="button"
+          <div
             class={rowCls()}
-            onClick={onRowClick}
             draggable={!props.short}
             onDragStart={(e) => {
               if (props.short) { e.preventDefault(); return; }
@@ -150,7 +159,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
             <span class="proj-working-bar" aria-hidden="true" />
             <span class="proj-row-name">{r().display}</span>
             <span class="proj-row-initials">{r().initials}</span>
-          </button>
+          </div>
         }
       >
         <div class={rowCls()} style={{ cursor: 'text' }}>
