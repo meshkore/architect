@@ -27,6 +27,7 @@ import { daemonStore } from '~/state/daemon';
 import { serverStore, isProjectEmpty } from '~/state/server';
 import { projectsStore } from '~/state/projects';
 import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
+import { viewStore } from '~/state/view';
 import { attachEventBus } from '~/lib/event-bus';
 import { log } from '~/lib/log';
 import { applyStoredLayout } from '~/components/Splitter';
@@ -81,6 +82,7 @@ export default function App() {
     });
     projectsStore.setActive(health.port, health.cluster_id ?? null);
     chatStore.bindCluster(health.cluster_id ?? null);
+    viewStore.bindCluster(health.cluster_id ?? null);
     if (detachBus) { detachBus(); detachBus = null; }
     const ws = daemonStore.state.ws;
     if (ws) detachBus = attachEventBus(ws, client);

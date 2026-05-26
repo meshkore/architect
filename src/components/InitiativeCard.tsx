@@ -1,16 +1,23 @@
-import { For, Show, createSignal, createMemo } from 'solid-js';
+import { For, Show, createMemo } from 'solid-js';
 import type { ServerInitiative, ServerTask } from '~/state/server';
 import { sortTasks, groupByPhases } from '~/components/initiative/task-grouping';
 import { TaskGrid, StatusBadge } from '~/components/initiative/TaskGrid';
 import { storyStore } from '~/state/story';
 import { chatStore } from '~/state/chat';
+import { viewStore } from '~/state/view';
 import { collectStoryTaskIds } from '~/components/story/StoryRunner';
 import StoryProgressPill from '~/components/story/StoryProgressPill';
 import { log } from '~/lib/log';
 
 export default function InitiativeCard(props: { initiative: ServerInitiative; tasks: ServerTask[] }) {
-  const [expanded, setExpanded] = createSignal(true);
-  const [groupByPhase, setGroupByPhase] = createSignal(false);
+  // V84 — expanded + groupByPhase live in viewStore so the operator's
+  // toggles persist per-project across reloads and hot-swaps. Default
+  // is collapsed (false) so a fresh project loads with the whole
+  // roadmap shape visible without scrolling.
+  const expanded = () => viewStore.isInitiativeExpanded(props.initiative.id);
+  const setExpanded = (v: boolean) => viewStore.setInitiativeExpanded(props.initiative.id, v);
+  const groupByPhase = () => viewStore.isGroupByPhase(props.initiative.id);
+  const setGroupByPhase = (v: boolean) => viewStore.setGroupByPhase(props.initiative.id, v);
 
   const sorted = createMemo(() => sortTasks(props.tasks));
   const done = createMemo(() => props.tasks.filter((t) => t.status === 'done').length);

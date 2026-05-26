@@ -1,36 +1,29 @@
-import { createMemo, createSignal, For, Show } from 'solid-js';
+import { createMemo, For, Show } from 'solid-js';
 import { allModules, allTasks } from '~/state/server';
 import { uiStore, type ModulesPill } from '~/state/ui';
+import { viewStore } from '~/state/view';
 import ModuleNode from './ModuleNode';
 import { buildModuleTree, modulePasses } from './modules-tree/tree-build';
 
-const EXPAND_KEY = 'meshcore-nav-expanded';
 const PILLS: ModulesPill[] = ['all', 'work', 'stb'];
 
-function readExpanded(): Set<string> {
-  try {
-    const raw = localStorage.getItem(EXPAND_KEY);
-    if (raw) return new Set(JSON.parse(raw) as string[]);
-  } catch {
-    /* ignore */
-  }
-  return new Set(['project']);
-}
-
 export default function ModulesTree(props: { selected: string | null; onSelect: (id: string | null) => void }) {
-  const [expanded, setExpanded] = createSignal<Set<string>>(readExpanded(), { equals: false });
+  // V84 — module expansion lives in viewStore, persisted per-project.
+  // Default is fully collapsed (the previous `Set(['project'])` default
+  // pre-expanded the root, but the operator wants a clean collapsed
+  // shape on first load).
+  const expanded = createMemo<Set<string>>(() => {
+    const set = new Set<string>();
+    for (const [id, v] of Object.entries(viewStore.state.view.modules)) {
+      if (v) set.add(id);
+    }
+    return set;
+  });
 
   const tree = createMemo(() => buildModuleTree());
   const passes = (id: string): boolean => modulePasses(id, tree(), uiStore.state.modulesPill);
 
-  const toggle = (id: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      try { localStorage.setItem(EXPAND_KEY, JSON.stringify(Array.from(next))); } catch { /* quota */ }
-      return next;
-    });
-  };
+  const toggle = (id: string): void => { viewStore.toggleModule(id); };
 
   const rootKids = createMemo(() => (tree().byParent.get('__root__') ?? []).filter((m) => passes(m.id)));
 
