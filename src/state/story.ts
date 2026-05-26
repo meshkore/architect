@@ -83,6 +83,10 @@ function loadFromStorage(): void {
 }
 
 function ensureTicker(): void {
+  // 1 Hz wall-clock tick. Intentionally never cleared: this store is
+  // a singleton that lives for the lifetime of the page, the ticker
+  // is idempotent (guarded by `tickerStarted`), and the cost is
+  // negligible. Audit exception to the onCleanup rule.
   if (tickerStarted()) return;
   setTickerStarted(true);
   setInterval(() => setState('nowMs', Date.now()), 1000);

@@ -644,11 +644,11 @@
       .cl-config-pair { grid-template-columns: 60fr 40fr; align-items: start; }
     }
 
-    /* Workspace panels — only the active one is visible. The
-       :not(.hidden) selector beats inline `style=""` because we'd
-       otherwise need !important on .hidden. */
-    .ws-panel { display: none; }
-    .ws-panel:not(.hidden) { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    /* Workspace panels. The Solid cockpit mounts/unmounts panels via
+       Switch/Match, so the default is the visible flex-filled state;
+       legacy callers that toggle `.hidden` still hide via the override. */
+    .ws-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .ws-panel.hidden { display: none; }
 
     /* Collapsible columns. Each side can shrink to a 36px rail with a
        vertical label that the user clicks to expand back.
