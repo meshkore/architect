@@ -14,6 +14,8 @@
 import { Show, createSignal, onCleanup, onMount } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { projectsStore } from '~/state/projects';
+import { serverStore } from '~/state/server';
+import { chatStore } from '~/state/chat';
 import * as kp from '~/lib/known-projects';
 import RowActions from '~/components/projects-rail/RowActions';
 import RowConfirmStrip from '~/components/projects-rail/RowConfirmStrip';
@@ -64,19 +66,24 @@ export async function switchProject(port: number, key: string): Promise<void> {
 }
 
 function forgetProjectImmediate(target: { cluster_id?: string | null; port: number }, onAfter: () => void): void {
-  // V84 — if the operator is forgetting the CURRENTLY ACTIVE project,
-  // disconnect the daemon first so the WS doesn't keep firing under
-  // a row that no longer exists. We do this BEFORE wiping localStorage
-  // so daemonStore.disconnect() can use the still-attached client.
-  const active = daemonStore.state.health;
-  const isActive = !!(active && (
-    (target.cluster_id && active.cluster_id === target.cluster_id) ||
-    (!target.cluster_id && active.port === target.port)
-  ));
-  if (isActive) {
-    console.log('[RAIL] forgetting ACTIVE project — disconnecting first');
-    daemonStore.disconnect();
-  }
+  // V84 + MP1/MP2/MP3 — Forget is a full cluster eviction:
+  //   1. Compute the clusterKey (cluster_id, else port:N fallback).
+  //   2. Disconnect the daemon instance for that key — closes its
+  //      WebSocket. Other projects' WSes stay open.
+  //   3. Drop server snapshot for the cluster from serverStore.
+  //   4. Drop chat slice (convMap, agent status, archived convs) for
+  //      the cluster from chatStore in-memory cache.
+  //   5. kp.forget() wipes every per-project localStorage key
+  //      (known-projects entry, alias, token, conv-meta, view state,
+  //      projects-order).
+  //   6. projectsStore.refresh re-reads the disk so the row vanishes.
+  const clusterKey = target.cluster_id && target.cluster_id.trim().length > 0
+    ? target.cluster_id
+    : `port:${target.port}`;
+  console.log('[RAIL] forget — full eviction', { clusterKey });
+  daemonStore.disconnectInstance(clusterKey);
+  serverStore.clearForCluster(clusterKey);
+  chatStore.clearClusterChat(clusterKey);
   kp.forget({ cluster_id: target.cluster_id ?? undefined, port: target.port });
   projectsStore.refresh();
   onAfter();

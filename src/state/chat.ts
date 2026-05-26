@@ -123,11 +123,100 @@ function saveConvMeta(): void {
   }
 }
 
+// ── MP3 — per-cluster chat state ────────────────────────────────────
+//
+// `bindCluster` was just loading convMeta from localStorage; chat
+// messages, agent status and archived convs were single-tenant in
+// memory, so switching projects wiped them.
+//
+// Now we hold a parallel snapshot per cluster in `clusterSnapshots`.
+// When bindCluster fires we save the current visible state under the
+// prior key and restore the next cluster's slice if we've seen it
+// before. Convmeta still persists to localStorage (operator's
+// previous sessions); the in-memory snapshot is the live channel.
+//
+// Notes:
+//   - In-flight WS events from INACTIVE clusters are still dropped
+//     today because event-bus.ts only attaches to the active
+//     instance. MP4 puts a bus on each instance so background
+//     activity lands in the right slice.
+//   - clusterSnapshots stays in JS memory only — survives tab session,
+//     not a reload. Reload restores convMeta from localStorage and
+//     the daemon serves message history via /state on attach.
+
+interface ClusterChatSlice {
+  convMap: Record<string, ChatMsg[]>;
+  activeConv: string | null;
+  agentStatus: Record<string, AgentStatus>;
+  archivedConvs: Record<string, true>;
+  convMeta: Record<string, ConvMeta>;
+  convTitleOverrides: Record<string, string>;
+}
+
+const clusterSnapshots = new Map<string, ClusterChatSlice>();
+
+function snapshotCurrent(): ClusterChatSlice {
+  return {
+    convMap: { ...state.convMap },
+    activeConv: state.activeConv,
+    agentStatus: { ...state.agentStatus },
+    archivedConvs: { ...state.archivedConvs },
+    convMeta: { ...state.convMeta },
+    convTitleOverrides: { ...state.convTitleOverrides },
+  };
+}
+
+function restoreSlice(slice: ClusterChatSlice): void {
+  setState({
+    convMap: slice.convMap,
+    activeConv: slice.activeConv,
+    agentStatus: slice.agentStatus,
+    archivedConvs: slice.archivedConvs,
+    convMeta: slice.convMeta,
+    convTitleOverrides: slice.convTitleOverrides,
+  });
+}
+
 // ── Public actions ──────────────────────────────────────────────────
 
 function bindCluster(clusterId: string | null): void {
+  const prevId = activeClusterId();
+  // Save current state to the prior cluster's slice (skipped on first
+  // boot when prevId is null).
+  if (prevId) clusterSnapshots.set(prevId, snapshotCurrent());
   setActiveClusterId(clusterId);
+  // Restore the new cluster's slice if we've seen it this session.
+  const cached = clusterId ? clusterSnapshots.get(clusterId) : null;
+  if (cached) {
+    restoreSlice(cached);
+    return;
+  }
+  // First time visiting this cluster this session — reset visible
+  // state and load convMeta from localStorage.
+  setState({
+    convMap: {},
+    activeConv: null,
+    agentStatus: {},
+    archivedConvs: {},
+    convMeta: {},
+    convTitleOverrides: {},
+  });
   loadConvMeta();
+}
+
+/** Wipe the in-memory slice for a cluster (used by Forget). */
+function clearClusterChat(clusterId: string): void {
+  clusterSnapshots.delete(clusterId);
+  if (activeClusterId() === clusterId) {
+    setState({
+      convMap: {},
+      activeConv: null,
+      agentStatus: {},
+      archivedConvs: {},
+      convMeta: {},
+      convTitleOverrides: {},
+    });
+  }
 }
 
 function nextAgentId(): string {
@@ -421,6 +510,7 @@ async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promis
 export const chatStore = {
   state,
   bindCluster,
+  clearClusterChat,
   ensureConvMeta,
   createConv,
   setActiveConv,
