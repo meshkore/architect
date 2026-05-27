@@ -47,13 +47,33 @@ export const DEFAULT_DAEMON_PORTS = [5570, 5571, 5572, 5573, 5574];
  */
 export const LOOPBACK_HOSTNAME = 'daemon.meshkore.com';
 
+/**
+ * Whether the cockpit should reach the daemon via
+ * `https://daemon.meshkore.com:<port>` (true) or
+ * `http://localhost:<port>` (false).
+ *
+ * Resolution order (first match wins):
+ *   1. `?tls=1` / `?tls=0` query string  — debug override, this session only
+ *   2. `localStorage['mc-daemon-via-tls']` set to '1' or '0' — explicit preference
+ *   3. **Default by origin**: ON when the cockpit page itself is HTTPS,
+ *      OFF when it's HTTP. Plain HTTP→HTTP localhost works same-origin;
+ *      HTTPS→HTTP localhost is blocked by mixed-content rules, so the
+ *      only sensible default from an HTTPS origin is the TLS path.
+ *
+ * V86 — default-by-origin was added after operators reported
+ * 3.8k+ Chrome LNA Issues on architect.meshkore.com because the flag
+ * stayed off-by-default and every fetch tripped mixed content.
+ */
 export function useTlsDaemon(): boolean {
   try {
     if (typeof window === 'undefined') return false;
     const url = new URL(window.location.href);
     if (url.searchParams.get('tls') === '1') return true;
     if (url.searchParams.get('tls') === '0') return false;
-    return localStorage.getItem('mc-daemon-via-tls') === '1';
+    const stored = localStorage.getItem('mc-daemon-via-tls');
+    if (stored === '1') return true;
+    if (stored === '0') return false;
+    return window.location.protocol === 'https:';
   } catch { return false; }
 }
 
