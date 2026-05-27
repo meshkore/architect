@@ -44,21 +44,44 @@ export type RailRowData = {
   pendingReview?: boolean;
 };
 
-type RowMode = 'idle' | 'editing' | 'confirm-delete' | 'confirm-stop';
+type RowMode = 'idle' | 'editing' | 'confirm-delete' | 'confirm-stop-all';
 
-export async function stopProject(port: number, base: string, onAfter: () => void): Promise<void> {
-  const activePort = daemonStore.state.health?.port ?? null;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (port === activePort) {
-    const t = daemonStore.state.client?.transport.token;
-    if (t) headers['Authorization'] = `Bearer ${t}`;
-  }
-  try {
-    await fetch(`${base}/shutdown`, { method: 'POST', headers });
-  } catch {
-    /* daemon already exiting */
-  }
-  setTimeout(onAfter, 600);
+/**
+ * V86 — Cancel every running agent turn on a given cluster. Replaces
+ * the old "shutdown daemon" semantics that the rail's stop button
+ * used to expose. The operator's intent on that button now is a
+ * panic-stop: "4-5 agents working in this project, I want them all
+ * to stop NOW."
+ *
+ * Iterates the cluster's `workingConvs` (tracked globally in
+ * chatStore.clusterActivity by MP5) and POSTs /chat/cancel on each
+ * via the cluster's own DaemonInstance — works even on inactive
+ * projects because each instance still has its own client.
+ *
+ * (Daemon shutdown lives in the operator's terminal — `meshcore stop`
+ * or POST /shutdown directly — since it's a less common action than
+ * cancelling chat turns.)
+ */
+export async function stopAllAgents(clusterKey: string): Promise<{ cancelled: number; failed: number }> {
+  const inst = daemonStore.state.instances[clusterKey];
+  if (!inst) return { cancelled: 0, failed: 0 };
+  const activity = chatStore.state.clusterActivity[clusterKey];
+  const convs = activity ? [...activity.workingConvs] : [];
+  if (convs.length === 0) return { cancelled: 0, failed: 0 };
+  const results = await Promise.all(
+    convs.map(async (conv) => {
+      try {
+        const res = await inst.client.chatCancel(conv);
+        return res.ok;
+      } catch {
+        return false;
+      }
+    }),
+  );
+  return {
+    cancelled: results.filter((x) => x).length,
+    failed: results.filter((x) => !x).length,
+  };
 }
 
 export async function switchProject(port: number, key: string): Promise<void> {
@@ -140,10 +163,18 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
     forgetProjectImmediate({ cluster_id: r().cluster_id, port: r().port }, props.onAfterStop);
   };
 
-  const confirmStop = (): void => {
+  const confirmStopAll = async (): Promise<void> => {
     setMode('idle');
-    void stopProject(r().port, r().base, props.onAfterStop);
+    const res = await stopAllAgents(r().key);
+    if (res.failed > 0) {
+      alert(`Stopped ${res.cancelled} agent(s); ${res.failed} cancellation(s) failed. The daemon may have already finished those turns.`);
+    }
   };
+
+  /** Number of agent runs currently in flight on this row's cluster.
+   *  Reads chatStore.clusterActivity reactively. */
+  const runningCount = (): number =>
+    chatStore.state.clusterActivity[r().key]?.workingConvs.length ?? 0;
 
   const showActions = (): boolean => !props.short && r().active;
 
@@ -184,6 +215,27 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
       <Show when={showActions()}>
         <div class="proj-row-actions">
           <Show when={mode() === 'idle'}>
+            {/* V86 — order: stop (only when agents running) · edit · trash.
+                Stop now means "cancel every running agent turn on this
+                cluster", not "shutdown daemon". The badge in the title
+                shows the count so the operator confirms scope before
+                clicking. */}
+            <Show when={runningCount() > 0}>
+              <button
+                type="button"
+                class="proj-row-action is-stop"
+                title={`Stop all running agents (${runningCount()} in flight)`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  console.log('[RAIL] STOP-ALL click', { port: r().port, running: runningCount() });
+                  setMode('confirm-stop-all');
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                </svg>
+              </button>
+            </Show>
             <button
               type="button"
               class="proj-row-action is-edit"
@@ -200,22 +252,6 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
                 <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
               </svg>
             </button>
-            <Show when={r().live}>
-              <button
-                type="button"
-                class="proj-row-action is-stop"
-                title="Shutdown daemon"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  console.log('[RAIL] STOP click', { port: r().port });
-                  setMode('confirm-stop');
-                }}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="6" y="6" width="12" height="12" rx="1.5" />
-                </svg>
-              </button>
-            </Show>
             <button
               type="button"
               class="proj-row-action is-delete"
@@ -247,12 +283,12 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
               onClick={(e) => { e.stopPropagation(); confirmDelete(); }}>remove</button>
           </Show>
 
-          <Show when={mode() === 'confirm-stop'}>
-            <span class="proj-row-prompt">shutdown?</span>
+          <Show when={mode() === 'confirm-stop-all'}>
+            <span class="proj-row-prompt">stop {runningCount()} agent{runningCount() === 1 ? '' : 's'}?</span>
             <button type="button" class="proj-row-action is-cancel has-label"
               onClick={(e) => { e.stopPropagation(); setMode('idle'); }}>no</button>
             <button type="button" class="proj-row-action is-danger has-label"
-              onClick={(e) => { e.stopPropagation(); confirmStop(); }}>shutdown</button>
+              onClick={(e) => { e.stopPropagation(); void confirmStopAll(); }}>stop all</button>
           </Show>
         </div>
       </Show>
