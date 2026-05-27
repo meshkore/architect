@@ -161,38 +161,16 @@ export default function Cockpit(props: {
 }
 
 /**
- * Neutral placeholder shown in the cockpit's center body when the
- * active daemon is outdated. The DaemonOutdatedModal sits on top of
- * this; we just want the underlying area to NOT show stale roadmap /
- * chat data from the version about to be replaced. As soon as the
- * upgraded daemon connects, `daemonStore.state.outdated` flips false
- * and the real columns mount again — populated automatically by the
- * `notifyActiveChanged` side-effect bus.
+ * Empty placeholder shown in the cockpit's center body when the
+ * active daemon is outdated. The DaemonOutdatedModal floats on top
+ * and owns the entire conversation about the update — this panel
+ * just blanks out the area so stale roadmap / chat from the
+ * outgoing daemon doesn't leak through. As soon as the upgraded
+ * daemon connects, `state.outdated` flips false and the real
+ * columns mount again, populated by the side-effect bus.
  */
 function DaemonPausedPanel() {
-  const cluster = () =>
-    daemonStore.state.health?.cluster_name
-      ?? daemonStore.state.health?.cluster_id
-      ?? 'this project';
-  return (
-    <section class="flex-1 flex items-center justify-center px-6">
-      <div class="max-w-md w-full text-center">
-        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-mono uppercase tracking-wider mb-5">
-          <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse-soft" />
-          Daemon update in progress
-        </div>
-        <h2 class="text-lg font-semibold text-gray-100 mb-2">
-          Holding {cluster()}
-        </h2>
-        <p class="text-sm text-gray-400 leading-relaxed">
-          Data from the previous daemon version is hidden so it doesn't
-          mislead. The cockpit will resume the moment the upgraded
-          daemon checks in. Header and projects rail stay live — switch
-          to another project if you have one.
-        </p>
-      </div>
-    </section>
-  );
+  return <section class="flex-1" />;
 }
 
 function SubTab(props: {

@@ -156,7 +156,12 @@ function syncFacade(): void {
  */
 function attachClient(client: DaemonClient, health: HealthResponse): void {
   const v = parseDaemonVersion(health.version);
-  const supportsSelfUpdate = (health.features ?? []).includes('self-update');
+  const supportsSelfUpdate = (health.features ?? []).includes('self_update');
+  // py-1.2.0 — daemon reports `cluster.yaml.daemon.auto_update` in
+  // /health.daemon.auto_update. Default true if the field is absent
+  // (the daemon's own default). When false, the cockpit shows the
+  // chooser modal instead of running the silent flow.
+  const autoUpdateEnabled = health.daemon?.auto_update ?? true;
   const port = health.port;
   const key = clusterKeyFor(health, port);
 
@@ -197,6 +202,7 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
       activeId: key,
       phase: 'connected',
       errorMessage: '',
+      autoUpdateEnabled,
     });
     syncFacade();
   });
@@ -385,7 +391,7 @@ async function recheckHealth(): Promise<boolean> {
   const r = await inst.client.health();
   if (!r.ok) return false;
   const v = parseDaemonVersion(r.data.version);
-  const supportsSelfUpdate = (r.data.features ?? []).includes('self-update');
+  const supportsSelfUpdate = (r.data.features ?? []).includes('self_update');
   setState('instances', id!, {
     health: r.data,
     version: v,

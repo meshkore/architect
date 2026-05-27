@@ -50,6 +50,15 @@ export interface HealthResponse {
   cluster_type?: string;
   device?: { hostname: string; platform: string; arch: string; os_release: string };
   features?: string[];
+  /** D-TLS-01 — scheme advertised by daemon (py-1.8.0+). */
+  tls?: boolean;
+  /** D-TLS-01 — full URL the cockpit should target. */
+  endpoint?: string;
+  /** py-1.2.0 — cluster.yaml.daemon block. Drives the auto-update flow. */
+  daemon?: {
+    auto_update?: boolean;
+    auto_update_source?: string;
+  };
   ts?: string;
 }
 

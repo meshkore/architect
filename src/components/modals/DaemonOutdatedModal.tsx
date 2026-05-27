@@ -1,11 +1,12 @@
 import { JSX, Show, createEffect, createSignal } from 'solid-js';
 import { Modal } from '../Modal';
 import { daemonStore } from '~/state/daemon';
+import { activeProject } from '~/state/projects';
 import { MIN_DAEMON_VERSION } from '~/lib/version';
 import { ChoiceView } from './daemon-outdated/ChoiceView';
 import { AgentView, AGENT_PROMPT } from './daemon-outdated/AgentView';
 import { ManualView, SHELL_CMD } from './daemon-outdated/ManualView';
-import { Header, runningVersion } from './daemon-outdated/Header';
+import { runningVersion } from './daemon-outdated/Header';
 import { LockPanel } from './daemon-outdated/LockPanel';
 import { openAutoUpdateFlow, isAutoUpdating } from './AutoUpdateFlow';
 import { log } from '~/lib/log';
@@ -86,7 +87,6 @@ function RecheckBar(): JSX.Element {
 function Body(): JSX.Element {
   return (
     <>
-      <Header />
       <Show when={view() === 'choice'}>
         <ChoiceView
           supportsSelfUpdate={daemonStore.state.supportsSelfUpdate}
@@ -109,11 +109,39 @@ function Body(): JSX.Element {
   );
 }
 
+/** Title + subtitle for the Modal's own header row (top bar with
+ *  the close button). Moves the old in-body Header upstream so the
+ *  top bar isn't an empty black strip. */
+function clusterLabelText(): string {
+  const p = activeProject();
+  return p?.cluster_name ?? p?.base ?? 'this project';
+}
+function modalTitle(): string {
+  return `Update ${clusterLabelText()}'s daemon`;
+}
+function modalSubtitle(): string {
+  const base = activeProject()?.base ?? '';
+  return `${base} · running ${runningVersion()} · needs ${MIN_DAEMON_VERSION}`;
+}
+
 export function DaemonOutdatedHost(): JSX.Element {
   createEffect(() => {
     const outdated = daemonStore.state.outdated;
-    if (outdated && !dismissed() && !isOpen()) {
-      openDaemonOutdatedModal();
+    if (outdated && !dismissed() && !isOpen() && !isAutoUpdating()) {
+      // V86 — if the daemon supports self-update AND the operator
+      // hasn't explicitly disabled auto_update in cluster.yaml,
+      // run the silent flow directly. They never see the chooser
+      // modal in the happy path. The chooser modal is only for
+      // (a) daemons too old to self-update or (b) operators who
+      // killed auto_update on purpose.
+      const canAuto =
+        daemonStore.state.supportsSelfUpdate &&
+        daemonStore.state.autoUpdateEnabled !== false;
+      if (canAuto) {
+        openAutoUpdateFlow();
+      } else {
+        openDaemonOutdatedModal();
+      }
     }
     if (!outdated) {
       setIsOpen(false);
@@ -130,6 +158,8 @@ export function DaemonOutdatedHost(): JSX.Element {
         isOpen={isOpen()}
         floating
         zIndex={55}
+        title={modalTitle()}
+        subtitle={modalSubtitle()}
         onClose={(id) => {
           if (id === null) dismissModal();
           else closeModal();
