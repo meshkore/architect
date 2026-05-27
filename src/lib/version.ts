@@ -72,13 +72,15 @@ export function isDaemonAtLeast(
  * to support. When the connected daemon's version is lower, the
  * cockpit shows the V47 upgrade modal (M6.3) and offers `/self-update`.
  *
- * Current floor: `py-1.7.0` (introduces the agent_type system and
- * the AGENT_PROMPTS registry the cockpit relies on at chat dispatch).
- * Older daemons run without specialised role prompts; the cockpit
- * still works in degraded mode but the gate keeps that behaviour off
- * the happy path.
+ * Current floor: `py-1.8.0` (loopback TLS bundle via
+ * `daemon.meshkore.com`). Older daemons still answer at
+ * `http://localhost:<port>` with the TLS feature flag off, so they
+ * keep working in degraded mode (mixed-content + LNA Issues from
+ * any HTTPS cockpit origin). The gate nudges every operator to
+ * 1.8.0 so the cockpit can flip to HTTPS by default once a majority
+ * have upgraded.
  */
-export const MIN_DAEMON_VERSION = 'py-1.7.0';
+export const MIN_DAEMON_VERSION = 'py-1.8.0';
 
 /** Convenience: gate against the project's MIN. */
 export function meetsMinimum(actual: string | DaemonVersion | undefined | null): boolean {
