@@ -20,23 +20,34 @@ export const rows = createMemo<RailRowData[]>(() => {
   const livePortSet = livePorts();
   const liveById = liveClusters();
   // Read active port + cluster_id from the instances Map keyed by
-  // activeId (V85c). Facade reads could stay reference-equal across
-  // switches and miss reactivity; activeId is unambiguous.
+  // activeId (V85c).
   const activeId = daemonStore.state.activeId;
   const activeInst = activeId ? daemonStore.state.instances[activeId] : null;
   const activePort = activeInst?.health.port ?? null;
   const activeClusterId = activeInst?.health.cluster_id ?? null;
   const newIds = new Set(projectsStore.state.newClusterIds);
+  // V86 — pre-compute which ports are "claimed" by an entry with a
+  // real cluster_id, so we can suppress orphan rows (entries lacking
+  // cluster_id whose port a sibling already owns).
+  const claimedPorts = new Set<number>();
+  for (const k of known) {
+    if (k.cluster_id) {
+      const lp = liveById.get(k.cluster_id);
+      claimedPorts.add(lp?.port ?? k.port);
+    }
+  }
   const result: RailRowData[] = [];
   const seenPorts = new Set<number>();
   const seenClusters = new Set<string>();
   for (const k of known) {
     const liveProbe = k.cluster_id ? liveById.get(k.cluster_id) : null;
-    // V83 — a row is also live if it IS the currently-bound daemon
-    // project (matched by cluster_id when known, else by port). Without
-    // this, the boot project appears stopped until discovery's 2.5 s
-    // sweep finishes, and the green active bar never lights up.
     const portCandidate = liveProbe?.port ?? k.port;
+    // V86 — orphan suppression. A known-projects entry without
+    // cluster_id whose port is owned by a cluster-tagged sibling is
+    // stale (operator stopped that project, port got reassigned).
+    if (!k.cluster_id && claimedPorts.has(portCandidate)) continue;
+    // V83 — a row is also live if it IS the currently-bound daemon
+    // project (matched by cluster_id when known, else by port).
     const isActiveBinding =
       (k.cluster_id && activeClusterId && k.cluster_id === activeClusterId) ||
       (!k.cluster_id && activePort !== null && portCandidate === activePort);
@@ -54,9 +65,14 @@ export const rows = createMemo<RailRowData[]>(() => {
     if (k.cluster_id) seenClusters.add(k.cluster_id);
     const alias = kp.getAlias(k);
     const display = alias || k.cluster_name || k.cluster_id || `:${port}`;
-    const active =
-      (k.cluster_id && activeClusterId && k.cluster_id === activeClusterId) ||
-      (!k.cluster_id && activePort !== null && port === activePort);
+    // V86 — stricter active check: when the active instance has a
+    // cluster_id, ONLY rows with that exact cluster_id light up. A
+    // row matching by port alone is no longer enough (used to false-
+    // positive an orphan ":<port>" row when its port was actually
+    // bound to another cluster's daemon).
+    const active = activeClusterId
+      ? k.cluster_id === activeClusterId
+      : (!k.cluster_id && activePort !== null && port === activePort);
     const rowKey = k.cluster_id ?? `port:${port}`;
     // MP5 — read activity for this cluster. `working` lights the
     // bouncing slug whenever any conv on this cluster is mid-stream

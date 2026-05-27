@@ -145,6 +145,7 @@ export function upsert(input: Partial<KnownProject> & { port: number; base: stri
   if (idx < 0) {
     idx = arr.findIndex((p) => !p.cluster_id && p.port === incoming.port);
   }
+  let merged: KnownProject;
   if (idx >= 0) {
     // Merge — let new fields win, but preserve `repo_path` if the
     // incoming record didn't bring one.
@@ -154,18 +155,37 @@ export function upsert(input: Partial<KnownProject> & { port: number; base: stri
       writeRaw(arr);
       return incoming;
     }
-    const merged: KnownProject = {
+    merged = {
       ...prev,
       ...incoming,
       repo_path: incoming.repo_path ?? prev.repo_path,
     };
     arr[idx] = merged;
-    writeRaw(arr);
-    return merged;
+  } else {
+    merged = incoming;
+    arr.push(incoming);
   }
-  arr.push(incoming);
+  // V86 — port-collision sweep. When an incoming record carries a
+  // cluster_id and lands on a port, any OTHER entries that share
+  // that port (but have a different cluster_id, or none) are now
+  // stale — the OS port is bound to this cluster's daemon. Without
+  // this sweep operators end up with phantom rows like ":5572"
+  // pointing at a daemon whose real identity is already represented
+  // by a sibling row.
+  if (merged.cluster_id) {
+    const cleaned = arr.filter((p) => {
+      if (p === merged) return true;
+      if (p.port !== merged.port) return true;
+      if (p.cluster_id && p.cluster_id === merged.cluster_id) return true;
+      return false;
+    });
+    if (cleaned.length !== arr.length) {
+      writeRaw(cleaned);
+      return merged;
+    }
+  }
   writeRaw(arr);
-  return incoming;
+  return merged;
 }
 
 /**
