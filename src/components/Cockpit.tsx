@@ -16,6 +16,8 @@
 import { createEffect, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
 import Header from '~/components/Header';
 import ProjectsRail from '~/components/ProjectsRail';
+import OfflinePanel from '~/components/OfflinePanel';
+import RailEmptyPanel from '~/components/RailEmptyPanel';
 import ModulesTree from '~/components/ModulesTree';
 import RoadmapList from '~/components/RoadmapList';
 import InitiativesPanel from '~/components/InitiativesPanel';
@@ -95,6 +97,26 @@ export default function Cockpit(props: {
               when={!daemonStore.state.outdated}
               fallback={<DaemonPausedPanel />}
             >
+              {/* V86b — offline-selected row: the rail's pick has no
+                  live daemon. Replace the three-col body with the
+                  OfflinePanel so the operator gets explicit guidance
+                  on how to bring the daemon up. */}
+              <Show
+                when={!daemonStore.state.offlineSelection}
+                fallback={<OfflinePanel />}
+              >
+              {/* V86c — no live `activeId` and no offline pick either:
+                  the operator deleted the last selected project (or
+                  has yet to pick one). Render the empty panel; it
+                  decides between the "add/scan" CTAs and the
+                  "select a project" hint based on how many rows the
+                  rail has. The single-row case is auto-resolved in
+                  App.tsx's effect, so this branch only renders for
+                  0 or 2+ rows. */}
+              <Show
+                when={daemonStore.state.activeId}
+                fallback={<RailEmptyPanel />}
+              >
               <section class="tab-panel three-col">
                 <aside class="nav-col col">
                   <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
@@ -129,7 +151,7 @@ export default function Cockpit(props: {
                       <div class="ws-panel"><InitiativesPanel /></div>
                     </Match>
                     <Match when={tab() === 'tasks'}>
-                      <div class="ws-panel"><RoadmapList moduleId={props.selectedModule} /></div>
+                      <div class="ws-panel"><RoadmapList moduleId={props.selectedModule} onSelectModule={props.onSelectModule} /></div>
                     </Match>
                     <Match when={tab() === 'context'}>
                       <div class="ws-panel"><ContextPanel moduleId={props.selectedModule} /></div>
@@ -152,6 +174,8 @@ export default function Cockpit(props: {
                   </div>
                 </div>
               </section>
+              </Show>
+              </Show>
             </Show>
           </main>
         </div>

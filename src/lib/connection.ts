@@ -14,7 +14,6 @@
 
 import { DaemonClient, type HealthResponse } from './daemon-client';
 import {
-  DEFAULT_DAEMON_PORTS,
   cloudTransport,
   daemonHttpBase,
   localTransport,
@@ -55,12 +54,28 @@ export function storeToken(token: string, health?: HealthResponse, port?: number
 }
 
 /**
- * Probe localhost ports until /health returns 200.
- * /health is unauthenticated so we can identify the daemon before we
- * have a token. Returns the first responsive port + its HealthResponse.
+ * V86e — Probe ONLY the operator's last-known port (with 5570 as the
+ * fallback when there's no session memory). The old version walked
+ * 5570–5574 on every boot; every miss was a Chrome LNA Issue and an
+ * empty TLS handshake against the loopback daemon. With a saved port,
+ * that means exactly ONE probe on a typical boot.
+ *
+ * Full-range discovery (5570–5589) now lives behind the operator's
+ * explicit "Scan ports" / "Rescan" button in the rail — see
+ * `discovery.discoverProjects({ fullScan: true })`.
  */
-export async function probeLocal(timeoutMs = 1200): Promise<{ port: number; health: HealthResponse } | null> {
-  for (const port of DEFAULT_DAEMON_PORTS) {
+export const BOOT_PROBE_TIMEOUT_MS = 1200;
+
+export function bootProbePorts(): number[] {
+  const last = parseInt(localStorage.getItem('meshcore-last-port') || '0', 10);
+  const ordered: number[] = [];
+  if (last >= 5570 && last <= 5589) ordered.push(last);
+  if (!ordered.includes(5570)) ordered.push(5570);
+  return ordered;
+}
+
+export async function probeLocal(timeoutMs = BOOT_PROBE_TIMEOUT_MS): Promise<{ port: number; health: HealthResponse } | null> {
+  for (const port of bootProbePorts()) {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs);
     try {
@@ -94,10 +109,11 @@ export async function connect(setStatus: (s: ConnectionStatus) => void): Promise
     return;
   }
 
-  setStatus({ kind: 'probing', message: 'Looking for a local daemon on ports 5570–5574…' });
+  const ports = bootProbePorts();
+  setStatus({ kind: 'probing', message: `Looking for the daemon on ${ports.map((p) => `:${p}`).join(', ')}…` });
   const probe = await probeLocal();
   if (!probe) {
-    setStatus({ kind: 'no-daemon', portsTried: [...DEFAULT_DAEMON_PORTS] });
+    setStatus({ kind: 'no-daemon', portsTried: ports });
     return;
   }
 

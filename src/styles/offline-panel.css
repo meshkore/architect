@@ -1,0 +1,262 @@
+/* offline-panel.css — V86b.
+   Shown inside the cockpit body when the operator picked a row whose
+   daemon isn't reachable. Single-column layout, no chrome, three
+   numbered steps + copyable shell commands. */
+
+.offline-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 32px 24px;
+  background: var(--bg-canvas);
+  color: var(--text-body);
+}
+.offline-panel__inner {
+  width: 100%;
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.offline-panel__head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border-col);
+}
+.offline-panel__title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.offline-panel__title h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.2;
+}
+.offline-panel__dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.55);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.15);
+  align-self: center;
+}
+.offline-panel__port {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+.offline-panel__cluster {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.offline-panel__subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+  max-width: 60ch;
+}
+
+.offline-panel__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.offline-step {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-col);
+  border-radius: 10px;
+}
+.offline-step__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.offline-step__n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: rgba(96, 165, 250, 0.15);
+  color: #93c5fd;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.offline-step h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-strong);
+  margin: 0;
+}
+.offline-step__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0 0 0 32px;
+}
+
+.offline-step__code {
+  position: relative;
+  margin-left: 32px;
+  padding: 10px 70px 10px 12px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: #e2e8f0;
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.offline-step__code.is-multiline {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: visible;
+}
+.offline-step__code code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-family: inherit;
+}
+.offline-step__copy {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 3px 8px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-col);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.offline-step__copy:hover {
+  color: #e2e8f0;
+  border-color: rgba(148, 163, 184, 0.5);
+  background: rgba(148, 163, 184, 0.08);
+}
+.offline-step__code.is-multiline .offline-step__copy {
+  top: 8px;
+  transform: none;
+}
+
+.offline-panel__foot {
+  padding-top: 8px;
+  border-top: 1px solid var(--border-col-glow);
+}
+.offline-panel__foot p {
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.55;
+  margin: 0;
+  max-width: 68ch;
+}
+.offline-panel__foot code {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+  background: rgba(96, 165, 250, 0.10);
+  border-radius: 3px;
+  color: #93c5fd;
+  margin: 0 3px;
+}
+
+/* ── V86g — Watcher strip. Sits between the steps and the foot,
+   pulses a soft amber while polling, switches to a flat "stopped"
+   pill when the operator pauses it. */
+.offline-panel__watch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: rgba(31, 41, 55, 0.45);
+  border: 1px solid rgba(75, 85, 99, 0.50);
+}
+.offline-panel__watch[data-state="on"] {
+  background: rgba(52, 211, 153, 0.06);
+  border-color: rgba(52, 211, 153, 0.35);
+}
+.offline-panel__watch-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55);
+  animation: offline-watch-pulse 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@keyframes offline-watch-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55); }
+  70%  { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
+.offline-panel__watch-label {
+  flex: 1; min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-body);
+}
+.offline-panel__watch-label code {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+  background: rgba(96, 165, 250, 0.10);
+  border-radius: 3px;
+  color: #93c5fd;
+  margin: 0 2px;
+}
+.offline-panel__watch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(75, 85, 99, 0.20);
+  border: 1px solid rgba(148, 163, 184, 0.40);
+  border-radius: 5px;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 140ms, border-color 140ms, color 140ms;
+}
+.offline-panel__watch-btn:hover {
+  background: rgba(75, 85, 99, 0.35);
+  border-color: rgba(148, 163, 184, 0.70);
+  color: #f3f4f6;
+}
+.offline-panel__watch-btn.is-primary {
+  background: rgba(52, 211, 153, 0.14);
+  border-color: rgba(52, 211, 153, 0.45);
+  color: #6ee7b7;
+}
+.offline-panel__watch-btn.is-primary:hover {
+  background: rgba(52, 211, 153, 0.22);
+  border-color: rgba(52, 211, 153, 0.80);
+  color: #d1fae5;
+}

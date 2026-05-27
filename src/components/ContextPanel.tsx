@@ -11,6 +11,7 @@ import { serverStore } from '~/state/server';
 import { daemonStore } from '~/state/daemon';
 import { ensureMarked } from '~/lib/cdn-loaders';
 import { renderDiagram, type DiagramRef } from '~/lib/diagram-render';
+import { findProjectDoc, isProjectDocScope } from '~/components/modules-tree/doc-index';
 
 interface Doc {
   category: string;
@@ -33,6 +34,13 @@ function pickDoc(snapshot: unknown, scope: string | null): Doc | null {
       flat.find((d) => d.category === 'architecture') ??
       flat[0] ?? null
     );
+  }
+  // V86i — project-level doc scope (`doc:<category>/<slug>`) — used
+  // by the ModulesTree's Project section to navigate non-module docs.
+  if (isProjectDocScope(scope)) {
+    const ref = findProjectDoc(scope);
+    if (!ref) return null;
+    return flat.find((d) => d.category === ref.category && d.slug === ref.slug) ?? null;
   }
   return flat.find((d) => d.category === 'modules' && d.slug === scope) ?? null;
 }

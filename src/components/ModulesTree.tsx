@@ -4,6 +4,7 @@ import { uiStore, type ModulesPill } from '~/state/ui';
 import { viewStore } from '~/state/view';
 import ModuleNode from './ModuleNode';
 import { buildModuleTree, modulePasses } from './modules-tree/tree-build';
+import { projectDocs } from './modules-tree/doc-index';
 
 const PILLS: ModulesPill[] = ['all', 'work', 'stb'];
 
@@ -80,6 +81,41 @@ export default function ModulesTree(props: { selected: string | null; onSelect: 
         <p class="text-xs text-gray-600 px-2 mt-3 leading-relaxed">
           No modules declared in <span class="font-mono">cluster.yaml</span>. Add a <span class="font-mono">modules:</span> block and reload.
         </p>
+      </Show>
+
+      {/* V86i — project-level docs section. Renders below the modules
+          tree. These are docs that live at the project root (architecture,
+          security, deploy, conventions, …) and don't belong to a single
+          module. Selecting one re-scopes Context + Diagrams panels via
+          `doc:<category>/<slug>`. */}
+      <Show when={projectDocs().length > 0}>
+        <div class="mt-4 pt-3 border-t border-gray-800/60">
+          <div class="text-xs font-mono uppercase tracking-wider text-gray-500 px-2 mb-1">Project</div>
+          <For each={projectDocs()}>
+            {(d) => (
+              <button
+                type="button"
+                onClick={() => props.onSelect(d.scopeId)}
+                class={`w-full text-left px-2 py-1.5 rounded-md flex items-center gap-2 transition-colors ${
+                  props.selected === d.scopeId
+                    ? 'bg-emerald-500/10 text-emerald-300'
+                    : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
+                }`}
+              >
+                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-blue-400/80"
+                  title="Has context — open in CONTEXT tab"
+                  aria-label="has context doc" />
+                <span class="truncate flex-1" title={`${d.category}/${d.slug}`}>{d.label}</span>
+                <Show when={d.hasDiagrams}>
+                  <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-orange-400"
+                    title="Diagram(s) declared — open in DIAGRAMS tab"
+                    aria-label="has diagram(s)" />
+                </Show>
+                <span class="font-mono text-[9px] text-gray-600 uppercase tracking-wider">{d.category}</span>
+              </button>
+            )}
+          </For>
+        </div>
       </Show>
     </nav>
   );

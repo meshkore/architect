@@ -3,6 +3,8 @@
    silently drops them otherwise. */
 @import './styles/cockpit.css';
 @import './styles/projects-rail.css';
+@import './styles/offline-panel.css';
+@import './styles/rail-empty-panel.css';
 
 @tailwind base;
 @tailwind components;

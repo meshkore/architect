@@ -19,11 +19,12 @@
  * (green left bar) is the visual selection indicator.
  */
 
-import { Show, createSignal } from 'solid-js';
-import { daemonStore } from '~/state/daemon';
+import { Show } from 'solid-js';
+import { daemonStore, selectedRowKey } from '~/state/daemon';
 import { projectsStore } from '~/state/projects';
 import { serverStore } from '~/state/server';
 import { chatStore } from '~/state/chat';
+import { railUiStore } from '~/state/rail-ui';
 import * as kp from '~/lib/known-projects';
 
 export type RailRowData = {
@@ -35,7 +36,6 @@ export type RailRowData = {
   display: string;
   initials: string;
   live: boolean;
-  active: boolean;
   isNew: boolean;
   working?: boolean;
   /** MP5 — true when this (inactive) cluster received events since the
@@ -44,7 +44,9 @@ export type RailRowData = {
   pendingReview?: boolean;
 };
 
-type RowMode = 'idle' | 'editing' | 'confirm-delete' | 'confirm-stop-all';
+// Row mode + draft now live in `railUiStore` (state/rail-ui.ts) so the
+// UI survives any `<For>` reconciliation that swaps the component
+// instance underneath the operator's click.
 
 /**
  * V86 — Cancel every running agent turn on a given cluster. Replaces
@@ -84,23 +86,34 @@ export async function stopAllAgents(clusterKey: string): Promise<{ cancelled: nu
   };
 }
 
-export async function switchProject(port: number, key: string): Promise<boolean> {
+export async function switchProject(
+  port: number,
+  key: string,
+  fallback?: { display: string; cluster_id: string | null; cluster_name: string | null },
+): Promise<boolean> {
   console.log('[RAIL] switchProject called', { port, key });
   projectsStore.clearNewBadge(key);
   try { localStorage.setItem('meshcore-last-port', String(port)); } catch { /* quota */ }
-  const ok = await daemonStore.switchToPort(port);
-  console.log('[RAIL] switchProject result', { port, key, ok });
-  if (!ok) {
-    // V86 — no more native alert(). The rail's row visually reflects
-    // the failed switch (stays on its current active project, no
-    // green-bar move on the target). Diagnostics go to console; a
-    // proper in-rail toast is queued — for now we just refuse silently
-    // since the common case (clicking a stopped row) is self-evident
-    // visually. AutoUpdateFlow and other callers can await this
-    // boolean and surface their own UI when it matters.
-    console.warn('[RAIL] switch failed — no daemon on target port', { port });
+  const outcome = await daemonStore.switchToPortDetailed(port);
+  console.log('[RAIL] switchProject result', { port, key, outcome });
+  if (!outcome.ok) {
+    // V86b — switch failed, but we still register the operator's
+    // selection so the rail shows the row as selected and the cockpit
+    // body shows OfflinePanel with "start the daemon" guidance.
+    if (fallback) {
+      daemonStore.selectOffline({
+        key,
+        port,
+        cluster_id: fallback.cluster_id,
+        cluster_name: fallback.cluster_name,
+        display: fallback.display,
+        reason: outcome.reason,
+      });
+    } else {
+      console.warn('[RAIL] switch failed — no fallback provided', { port });
+    }
   }
-  return ok;
+  return outcome.ok;
 }
 
 function forgetProjectImmediate(target: { cluster_id?: string | null; port: number }, onAfter: () => void): void {
@@ -112,7 +125,22 @@ function forgetProjectImmediate(target: { cluster_id?: string | null; port: numb
   serverStore.clearForCluster(clusterKey);
   chatStore.clearClusterChat(clusterKey);
   kp.forget({ cluster_id: target.cluster_id ?? undefined, port: target.port });
+  // Drop any offline selection that pointed at the same row so the
+  // cockpit doesn't keep rendering OfflinePanel for a project that
+  // no longer exists in the rail.
+  const offline = daemonStore.state.offlineSelection;
+  if (offline && offline.key === clusterKey) {
+    daemonStore.clearOfflineSelection();
+  }
+  // After eviction, force the cockpit into the "no selection" state.
+  // The App-level effect picks it up: if exactly one project remains
+  // it auto-selects it; otherwise the operator gets the empty panel.
+  // disconnectInstance's built-in fallback (jumping to the first
+  // remaining instance) is too eager — we want the operator to
+  // confirm which project they switch to next.
+  daemonStore.clearActiveSelection();
   projectsStore.refresh();
+  railUiStore.clear();
   onAfter();
 }
 
@@ -123,9 +151,16 @@ export interface ProjectsRailRowProps {
 }
 
 export default function ProjectsRailRow(props: ProjectsRailRowProps) {
-  const [mode, setMode] = createSignal<RowMode>('idle');
-  const [nameDraft, setNameDraft] = createSignal(props.row.display);
   const r = () => props.row;
+  // V86d — `isActive` is read directly off `daemonStore` (not the
+  // per-row `active` field) so the green bar + action row morph
+  // doesn't depend on `<For>` re-issuing the row prop. The For
+  // component still remounts on every chatStore/wsState tick (rows()
+  // returns new object references), but the highlight state survives
+  // because each new mount reads the same daemon-store selectedRowKey.
+  const isActive = () => selectedRowKey() === r().key;
+  const mode = () => railUiStore.modeFor(r().key);
+  const nameDraft = () => railUiStore.state.draftName;
 
   const wrapCls = (): string => {
     const cls = ['proj-row-wrap'];
@@ -137,7 +172,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
 
   const rowCls = (): string => {
     const cls = ['proj-row'];
-    if (r().active) cls.push('active');
+    if (isActive()) cls.push('active');
     if (r().working) cls.push('is-working');
     if (r().pendingReview) cls.push('is-pending-review');
     return cls.join(' ');
@@ -149,7 +184,11 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
     const t = e.target as HTMLElement | null;
     if (t && t.closest('.proj-row-actions, .proj-row-name--editing')) return;
     if (mode() === 'editing') return;
-    void switchProject(r().port, r().key);
+    void switchProject(r().port, r().key, {
+      display: r().display,
+      cluster_id: r().cluster_id,
+      cluster_name: r().cluster_name,
+    });
   };
 
   const commit = (save: boolean): void => {
@@ -163,16 +202,16 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
       kp.setAlias(k, nameDraft().trim());
       projectsStore.refresh();
     }
-    setMode('idle');
+    railUiStore.clear();
   };
 
   const confirmDelete = (): void => {
-    setMode('idle');
+    railUiStore.clear();
     forgetProjectImmediate({ cluster_id: r().cluster_id, port: r().port }, props.onAfterStop);
   };
 
   const confirmStopAll = async (): Promise<void> => {
-    setMode('idle');
+    railUiStore.clear();
     const res = await stopAllAgents(r().key);
     if (res.failed > 0) {
       // V86 — no native alert(). The chatStore.clusterActivity will
@@ -192,7 +231,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
   const runningCount = (): number =>
     chatStore.state.clusterActivity[r().key]?.workingConvs.length ?? 0;
 
-  const showActions = (): boolean => !props.short && r().active;
+  const showActions = (): boolean => !props.short && isActive();
 
   return (
     <div
@@ -216,7 +255,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
             class="proj-row-name proj-row-name--editing"
             value={nameDraft()}
             autofocus
-            onInput={(e) => setNameDraft(e.currentTarget.value)}
+            onInput={(e) => railUiStore.setDraft(e.currentTarget.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') { e.preventDefault(); commit(true); }
               else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
@@ -244,7 +283,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
                 onClick={(e) => {
                   e.stopPropagation();
                   console.log('[RAIL] STOP-ALL click', { port: r().port, running: runningCount() });
-                  setMode('confirm-stop-all');
+                  railUiStore.beginConfirmStop(r().key);
                 }}
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
@@ -259,8 +298,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
               onClick={(e) => {
                 e.stopPropagation();
                 console.log('[RAIL] EDIT click', { port: r().port });
-                setNameDraft(r().display);
-                setMode('editing');
+                railUiStore.beginEdit(r().key, r().display);
               }}
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
@@ -275,7 +313,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
               onClick={(e) => {
                 e.stopPropagation();
                 console.log('[RAIL] DELETE click', { port: r().port });
-                setMode('confirm-delete');
+                railUiStore.beginConfirmDelete(r().key);
               }}
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
@@ -294,7 +332,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
           <Show when={mode() === 'confirm-delete'}>
             <span class="proj-row-prompt">remove?</span>
             <button type="button" class="proj-row-action is-cancel has-label"
-              onClick={(e) => { e.stopPropagation(); setMode('idle'); }}>no</button>
+              onClick={(e) => { e.stopPropagation(); railUiStore.clear(); }}>no</button>
             <button type="button" class="proj-row-action is-danger has-label"
               onClick={(e) => { e.stopPropagation(); confirmDelete(); }}>remove</button>
           </Show>
@@ -302,7 +340,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
           <Show when={mode() === 'confirm-stop-all'}>
             <span class="proj-row-prompt">stop {runningCount()} agent{runningCount() === 1 ? '' : 's'}?</span>
             <button type="button" class="proj-row-action is-cancel has-label"
-              onClick={(e) => { e.stopPropagation(); setMode('idle'); }}>no</button>
+              onClick={(e) => { e.stopPropagation(); railUiStore.clear(); }}>no</button>
             <button type="button" class="proj-row-action is-danger has-label"
               onClick={(e) => { e.stopPropagation(); void confirmStopAll(); }}>stop all</button>
           </Show>

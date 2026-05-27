@@ -107,18 +107,23 @@ body.col-reordering .projects-rail-resize {
 }
 .proj-row-wrap::before {
   /* Vertical accent bar — full height of the card. Wrap-level so it
-     spans across the name row AND the action row when active. */
+     spans across the name row AND the action row when active.
+     V86b — tri-state semantics:
+       · live (default)        → blue (project reachable, ready to pick)
+       · stopped (.is-stopped) → muted gray (no daemon answering)
+       · active (.active)      → green (operator's current pick)
+     Active wins because its rule comes later in source order. */
   content: '';
   position: absolute;
   left: 0; top: 4px; bottom: 4px;
   width: 2px;
-  background: rgba(75, 85, 99, 0.65);
+  background: rgba(96, 165, 250, 0.55);
   transition: width 140ms, background 140ms, top 140ms, bottom 140ms;
   pointer-events: none;
 }
-.proj-row-wrap:hover::before { background: rgba(148, 163, 184, 0.85); }
-.proj-row-wrap.is-stopped::before { background: rgba(96, 165, 250, 0.50); }
-.proj-row-wrap.is-stopped:hover::before { background: rgba(96, 165, 250, 0.80); }
+.proj-row-wrap:hover::before { background: rgba(96, 165, 250, 0.85); }
+.proj-row-wrap.is-stopped::before { background: rgba(148, 163, 184, 0.40); }
+.proj-row-wrap.is-stopped:hover::before { background: rgba(148, 163, 184, 0.70); }
 /* Active card — wrap owns the bg and the green full-height bar. */
 .proj-row-wrap:has(> .proj-row.active),
 .proj-row-wrap.is-active-card {
@@ -186,9 +191,9 @@ body.col-reordering .projects-rail-resize {
   background: transparent;
   color: #9ca3af;
 }
-.proj-row-wrap.is-stopped .proj-row::before { background: rgba(96, 165, 250, 0.50); }
-.proj-row-wrap.is-stopped .proj-row:hover { background: rgba(96, 165, 250, 0.05); color: #cbd5e1; }
-.proj-row-wrap.is-stopped .proj-row:hover::before { background: rgba(96, 165, 250, 0.80); }
+.proj-row-wrap.is-stopped .proj-row::before { background: rgba(148, 163, 184, 0.40); }
+.proj-row-wrap.is-stopped .proj-row:hover { background: rgba(148, 163, 184, 0.06); color: #cbd5e1; }
+.proj-row-wrap.is-stopped .proj-row:hover::before { background: rgba(148, 163, 184, 0.70); }
 .proj-row-wrap.is-stopped .proj-row.is-working::before { display: none; }
 .proj-row .proj-row-start {
   display: none;

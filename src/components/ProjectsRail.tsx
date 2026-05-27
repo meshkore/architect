@@ -24,7 +24,7 @@
  * Styling lives entirely in src/styles/projects-rail.css.
  */
 
-import { For, Show, createMemo, onMount } from 'solid-js';
+import { For, Show, createMemo } from 'solid-js';
 import { uiStore } from '~/state/ui';
 import ProjectsRailRow from '~/components/ProjectsRailRow';
 import { PORT_LO, PORT_HI, discoverProjects } from '~/components/projects-rail/discovery';
@@ -53,18 +53,22 @@ export default function ProjectsRail() {
   const order = (): string[] => loadProjectsOrder();
   const orderedRows = createMemo(() => applyOrder(rows(), order()));
 
-  onMount(() => {
-    void discoverProjects();
-  });
-
-  // V84 — The earlier continuous scan timer (setInterval every 2.5 s
-  // while `scanning()` was true) ran forever and fired 20 port probes
-  // per tick. When the cockpit is served over HTTPS (hub.meshkore.com)
-  // Chrome's Local Network Access gate flags every fetch to localhost
-  // as a security Issue; the runaway loop accumulated ~2k Issues in
-  // minutes. Rescan is now one-shot, handled inside RailFooter; the
-  // boot scan above is the only automatic discovery this component
-  // performs.
+  // V86e — Boot used to fire `discoverProjects()` here so the rail
+  // could decorate each row with a live/stopped pill before the
+  // operator clicked anything. The cost was an N-port probe across
+  // 5570–5574 on EVERY page load, plus a steady stream of Chrome LNA
+  // Issues whenever the daemon wasn't running. The session-pinning
+  // info that probe was after (which port is live) already lives in
+  // localStorage via `meshcore-last-port` + `kp.list()`. The boot
+  // path in `connection.ts` already probes the single last-port and
+  // attaches it — no rail-side scan needed.
+  //
+  // Discovery now runs ONLY on the operator's explicit click:
+  //   - "Scan ports" button in `RailEmptyPanel`
+  //   - "Rescan" button in `RailFooter`
+  // Both call `discoverProjects({ fullScan: true })` which sweeps
+  // 5570–5589 once and stops.
+  void discoverProjects; // keep the import live for downstream callers
 
   // Drag-resize handle on the right edge.
   let host: HTMLElement | undefined;

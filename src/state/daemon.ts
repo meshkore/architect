@@ -73,11 +73,32 @@ function notifyActiveChanged(): void {
   }
 }
 
+/**
+ * V86b — A row the operator clicked on whose daemon isn't reachable.
+ * Independent from `activeId` (which only points at a real, attached
+ * instance). When `offlineSelection` is non-null, the cockpit body
+ * renders an `OfflinePanel` with start-daemon instructions, and the
+ * row carries the green selected-bar in the rail so the operator
+ * still gets a visual confirmation of "yes, this is the one I picked".
+ */
+export interface OfflineSelection {
+  key: string;
+  port: number;
+  cluster_id: string | null;
+  cluster_name: string | null;
+  display: string;
+  /** Why the probe failed — used by the panel to tailor the message. */
+  reason: 'no-daemon' | 'tls' | 'unknown';
+}
+
 export interface DaemonStoreState {
   /** All live (or recently-live) instances, keyed by clusterKey. */
   instances: Record<string, DaemonInstance>;
   /** Which instance is currently rendered in the cockpit. */
   activeId: string | null;
+  /** Operator's selection when no live daemon backs it. Mutually
+   *  exclusive with `activeId` — picking one clears the other. */
+  offlineSelection: OfflineSelection | null;
 
   // Boot-time state machine. Drives ConnectionGate vs Cockpit.
   phase: ConnectionPhase;
@@ -99,6 +120,7 @@ export interface DaemonStoreState {
 const initial: DaemonStoreState = {
   instances: {},
   activeId: null,
+  offlineSelection: null,
   phase: 'idle',
   errorMessage: '',
   client: null,
@@ -165,8 +187,31 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
   const port = health.port;
   const key = clusterKeyFor(health, port);
 
-  // Replace any prior instance under the same key (re-attach scenario).
+  // V86f — re-attach guard.
+  //
+  // Intent: don't recreate a healthy WebSocket when somebody calls
+  // `attachClient` for a cluster we're already connected to. The boot
+  // createEffect in App.tsx is one such caller (it re-runs whenever
+  // `status` changes); without this guard, every re-fire closes the
+  // open WS and dials a new one, piling up against Chrome's per-origin
+  // socket pool ("Insufficient resources").
+  //
+  // V86e mistake: the previous version of this guard ALSO bumped
+  // `activeId` back to `key` and cleared `offlineSelection` when they
+  // didn't match. That clobbered the operator's "I want to see this
+  // offline row" pick — clicks on a dead-port row briefly flipped to
+  // OfflinePanel, then a stray attachClient call re-asserted the live
+  // row, and the cockpit jumped back. Now the guard is fully
+  // idempotent: if we already have a working instance for this key,
+  // we do NOTHING and return. Selection (activeId / offlineSelection)
+  // is owned exclusively by `switchToPortDetailed`, `selectOffline`,
+  // and `clearActiveSelection`.
   const prior = state.instances[key];
+  if (prior && prior.client.transport.token === client.transport.token && prior.wsState !== 'fatal') {
+    return;
+  }
+  // Otherwise replace the prior instance entirely (new token, fatal
+  // WS that needs a fresh dial, or first-ever attach).
   if (prior && prior !== undefined) {
     const priorDetach = busDetachers.get(key);
     if (priorDetach) { priorDetach(); busDetachers.delete(key); }
@@ -200,6 +245,7 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
     setState('instances', key, inst);
     setState({
       activeId: key,
+      offlineSelection: null,
       phase: 'connected',
       errorMessage: '',
       autoUpdateEnabled,
@@ -303,7 +349,16 @@ function setAutoUpdate(flag: boolean): void {
  *
  * Returns true on success. Never closes other projects' WS.
  */
+export type SwitchOutcome =
+  | { ok: true }
+  | { ok: false; reason: 'no-daemon' | 'tls' | 'unknown'; detail?: string };
+
 async function switchToPort(port: number): Promise<boolean> {
+  const r = await switchToPortDetailed(port);
+  return r.ok;
+}
+
+async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
   console.log('[RAIL] switchToPort entry', { port, current: state.health?.port ?? null, instances: Object.keys(state.instances) });
   log.info('switchToPort requested', { port, current: state.health?.port ?? null });
 
@@ -314,7 +369,7 @@ async function switchToPort(port: number): Promise<boolean> {
     console.log('[RAIL] switchToPort reusing existing instance', { key, port });
     if (state.activeId !== key) {
       batch(() => {
-        setState({ activeId: key, phase: 'connected', errorMessage: '' });
+        setState({ activeId: key, offlineSelection: null, phase: 'connected', errorMessage: '' });
         syncFacade();
       });
       if (inst.wsState === 'fatal' || inst.wsState === 'closed') {
@@ -322,7 +377,7 @@ async function switchToPort(port: number): Promise<boolean> {
       }
       notifyActiveChanged();
     }
-    return true;
+    return { ok: true };
   }
 
   // New project — probe /health, build a client, attach.
@@ -336,14 +391,18 @@ async function switchToPort(port: number): Promise<boolean> {
     if (!r.ok) {
       console.warn('[RAIL] switchToPort probe non-OK', { port, status: r.status });
       log.warn('switchToPort probe failed', port, r.status);
-      return false;
+      return { ok: false, reason: 'no-daemon', detail: `HTTP ${r.status}` };
     }
     health = (await r.json()) as HealthResponse;
     console.log('[RAIL] switchToPort probe OK', { port, cluster_id: health.cluster_id });
   } catch (e) {
-    console.warn('[RAIL] switchToPort fetch threw', { port, error: e instanceof Error ? e.message : String(e) });
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn('[RAIL] switchToPort fetch threw', { port, error: msg });
     log.warn('switchToPort fetch threw', port, e);
-    return false;
+    // ERR_SSL_PROTOCOL_ERROR / ERR_CERT_* surface as plain TypeError in
+    // fetch — distinguish from a closed port by sniffing the message.
+    const isTls = /ssl|tls|cert/i.test(msg);
+    return { ok: false, reason: isTls ? 'tls' : 'no-daemon', detail: msg };
   }
   const { clusterTokenKey, tokenForCluster } = await import('~/lib/tokens');
   const tokenKey = clusterTokenKey({ cluster_id: health.cluster_id ?? null, port });
@@ -380,7 +439,7 @@ async function switchToPort(port: number): Promise<boolean> {
     } catch (e) {
       log.warn('failed to open token modal after auth mismatch', e instanceof Error ? e.message : String(e));
     }
-    return false;
+    return { ok: false, reason: 'unknown', detail: 'auth mismatch' };
   }
 
   const { localTransport } = await import('~/lib/transport');
@@ -389,7 +448,52 @@ async function switchToPort(port: number): Promise<boolean> {
   attachClient(client, health);
   console.log('[RAIL] switchToPort attached new instance', { port, cluster_id: health.cluster_id ?? null });
   log.info('switchToPort attached', { port, cluster_id: health.cluster_id ?? null, identity: verify.kind });
-  return true;
+  return { ok: true };
+}
+
+/**
+ * V86b — select a row whose daemon isn't reachable. Clears `activeId`
+ * (no live instance backs this pick), parks the operator's choice in
+ * `offlineSelection` so the rail can render the row as selected and
+ * the cockpit can render the OfflinePanel. Notifies listeners so the
+ * UI updates immediately (same path as a real switch).
+ */
+function selectOffline(target: OfflineSelection): void {
+  console.log('[RAIL] selectOffline', target);
+  batch(() => {
+    setState({
+      activeId: null,
+      offlineSelection: target,
+      phase: 'no-daemon',
+      errorMessage: '',
+    });
+    syncFacade();
+  });
+  notifyActiveChanged();
+}
+
+function clearOfflineSelection(): void {
+  if (!state.offlineSelection) return;
+  setState('offlineSelection', null);
+}
+
+/**
+ * V86c — Force the cockpit into the "no selection" state. Drops the
+ * active instance pointer AND the offline pick, leaves any open WS
+ * connections alone (`disconnectInstance` already closed the row the
+ * operator deleted). Called by `forgetProjectImmediate` so the next
+ * paint hits the empty-rail panel and the operator picks the next
+ * project explicitly. We do NOT want `disconnectInstance`'s
+ * auto-fallback-to-first-instance behaviour here — the operator just
+ * told us they're done with that row.
+ */
+function clearActiveSelection(): void {
+  if (state.activeId === null && state.offlineSelection === null) return;
+  batch(() => {
+    setState({ activeId: null, offlineSelection: null, phase: 'idle', errorMessage: '' });
+    syncFacade();
+  });
+  notifyActiveChanged();
 }
 
 /**
@@ -425,7 +529,29 @@ export const daemonStore = {
   setAutoUpdate,
   recheckHealth,
   switchToPort,
+  switchToPortDetailed,
+  selectOffline,
+  clearOfflineSelection,
+  clearActiveSelection,
   onActiveChanged,
+};
+
+/**
+ * V86d — Single source of truth for "which rail row is highlighted".
+ * Replaces the per-row `RailRowData.active` flag (which was baked into
+ * the array returned by `rows()` and therefore tied to `<For>`'s
+ * remount cadence). Components read this accessor directly so the
+ * green bar + edit/delete morph live entirely off the daemon store's
+ * reactivity — no rebuild of the rows array required.
+ *
+ * Returns the offline pick's key when present (offline always wins
+ * over a live instance because picking offline explicitly cleared
+ * `activeId`); otherwise the live `activeId`; otherwise null.
+ */
+export const selectedRowKey = (): string | null => {
+  const off = state.offlineSelection;
+  if (off) return off.key;
+  return state.activeId;
 };
 
 // Convenience selectors for components that just need one slice.

@@ -21,8 +21,16 @@ interface ProjectView {
   initiatives: Record<string, boolean>;
   /** moduleId → true when expanded. Missing = collapsed. */
   modules: Record<string, boolean>;
-  /** initiativeId → true when "Group by phase" is on. */
+  /** initiativeId → true when "Group by phase" is on.
+   *  V86h — kept for backwards-compat with persisted projects; the UI
+   *  no longer reads it (tasks are always grouped by phase). */
   groupByPhase: Record<string, boolean>;
+  /** initiativeId → true when its description block is expanded
+   *  (oneliner + full body). V86h. */
+  descriptions?: Record<string, boolean>;
+  /** taskId → true when the task card is expanded inline (shows the
+   *  body alongside the title). V86h. */
+  tasks?: Record<string, boolean>;
 }
 
 interface ViewState {
@@ -30,7 +38,7 @@ interface ViewState {
   view: ProjectView;
 }
 
-const EMPTY: ProjectView = { initiatives: {}, modules: {}, groupByPhase: {} };
+const EMPTY: ProjectView = { initiatives: {}, modules: {}, groupByPhase: {}, descriptions: {}, tasks: {} };
 
 function keyFor(cluster: string | null): string {
   return `mc-view-v1::${cluster ?? '_local'}`;
@@ -45,6 +53,8 @@ function loadFor(cluster: string | null): ProjectView {
       initiatives: parsed.initiatives ?? {},
       modules: parsed.modules ?? {},
       groupByPhase: parsed.groupByPhase ?? {},
+      descriptions: parsed.descriptions ?? {},
+      tasks: parsed.tasks ?? {},
     };
   } catch {
     return { ...EMPTY };
@@ -100,6 +110,26 @@ function setGroupByPhase(id: string, value: boolean): void {
   persist();
 }
 
+function isDescriptionExpanded(initiativeId: string): boolean {
+  return state.view.descriptions?.[initiativeId] === true;
+}
+
+function toggleDescription(initiativeId: string): void {
+  const next = !isDescriptionExpanded(initiativeId);
+  setState('view', 'descriptions', initiativeId, next);
+  persist();
+}
+
+function isTaskExpanded(taskId: string): boolean {
+  return state.view.tasks?.[taskId] === true;
+}
+
+function toggleTask(taskId: string): void {
+  const next = !isTaskExpanded(taskId);
+  setState('view', 'tasks', taskId, next);
+  persist();
+}
+
 export const viewStore = {
   state,
   bindCluster,
@@ -111,4 +141,8 @@ export const viewStore = {
   toggleModule,
   isGroupByPhase,
   setGroupByPhase,
+  isDescriptionExpanded,
+  toggleDescription,
+  isTaskExpanded,
+  toggleTask,
 };

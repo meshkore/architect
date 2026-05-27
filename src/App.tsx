@@ -38,6 +38,8 @@ import { AddProjectWizardHost } from '~/components/modals/AddProjectWizard';
 import StoryRunner from '~/components/story/StoryRunner';
 import ConnectionGate from '~/components/ConnectionGate';
 import Cockpit from '~/components/Cockpit';
+import { rows } from '~/components/projects-rail/rows';
+import { switchProject } from '~/components/ProjectsRailRow';
 
 export default function App() {
   const [status, setStatus] = createSignal<ConnectionStatus>({ kind: 'probing', message: 'Booting…' });
@@ -104,6 +106,30 @@ export default function App() {
     if (chatStore.state.activeConv) return;
     const next = pickDefaultConv();
     if (next) chatStore.setActiveConv(next);
+  });
+
+  // V86c — Auto-select the lone remaining project. When the operator
+  // deletes the currently-selected row, `forgetProjectImmediate`
+  // clears both `activeId` and `offlineSelection` so the cockpit lands
+  // on `RailEmptyPanel`. If exactly one row remains, the empty panel
+  // would be a dead-end click target — bridge it for the operator by
+  // switching to that row immediately. With 2+ rows we keep the empty
+  // panel so the operator's next pick is explicit (they just told us
+  // they don't want the rail's prior default), and with 0 rows the
+  // empty panel shows the add/scan CTAs.
+  createEffect(() => {
+    if (daemonStore.state.activeId) return;
+    if (daemonStore.state.offlineSelection) return;
+    const list = rows();
+    if (list.length !== 1) return;
+    const only = list[0];
+    if (!only) return;
+    log.info('auto-selecting lone project after deletion / boot', { key: only.key, port: only.port });
+    void switchProject(only.port, only.key, {
+      display: only.display,
+      cluster_id: only.cluster_id,
+      cluster_name: only.cluster_name,
+    });
   });
 
   onCleanup(() => {

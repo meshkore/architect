@@ -7,6 +7,7 @@
 import { createMemo, createResource, createSignal, For, Show } from 'solid-js';
 import { serverStore } from '~/state/server';
 import { renderDiagram, type DiagramRef } from '~/lib/diagram-render';
+import { findProjectDoc, isProjectDocScope } from '~/components/modules-tree/doc-index';
 
 interface Doc {
   category: string;
@@ -17,11 +18,19 @@ interface Doc {
 function activeDiagrams(snapshot: unknown, scope: string | null): DiagramRef[] {
   const tree = (snapshot as { docs?: { tree?: Array<{ items: Doc[] }> } } | null)?.docs?.tree ?? [];
   const flat = tree.flatMap((c) => c.items);
-  const doc = !scope
-    ? flat.find((d) => d.category === 'architecture' && d.slug === 'cluster-layout') ??
+  let doc: Doc | undefined;
+  if (!scope) {
+    doc =
+      flat.find((d) => d.category === 'architecture' && d.slug === 'cluster-layout') ??
       flat.find((d) => d.category === 'architecture') ??
-      flat[0]
-    : flat.find((d) => d.category === 'modules' && d.slug === scope);
+      flat[0];
+  } else if (isProjectDocScope(scope)) {
+    // V86i — project-level doc scope.
+    const ref = findProjectDoc(scope);
+    doc = ref ? flat.find((d) => d.category === ref.category && d.slug === ref.slug) : undefined;
+  } else {
+    doc = flat.find((d) => d.category === 'modules' && d.slug === scope);
+  }
   return doc?.diagrams ?? [];
 }
 

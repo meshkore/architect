@@ -1,5 +1,5 @@
 import { createMemo } from 'solid-js';
-import { daemonStore } from '~/state/daemon';
+import { daemonStore, selectedRowKey } from '~/state/daemon';
 import { projectsStore } from '~/state/projects';
 import { chatStore } from '~/state/chat';
 import * as kp from '~/lib/known-projects';
@@ -25,6 +25,13 @@ export const rows = createMemo<RailRowData[]>(() => {
   const activeInst = activeId ? daemonStore.state.instances[activeId] : null;
   const activePort = activeInst?.health.port ?? null;
   const activeClusterId = activeInst?.health.cluster_id ?? null;
+  // V86d — `selectedKey` is the single source of truth for "which row
+  // is highlighted". Used here ONLY for the per-row `hasUnread` check
+  // (active cluster never shows an unread dot). The CSS-level "active"
+  // class is now applied inside ProjectsRailRow by reading
+  // `selectedRowKey()` directly — keeps highlight reactivity off the
+  // rows-array remount cycle.
+  const selectedKey = selectedRowKey();
   const newIds = new Set(projectsStore.state.newClusterIds);
   // V86 — pre-compute which ports are "claimed" by an entry with a
   // real cluster_id, so we can suppress orphan rows (entries lacking
@@ -65,23 +72,17 @@ export const rows = createMemo<RailRowData[]>(() => {
     if (k.cluster_id) seenClusters.add(k.cluster_id);
     const alias = kp.getAlias(k);
     const display = alias || k.cluster_name || k.cluster_id || `:${port}`;
-    // V86 — stricter active check: when the active instance has a
-    // cluster_id, ONLY rows with that exact cluster_id light up. A
-    // row matching by port alone is no longer enough (used to false-
-    // positive an orphan ":<port>" row when its port was actually
-    // bound to another cluster's daemon).
-    const active = activeClusterId
-      ? k.cluster_id === activeClusterId
-      : (!k.cluster_id && activePort !== null && port === activePort);
     const rowKey = k.cluster_id ?? `port:${port}`;
+    const isSelected = selectedKey === rowKey;
     // MP5 — read activity for this cluster. `working` lights the
     // bouncing slug whenever any conv on this cluster is mid-stream
     // (active or inactive). `hasUnread` shows a small dot when the
-    // cluster received an event after the last bindCluster. Active
-    // cluster never shows unread (the operator IS looking at it).
+    // cluster received an event after the last bindCluster. The
+    // currently-selected cluster never shows unread (the operator is
+    // looking at it).
     const activity = chatStore.state.clusterActivity[rowKey];
     const working = !!(activity && activity.workingConvs.length > 0);
-    const hasUnread = !!(activity && !active && activity.lastEventAt > activity.lastReadAt);
+    const hasUnread = !!(activity && !isSelected && activity.lastEventAt > activity.lastReadAt);
     result.push({
       key: rowKey,
       port, base: liveProbe?.base ?? k.base,
@@ -89,7 +90,6 @@ export const rows = createMemo<RailRowData[]>(() => {
       cluster_name: k.cluster_name ?? null,
       display, initials: initialsFor(display),
       live: isLive,
-      active: !!active,
       working,
       hasUnread,
       isNew: newIds.has(rowKey),

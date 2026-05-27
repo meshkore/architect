@@ -1,19 +1,33 @@
 import { For, Show } from 'solid-js';
 import type { ServerTask } from '~/state/server';
 import TaskCard from '~/components/TaskCard';
+import { viewStore } from '~/state/view';
 
 export function TaskGrid(props: { tasks: ServerTask[] }) {
   return (
     <ul class="grid gap-x-6 gap-y-3 grid-cols-1 min-[720px]:grid-cols-2 min-[1280px]:grid-cols-3">
       <For each={props.tasks}>
-        {(t, i) => (
-          <li class="relative">
-            <TaskCard task={t} />
-            <Show when={i() < props.tasks.length - 1}>
-              <ReadingOrderArrow />
-            </Show>
-          </li>
-        )}
+        {(t, i) => {
+          // V86h — the reading-order arrow only makes sense between
+          // collapsed siblings in the grid. When a task expands to
+          // span the full row it visually breaks the left-to-right
+          // reading chain anyway, so hide the arrow for that row.
+          // We also lift `col-span-full` onto the <li> (grid item)
+          // — putting it on TaskCard didn't take because the <li> is
+          // what the grid lays out.
+          const expanded = () => viewStore.isTaskExpanded(t.id);
+          return (
+            <li
+              class="relative"
+              classList={{ 'min-[720px]:col-span-full': expanded() }}
+            >
+              <TaskCard task={t} />
+              <Show when={i() < props.tasks.length - 1 && !expanded()}>
+                <ReadingOrderArrow />
+              </Show>
+            </li>
+          );
+        }}
       </For>
     </ul>
   );
