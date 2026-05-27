@@ -20,6 +20,7 @@
  * project at a new port.
  */
 
+import { batch } from 'solid-js';
 import { createStore } from 'solid-js/store';
 import type { DaemonClient, HealthResponse } from '~/lib/daemon-client';
 import { DaemonWS, type DaemonWSState } from '~/lib/ws';
@@ -53,6 +54,24 @@ export interface DaemonInstance {
 // MP4 — event-bus detachers kept OUTSIDE the reactive store, keyed
 // by clusterKey. Solid's createStore shouldn't track closures.
 const busDetachers = new Map<string, () => void>();
+
+// V85d — Imperative active-change subscribers. After 10 rounds of
+// chasing a "createEffect never fires" mystery, the lesson is
+// simple: don't bet cross-store coordination on Solid's effect
+// timing. Components that NEED to react on a project switch
+// register here and we notify them by direct function call.
+type ActiveChangeListener = (activeId: string | null) => void;
+const activeChangeListeners = new Set<ActiveChangeListener>();
+
+function notifyActiveChanged(): void {
+  const id = state.activeId;
+  console.log('[RAIL] notifyActiveChanged → listeners count:', activeChangeListeners.size, 'activeId:', id);
+  for (const fn of activeChangeListeners) {
+    try { fn(id); } catch (e) {
+      log.warn('active-change listener threw', e instanceof Error ? e.message : String(e));
+    }
+  }
+}
 
 export interface DaemonStoreState {
   /** All live (or recently-live) instances, keyed by clusterKey. */
@@ -169,18 +188,22 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
     outdated: !meetsMinimum(v),
     supportsSelfUpdate,
   };
-  setState('instances', key, inst);
-  setState({
-    activeId: key,
-    phase: 'connected',
-    errorMessage: '',
+  // Batch reactive writes (one tick for downstream memos), then
+  // notify the imperative subscribers so the side-effect bus runs
+  // deterministically regardless of Solid's effect scheduling.
+  batch(() => {
+    setState('instances', key, inst);
+    setState({
+      activeId: key,
+      phase: 'connected',
+      errorMessage: '',
+    });
+    syncFacade();
   });
-  console.log('[RAIL] attachClient: post-setState', { activeId: state.activeId, instances: Object.keys(state.instances) });
-  syncFacade();
-  console.log('[RAIL] attachClient: post-syncFacade', { facadePort: state.health?.port, facadeCluster: state.health?.cluster_id });
   ws.connect();
   const detachBus = attachEventBus(ws, client, key);
   busDetachers.set(key, detachBus);
+  notifyActiveChanged();
 }
 
 /**
@@ -191,6 +214,7 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
 function disconnectInstance(key: string): void {
   const inst = state.instances[key];
   if (!inst) return;
+  const wasActive = state.activeId === key;
   // Detach the event-bus FIRST so a late WS-close event doesn't
   // try to write to a disposed cluster slice.
   const detachBus = busDetachers.get(key);
@@ -199,25 +223,26 @@ function disconnectInstance(key: string): void {
     busDetachers.delete(key);
   }
   try { inst.ws.close(); } catch { /* already closed */ }
-  // Drop from map.
-  setState('instances', (prev) => {
-    const next = { ...prev };
-    delete next[key];
-    return next;
+  batch(() => {
+    setState('instances', (prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    if (wasActive) {
+      const fallback = Object.keys(state.instances)[0] ?? null;
+      setState('activeId', fallback);
+      if (!fallback) setState('phase', 'idle');
+    }
+    syncFacade();
   });
-  if (state.activeId === key) {
-    const fallback = Object.keys(state.instances)[0] ?? null;
-    setState('activeId', fallback);
-    if (!fallback) setState('phase', 'idle');
-  }
-  syncFacade();
+  if (wasActive) notifyActiveChanged();
 }
 
 /**
  * Close every instance. Called once on app unmount.
  */
 function disconnectAll(): void {
-  // Detach every bus first.
   for (const [, detach] of busDetachers) {
     try { detach(); } catch { /* ignore */ }
   }
@@ -225,12 +250,27 @@ function disconnectAll(): void {
   for (const key of Object.keys(state.instances)) {
     try { state.instances[key]?.ws.close(); } catch { /* ignore */ }
   }
-  setState({
-    instances: {},
-    activeId: null,
-    phase: 'idle',
+  const hadActive = state.activeId !== null;
+  batch(() => {
+    setState({
+      instances: {},
+      activeId: null,
+      phase: 'idle',
+    });
+    syncFacade();
   });
-  syncFacade();
+  if (hadActive) notifyActiveChanged();
+}
+
+/**
+ * Subscribe to active-project changes. Imperative — fires
+ * synchronously from attachClient / switchToPort / disconnectInstance
+ * / disconnectAll. Use this for cross-store side effects that MUST
+ * run on switch (the App-level bus uses it).
+ */
+function onActiveChanged(fn: ActiveChangeListener): () => void {
+  activeChangeListeners.add(fn);
+  return () => { activeChangeListeners.delete(fn); };
 }
 
 /**
@@ -267,13 +307,14 @@ async function switchToPort(port: number): Promise<boolean> {
     const [key, inst] = existing;
     console.log('[RAIL] switchToPort reusing existing instance', { key, port });
     if (state.activeId !== key) {
-      setState({ activeId: key, phase: 'connected', errorMessage: '' });
-      syncFacade();
-      // If the WS for this instance went 'fatal' or 'closed' while it
-      // was in the background, kick a reconnect now that it's active.
+      batch(() => {
+        setState({ activeId: key, phase: 'connected', errorMessage: '' });
+        syncFacade();
+      });
       if (inst.wsState === 'fatal' || inst.wsState === 'closed') {
         try { inst.ws.connect(); } catch { /* ignore */ }
       }
+      notifyActiveChanged();
     }
     return true;
   }
@@ -342,6 +383,7 @@ export const daemonStore = {
   setAutoUpdate,
   recheckHealth,
   switchToPort,
+  onActiveChanged,
 };
 
 // Convenience selectors for components that just need one slice.

@@ -14,7 +14,7 @@
  * boot-only / swap-only branching that caused stale columns earlier.
  */
 
-import { createEffect, createSignal, Match, onCleanup, onMount, Switch } from 'solid-js';
+import { batch, createEffect, createSignal, Match, onCleanup, onMount, Switch } from 'solid-js';
 import {
   connect,
   storeToken,
@@ -63,38 +63,35 @@ export default function App() {
     if (s.kind === 'connected') daemonStore.attachClient(s.client, s.health);
   });
 
-  // V85c — Side-effect bus now tracks `activeId` directly (the source
-  // of truth in daemonStore). The previous version read client + health
-  // off the facade; in production the facade fields could remain
-  // reference-equal across switches under certain setState orderings,
-  // and the effect would silently fail to re-fire. Active-id tracking
-  // is unambiguous: every switch is a setState({activeId}) — Solid
-  // sees that and re-runs this body deterministically.
-  createEffect(() => {
-    const activeId = daemonStore.state.activeId;
-    console.log('[RAIL] effect: activeId =', activeId);
+  // V85d — Imperative side-effect bus. Registered SYNCHRONOUSLY in
+  // App's body (not in onMount) so the subscriber exists before any
+  // onMount or async boot path runs daemonStore.attachClient.
+  // Fired DIRECTLY from daemonStore on every active-id change.
+  const detachActive = daemonStore.onActiveChanged((activeId) => {
+    console.log('[RAIL] side-effect bus firing', { activeId });
     if (!activeId) return;
     const inst = daemonStore.state.instances[activeId];
     if (!inst) {
-      console.log('[RAIL] effect: no instance for activeId, bail');
+      console.warn('[RAIL] bus: no instance for activeId, bail', { activeId });
       return;
     }
     const { client, health } = inst;
-    console.log('[RAIL] side-effect bus firing', { port: health.port, cluster: health.cluster_id, activeId });
     log.info('daemon bound — running side effects', { port: health.port, cluster: health.cluster_id });
-    void store.attach(client);
-    serverStore.setActiveCluster(activeId);
-    void serverStore.refreshNow(client, activeId);
-    projectsStore.upsert({
-      port: health.port,
-      base: client.transport.httpBase,
-      cluster_id: health.cluster_id ?? undefined,
-      cluster_name: health.cluster_name ?? undefined,
-      status: 'live',
+    batch(() => {
+      void store.attach(client);
+      serverStore.setActiveCluster(activeId);
+      projectsStore.upsert({
+        port: health.port,
+        base: client.transport.httpBase,
+        cluster_id: health.cluster_id ?? undefined,
+        cluster_name: health.cluster_name ?? undefined,
+        status: 'live',
+      });
+      projectsStore.setActive(health.port, health.cluster_id ?? null);
+      chatStore.bindCluster(health.cluster_id ?? null);
+      viewStore.bindCluster(health.cluster_id ?? null);
     });
-    projectsStore.setActive(health.port, health.cluster_id ?? null);
-    chatStore.bindCluster(health.cluster_id ?? null);
-    viewStore.bindCluster(health.cluster_id ?? null);
+    void serverStore.refreshNow(client, activeId);
   });
 
   // Once the server snapshot lands, fall back to the Coordinator conv
@@ -110,7 +107,7 @@ export default function App() {
   });
 
   onCleanup(() => {
-    // Per-instance buses are detached inside disconnectAll().
+    detachActive();
     daemonStore.disconnectAll();
   });
 

@@ -19,7 +19,7 @@
  * (green left bar) is the visual selection indicator.
  */
 
-import { Show, createEffect, createSignal, onMount } from 'solid-js';
+import { Show, createSignal } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { projectsStore } from '~/state/projects';
 import { serverStore } from '~/state/server';
@@ -92,17 +92,6 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
   const [mode, setMode] = createSignal<RowMode>('idle');
   const [nameDraft, setNameDraft] = createSignal(props.row.display);
   const r = () => props.row;
-
-  // Diagnostics for the "buttons don't visibly work" report. If the
-  // row is being remounted every click, we'll see "[RAIL] row MOUNT"
-  // immediately after a setMode call → state reset. If mode actually
-  // changes and stays, we'll see the effect log without a mount.
-  onMount(() => {
-    console.log('[RAIL] row MOUNT', { key: r().key, port: r().port, active: r().active });
-  });
-  createEffect(() => {
-    console.log('[RAIL] row mode →', mode(), { key: r().key, active: r().active });
-  });
 
   const wrapCls = (): string => {
     const cls = ['proj-row-wrap'];

@@ -18,16 +18,13 @@ export const rows = createMemo<RailRowData[]>(() => {
   const known = projectsStore.state.list;
   const livePortSet = livePorts();
   const liveById = liveClusters();
-  // V85c — read active port + cluster_id from the instances Map keyed
-  // by activeId, NOT from the facade. The facade `state.health` could
-  // stay reference-equal across switches under certain setState
-  // orderings, missing the reactivity for this memo. activeId always
-  // changes on switch.
+  // Read active port + cluster_id from the instances Map keyed by
+  // activeId (V85c). Facade reads could stay reference-equal across
+  // switches and miss reactivity; activeId is unambiguous.
   const activeId = daemonStore.state.activeId;
   const activeInst = activeId ? daemonStore.state.instances[activeId] : null;
   const activePort = activeInst?.health.port ?? null;
   const activeClusterId = activeInst?.health.cluster_id ?? null;
-  console.log('[RAIL] rows() recomputing', { activeId, activePort, activeClusterId, knownCount: known.length });
   const newIds = new Set(projectsStore.state.newClusterIds);
   const result: RailRowData[] = [];
   const seenPorts = new Set<number>();
