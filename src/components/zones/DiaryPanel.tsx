@@ -1,51 +1,346 @@
 /**
- * DiaryPanel — V43 zone stub.
+ * DiaryPanel — V86j.
  *
- * The full diary merges `.meshkore/log/<date>.md` daily logs,
- * `.meshkore/timeline/*.jsonl`, git history, and live WS events into
- * a single chronological blog. The V80 monolith does not ship that
- * view yet; this Solid port renders an equivalent coming-soon card so
- * the header Diary button + `#diary` deep link have something visible
- * to open. Real content lands with V43.
+ * Reverse-chronological viewer over `.meshkore/log/<YYYY-MM-DD>.md`.
+ * Boots by hitting `GET /log` (py-1.9.0, `files.log` feature) to get
+ * the descending date index, then lazy-loads each day's body the
+ * first time it scrolls into view. Pages are kept once loaded so
+ * scroll-up doesn't re-fetch.
+ *
+ * Why this design instead of "load everything":
+ *   - 10-30 KB markdown per day adds up over months. Lazy paging
+ *     keeps the initial paint cheap.
+ *   - The cockpit re-renders this panel on every project hot-swap;
+ *     keeping state in a `createStore` lets the previous fetches
+ *     survive the swap.
+ *
+ * Operator UX:
+ *   - Newest day always at the top. Each day is a collapsible card
+ *     that defaults to expanded for the first 3 days (so the diary
+ *     reads as a feed) and collapsed below that (so you scroll
+ *     titles, expand the day you want).
+ *   - The whole list scrolls; an IntersectionObserver at the bottom
+ *     triggers the next batch of body fetches as you approach the end.
+ *   - If the daemon doesn't expose `files.log` yet (older py-1.8.x),
+ *     a banner tells the operator to upgrade and points at the
+ *     command the cockpit already knows how to run.
  */
 
+import { For, Show, createMemo, createResource, createSignal, onCleanup, onMount } from 'solid-js';
+import { createStore } from 'solid-js/store';
+import { daemonStore } from '~/state/daemon';
+import { ensureMarked } from '~/lib/cdn-loaders';
 import { uiStore } from '~/state/ui';
+import { log } from '~/lib/log';
+import type { LogEntry } from '~/lib/daemon-client';
+
+const DEFAULT_EXPANDED = 3;     // expand this many newest days by default
+const BATCH_SIZE = 5;            // load this many bodies per IO trigger
+const PREVIEW_LINES = 30;        // collapsed-card preview line count
+
+interface BodyState { loading: boolean; body: string | null; error: string | null; html: string | null; }
 
 export default function DiaryPanel() {
+  const supported = createMemo(() => {
+    const features = daemonStore.state.health?.features ?? [];
+    return features.includes('files.log');
+  });
+
+  const [index] = createResource(
+    () => daemonStore.state.client,
+    async (client) => {
+      const r = await client.logList();
+      if (!r.ok) {
+        throw new Error(r.error ?? `HTTP ${r.status}: ${r.body.slice(0, 200)}`);
+      }
+      return r.data;
+    },
+  );
+
+  const entries = createMemo<LogEntry[]>(() => index()?.entries ?? []);
+
+  // body cache keyed by entry.name. Survives the panel mount/unmount
+  // cycle of the zone switcher (uiStore re-renders Cockpit children
+  // when activeZone flips back to architect and back to diary).
+  const [bodies, setBodies] = createStore<Record<string, BodyState>>({});
+  const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
+  const [batchHead, setBatchHead] = createSignal(BATCH_SIZE);
+
+  // Auto-expand the first N entries when the index lands.
+  const seedExpansion = (list: LogEntry[]): void => {
+    if (expanded().size > 0) return;
+    const init = new Set<string>();
+    for (const e of list.slice(0, DEFAULT_EXPANDED)) init.add(e.name);
+    setExpanded(init);
+  };
+
+  const toggle = (name: string): void => {
+    const next = new Set(expanded());
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    setExpanded(next);
+  };
+
+  const loadBody = async (name: string): Promise<void> => {
+    if (bodies[name]?.body !== undefined && bodies[name]?.body !== null) return;
+    if (bodies[name]?.loading) return;
+    setBodies(name, { loading: true, body: null, error: null, html: null });
+    const client = daemonStore.state.client;
+    if (!client) {
+      setBodies(name, { loading: false, body: null, error: 'no daemon', html: null });
+      return;
+    }
+    const r = await client.logFile(name);
+    if (!r.ok) {
+      setBodies(name, {
+        loading: false,
+        body: null,
+        error: r.error ?? `HTTP ${r.status}`,
+        html: null,
+      });
+      return;
+    }
+    let html: string | null = null;
+    try {
+      const marked = await ensureMarked();
+      html = marked.parse(r.body, { gfm: true });
+    } catch (e) {
+      log.warn('diary marked render failed', e instanceof Error ? e.message : String(e));
+    }
+    setBodies(name, { loading: false, body: r.body, error: null, html });
+  };
+
+  // Whenever the index lands or batchHead grows, pre-fetch the bodies
+  // for visible entries so expand/scroll is instant. We don't render
+  // past `batchHead` until the sentinel scrolls into view.
+  const ensureBatch = (): void => {
+    const list = entries();
+    seedExpansion(list);
+    const head = Math.min(batchHead(), list.length);
+    for (let i = 0; i < head; i += 1) {
+      void loadBody(list[i]!.name);
+    }
+  };
+
+  // Watch entries() reactively to kick off the initial batch fetch.
+  createMemo(() => {
+    if (entries().length === 0) return;
+    ensureBatch();
+  });
+
+  // Infinite-scroll sentinel
+  let sentinel: HTMLDivElement | undefined;
+  let observer: IntersectionObserver | undefined;
+  onMount(() => {
+    if (typeof IntersectionObserver === 'undefined') return;
+    observer = new IntersectionObserver((records) => {
+      for (const rec of records) {
+        if (rec.isIntersecting) {
+          setBatchHead((h) => Math.min(h + BATCH_SIZE, entries().length));
+          ensureBatch();
+          break;
+        }
+      }
+    }, { rootMargin: '200px' });
+    if (sentinel) observer.observe(sentinel);
+  });
+  onCleanup(() => { observer?.disconnect(); });
+
+  const visible = createMemo<LogEntry[]>(() => entries().slice(0, batchHead()));
+
   return (
-    <div class="flex-1 flex items-center justify-center px-6 py-10">
-      <div class="max-w-xl w-full rounded-2xl border border-gray-800/60 bg-gray-900/40 px-8 py-10 text-center">
-        <div class="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-amber-500/15 border border-amber-500/30 mb-5">
-          <svg class="w-6 h-6 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+    <div class="flex-1 min-h-0 flex flex-col bg-canvas">
+      <header class="px-6 pt-6 pb-3 border-b border-gray-800/60 flex items-center gap-3 flex-shrink-0">
+        <div class="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+          <svg class="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path d="M4 4h12a2 2 0 012 2v14l-4-2-4 2-4-2-2 2V6a2 2 0 012-2z" />
             <path d="M8 8h8M8 12h8M8 16h5" />
           </svg>
         </div>
-
-        <h2 class="text-lg font-semibold text-gray-100 mb-2">Diary</h2>
-        <p class="text-sm text-gray-400 leading-relaxed mb-5">
-          Chronological activity blog lands with{' '}
-          <span class="font-mono text-amber-300">V43</span>. It merges
-          daily logs, the timeline ledger, git history, and live WS
-          events into a single reverse-chronological feed.
-        </p>
-
-        <div class="text-[11px] text-gray-500 leading-relaxed font-mono bg-gray-950/60 border border-gray-800/60 rounded-lg px-4 py-3 text-left">
-          <div class="text-gray-400 mb-1"># sources merged by the diary</div>
-          <div class="text-gray-500">- .meshkore/log/&lt;YYYY-MM-DD&gt;.md</div>
-          <div class="text-gray-500">- .meshkore/timeline/*.jsonl</div>
-          <div class="text-gray-500">- git log (commits, branches, merges)</div>
-          <div class="text-gray-500">- live WS: task.*, initiative.*, chat.*</div>
+        <div>
+          <h1 class="text-base font-semibold text-gray-100">Diary</h1>
+          <p class="text-xs text-gray-500">
+            Daily narrative log · newest first · loaded from{' '}
+            <code class="font-mono text-amber-300/80">.meshkore/log/</code>
+          </p>
         </div>
+        <div class="ml-auto flex items-center gap-2">
+          <Show when={entries().length > 0}>
+            <span class="text-[10px] font-mono uppercase tracking-wider text-gray-500">
+              {entries().length} day{entries().length === 1 ? '' : 's'}
+            </span>
+          </Show>
+          <button
+            type="button"
+            onClick={() => uiStore.setActiveZone('architect')}
+            class="px-2.5 py-1 rounded-md bg-gray-800/60 hover:bg-gray-700/60 text-gray-300 text-[11px] font-mono uppercase tracking-wider transition-colors"
+          >
+            ← back
+          </button>
+        </div>
+      </header>
 
-        <button
-          type="button"
-          onClick={() => uiStore.setActiveZone('architect')}
-          class="mt-6 px-3 py-1.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-medium hover:bg-amber-500/25 transition-colors"
-        >
-          ← Back to Architect
-        </button>
+      <div class="flex-1 min-h-0 overflow-y-auto px-6 py-6">
+        <Show when={supported()} fallback={<UnsupportedNotice />}>
+          <Show when={index.error}>
+            <ErrorNotice error={String(index.error)} />
+          </Show>
+          <Show when={index.loading && entries().length === 0}>
+            <p class="text-sm text-gray-500">Loading the diary index…</p>
+          </Show>
+          <Show when={!index.loading && entries().length === 0 && !index.error}>
+            <EmptyNotice />
+          </Show>
+
+          <ul class="space-y-4 max-w-3xl mx-auto">
+            <For each={visible()}>
+              {(entry) => (
+                <DayCard
+                  entry={entry}
+                  expanded={expanded().has(entry.name)}
+                  state={bodies[entry.name] ?? { loading: false, body: null, error: null, html: null }}
+                  onToggle={() => toggle(entry.name)}
+                  onRequestLoad={() => void loadBody(entry.name)}
+                />
+              )}
+            </For>
+          </ul>
+
+          <Show when={batchHead() < entries().length}>
+            <div ref={(el) => (sentinel = el)} class="text-center text-[11px] text-gray-600 py-6 font-mono uppercase tracking-wider">
+              loading more days…
+            </div>
+          </Show>
+          <Show when={batchHead() >= entries().length && entries().length > BATCH_SIZE}>
+            <div class="text-center text-[11px] text-gray-700 py-6 font-mono uppercase tracking-wider">
+              end of the log · {entries().length} day{entries().length === 1 ? '' : 's'} loaded
+            </div>
+          </Show>
+        </Show>
       </div>
     </div>
   );
+}
+
+function DayCard(props: {
+  entry: LogEntry;
+  expanded: boolean;
+  state: BodyState;
+  onToggle: () => void;
+  onRequestLoad: () => void;
+}) {
+  // Kick off the body fetch the first time the card expands, in case
+  // the auto-batcher hasn't reached this entry yet.
+  const handleToggle = (): void => {
+    if (!props.expanded && !props.state.body && !props.state.loading) {
+      props.onRequestLoad();
+    }
+    props.onToggle();
+  };
+
+  const previewText = createMemo<string>(() => {
+    const body = props.state.body;
+    if (!body) return '';
+    const lines = body.split('\n').slice(0, PREVIEW_LINES);
+    return lines.join('\n') + (body.split('\n').length > PREVIEW_LINES ? '\n…' : '');
+  });
+
+  return (
+    <li class="bg-gray-900/40 border border-gray-800/70 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={handleToggle}
+        class="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-gray-900/60 transition-colors"
+      >
+        <div class="flex flex-col min-w-0">
+          <span class="text-sm font-semibold text-gray-100">
+            {props.entry.date ?? props.entry.name.replace(/\.md$/, '')}
+          </span>
+          <Show when={props.entry.mtime}>
+            <span class="text-[10px] text-gray-600 font-mono">
+              updated <time>{formatMtime(props.entry.mtime!)}</time>
+              {props.entry.size !== null && (
+                <>
+                  <span class="text-gray-700"> · </span>
+                  {formatSize(props.entry.size)}
+                </>
+              )}
+            </span>
+          </Show>
+        </div>
+        <span class="ml-auto text-gray-600 flex-shrink-0">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            class={`transition-transform ${props.expanded ? 'rotate-180' : ''}`}>
+            <path d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+          </svg>
+        </span>
+      </button>
+
+      <Show when={props.expanded}>
+        <div class="px-4 pb-4 pt-2 border-t border-gray-800/60">
+          <Show when={props.state.loading}>
+            <p class="text-xs text-gray-500 font-mono">loading…</p>
+          </Show>
+          <Show when={props.state.error}>
+            <p class="text-xs text-red-400 font-mono">
+              load failed — {props.state.error}
+            </p>
+          </Show>
+          <Show when={props.state.html}>
+            <div class="md prose prose-invert max-w-none text-[13px] leading-relaxed" innerHTML={props.state.html ?? ''} />
+          </Show>
+          <Show when={!props.state.html && props.state.body && !props.state.loading}>
+            <pre class="whitespace-pre-wrap text-[12px] text-gray-300 font-mono leading-relaxed">{previewText()}</pre>
+          </Show>
+        </div>
+      </Show>
+    </li>
+  );
+}
+
+function UnsupportedNotice() {
+  return (
+    <div class="max-w-xl mx-auto rounded-lg border border-amber-500/30 bg-amber-500/10 px-5 py-4 text-sm text-amber-200">
+      <p class="font-semibold mb-1">Daemon doesn't expose <code class="font-mono">files.log</code> yet.</p>
+      <p class="text-amber-300/80 leading-relaxed">
+        Upgrade the daemon to <span class="font-mono">py-1.9.0</span> or later. Once it answers{' '}
+        <code class="font-mono">/log</code>, this view will populate automatically.
+      </p>
+    </div>
+  );
+}
+
+function ErrorNotice(props: { error: string }) {
+  return (
+    <div class="max-w-xl mx-auto rounded-lg border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-200">
+      <p class="font-semibold mb-1">Couldn't load the diary index.</p>
+      <p class="text-red-300/80 font-mono text-[12px]">{props.error}</p>
+    </div>
+  );
+}
+
+function EmptyNotice() {
+  return (
+    <div class="max-w-xl mx-auto rounded-lg border border-gray-800/70 bg-gray-900/40 px-5 py-6 text-sm text-gray-400 text-center">
+      <p class="mb-1">No day-logs yet.</p>
+      <p class="text-[12px] text-gray-500">
+        New entries land in <code class="font-mono">.meshkore/log/&lt;YYYY-MM-DD&gt;.md</code> as the closure protocol runs.
+      </p>
+    </div>
+  );
+}
+
+function formatMtime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }

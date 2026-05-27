@@ -131,6 +131,16 @@ export interface CronTriggerResponse {
   status: string;
 }
 
+export interface LogEntry {
+  name: string;
+  date: string | null;
+  size: number | null;
+  mtime: string | null;
+}
+export interface LogListResponse {
+  entries: LogEntry[];
+}
+
 export interface DispatchBody {
   conv?: string;
   author?: string;
@@ -205,6 +215,32 @@ export class DaemonClient {
 
   async links(signal?: AbortSignal): Promise<Result<unknown>> {
     return this.request<unknown>('GET', '/links', undefined, signal);
+  }
+
+  /** py-1.9.0 — daily narrative log index. Returns descending-by-date
+   *  metadata for every `.meshkore/log/<date>.md` file. The Diary tab
+   *  uses this to drive its scroll-paged viewer. */
+  async logList(signal?: AbortSignal): Promise<Result<LogListResponse>> {
+    return this.request<LogListResponse>('GET', '/log', undefined, signal);
+  }
+
+  /** py-1.9.0 — fetch ONE day-log body as raw markdown. Returns the
+   *  raw text via the standard transport — the cockpit handles
+   *  rendering. */
+  async logFile(name: string, signal?: AbortSignal): Promise<{ ok: true; body: string } | { ok: false; status: number; error?: string }> {
+    const url = this.transport.httpBase + '/log/' + encodeURIComponent(name);
+    const token = this.transport.token;
+    try {
+      const r = await fetch(url, {
+        signal,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!r.ok) return { ok: false, status: r.status };
+      const body = await r.text();
+      return { ok: true, body };
+    } catch (e) {
+      return { ok: false, status: 0, error: e instanceof Error ? e.message : String(e) };
+    }
   }
 
   // ── Mutating endpoints ────────────────────────────────────────────
