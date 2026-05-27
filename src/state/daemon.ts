@@ -342,12 +342,34 @@ async function switchToPort(port: number): Promise<boolean> {
   const { clusterTokenKey, tokenForCluster } = await import('~/lib/tokens');
   const tokenKey = clusterTokenKey({ cluster_id: health.cluster_id ?? null, port });
   const token = tokenForCluster(tokenKey) || oldToken;
+
+  // D-TLS-02 — challenge-response identity check before we attach.
+  // When the daemon supports it AND we have a token for this cluster,
+  // require a passing HMAC handshake. A mismatch suggests an
+  // attacker-impersonated endpoint (DNS poisoned + valid TLS cert);
+  // we refuse to attach and surface a clear error.
+  const { verifyDaemonIdentity } = await import('~/lib/auth');
+  const verify = await verifyDaemonIdentity(daemonHttpBase(port), token, health.features ?? []);
+  console.log('[RAIL] switchToPort identity', { port, outcome: verify.kind });
+  if (verify.kind === 'mismatch') {
+    log.error('switchToPort REFUSED — auth challenge failed (possible MITM)', { port, cluster: health.cluster_id });
+    alert(
+      `Security warning — refused to attach to daemon on port ${port}.\n\n` +
+      `The daemon at https://daemon.meshkore.com:${port} did not pass the auth challenge.\n` +
+      `Either the token in this browser is stale, or someone is impersonating the daemon ` +
+      `(DNS poisoning on this network).\n\n` +
+      `Reset the token via the cockpit's Token modal, or run the daemon yourself on a ` +
+      `trusted network to clear this.`
+    );
+    return false;
+  }
+
   const { localTransport } = await import('~/lib/transport');
   const { DaemonClient } = await import('~/lib/daemon-client');
   const client = new DaemonClient(localTransport(port, token));
   attachClient(client, health);
   console.log('[RAIL] switchToPort attached new instance', { port, cluster_id: health.cluster_id ?? null });
-  log.info('switchToPort attached', { port, cluster_id: health.cluster_id ?? null });
+  log.info('switchToPort attached', { port, cluster_id: health.cluster_id ?? null, identity: verify.kind });
   return true;
 }
 
