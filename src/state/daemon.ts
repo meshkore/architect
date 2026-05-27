@@ -359,14 +359,27 @@ async function switchToPort(port: number): Promise<boolean> {
   console.log('[RAIL] switchToPort identity', { port, outcome: verify.kind });
   if (verify.kind === 'mismatch') {
     log.error('switchToPort REFUSED — auth challenge failed (possible MITM)', { port, cluster: health.cluster_id });
-    alert(
-      `Security warning — refused to attach to daemon on port ${port}.\n\n` +
-      `The daemon at https://daemon.meshkore.com:${port} did not pass the auth challenge.\n` +
-      `Either the token in this browser is stale, or someone is impersonating the daemon ` +
-      `(DNS poisoning on this network).\n\n` +
-      `Reset the token via the cockpit's Token modal, or run the daemon yourself on a ` +
-      `trusted network to clear this.`
-    );
+    // V86 — no native alert(). The cockpit's existing
+    // TokenUnlockModal handles auth-related interruptions; route the
+    // security failure through it so the operator sees a styled
+    // dialog inside the cockpit chrome rather than an OS popup. The
+    // modal explains the situation and lets them paste a fresh
+    // token, the only operator-side mitigation available.
+    try {
+      const { openTokenUnlockModal } = await import('~/components/modals/TokenUnlockModal');
+      openTokenUnlockModal({
+        project: { port, cluster_id: health.cluster_id ?? null, cluster_name: health.cluster_name ?? null },
+        reason:
+          'Auth challenge failed — the daemon at ' +
+          `https://daemon.meshkore.com:${port} couldn't prove ownership of the stored ` +
+          'token. Likely causes: stale local token, or someone impersonating the daemon on ' +
+          'this network. Paste a fresh token from .meshkore/credentials/architect-token, ' +
+          'or move to a trusted network.',
+        onUnlocked: () => { /* operator will retry from the rail */ },
+      });
+    } catch (e) {
+      log.warn('failed to open token modal after auth mismatch', e instanceof Error ? e.message : String(e));
+    }
     return false;
   }
 

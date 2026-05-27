@@ -132,3 +132,39 @@ export function DoneView(props: { newPort: number }): JSX.Element {
     </>
   );
 }
+
+/**
+ * V86 — Shown inside the auto-update modal when the flow can't
+ * complete (daemon refused, new daemon didn't bind in time, cockpit
+ * couldn't attach to the new port, etc.). Stays inside the same
+ * modal so the operator never sees a native browser alert.
+ *
+ * Offers three exits: Retry the whole flow, fall back to the manual
+ * / agent paths from the chooser modal, or dismiss to leave the
+ * project read-only.
+ */
+export function ErrorView(props: {
+  reason: string;
+  newPort?: number;
+  onRetry: () => void;
+  onFallback: () => void;
+  onDismiss: () => void;
+}): JSX.Element {
+  return (
+    <>
+      <Head tone="amber" icon="warn"
+        title={<>Auto-update couldn't finish</>}
+        sub={<>{cluster()} stays on {running()} until the next attempt</>} />
+      <p class="text-[12.5px] text-gray-300 mb-3 leading-relaxed">{props.reason}</p>
+      <Show when={props.newPort}>
+        <pre class="text-[11px] font-mono text-emerald-300/90 bg-gray-950 border border-gray-800 rounded p-2 mb-3 whitespace-pre-wrap break-all">cd &lt;repo&gt; && python3 .meshkore/scripts/daemon.py --port {props.newPort}</pre>
+      </Show>
+      <div class="flex flex-col gap-2">
+        <button type="button" class={PRI} onClick={props.onRetry}>Retry the auto-update</button>
+        <button type="button" class={SEC} onClick={props.onFallback}>Use manual / agent options instead</button>
+        <button type="button" class={GHO} onClick={props.onDismiss}>Dismiss — leave it locked</button>
+      </div>
+      <p class="text-[10px] text-gray-600 mt-3">Retrying re-runs <code class="font-mono">/self-update</code> from scratch; safe to repeat.</p>
+    </>
+  );
+}

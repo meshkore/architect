@@ -84,15 +84,23 @@ export async function stopAllAgents(clusterKey: string): Promise<{ cancelled: nu
   };
 }
 
-export async function switchProject(port: number, key: string): Promise<void> {
+export async function switchProject(port: number, key: string): Promise<boolean> {
   console.log('[RAIL] switchProject called', { port, key });
   projectsStore.clearNewBadge(key);
   try { localStorage.setItem('meshcore-last-port', String(port)); } catch { /* quota */ }
   const ok = await daemonStore.switchToPort(port);
   console.log('[RAIL] switchProject result', { port, key, ok });
   if (!ok) {
-    alert(`No daemon answering on port ${port}.\n\nThe project is stopped or the port changed. Start it with \`meshcore start\` in the repo folder, then click again.`);
+    // V86 — no more native alert(). The rail's row visually reflects
+    // the failed switch (stays on its current active project, no
+    // green-bar move on the target). Diagnostics go to console; a
+    // proper in-rail toast is queued — for now we just refuse silently
+    // since the common case (clicking a stopped row) is self-evident
+    // visually. AutoUpdateFlow and other callers can await this
+    // boolean and surface their own UI when it matters.
+    console.warn('[RAIL] switch failed — no daemon on target port', { port });
   }
+  return ok;
 }
 
 function forgetProjectImmediate(target: { cluster_id?: string | null; port: number }, onAfter: () => void): void {
@@ -167,7 +175,15 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
     setMode('idle');
     const res = await stopAllAgents(r().key);
     if (res.failed > 0) {
-      alert(`Stopped ${res.cancelled} agent(s); ${res.failed} cancellation(s) failed. The daemon may have already finished those turns.`);
+      // V86 — no native alert(). The chatStore.clusterActivity will
+      // reflect the new workingConvs count, and the row's bouncing
+      // slug + stop button will disappear for the cancelled convs.
+      // Partial failures are logged for the operator's console.
+      console.warn('[RAIL] stop-all partial', {
+        cancelled: res.cancelled,
+        failed: res.failed,
+        cluster: r().key,
+      });
     }
   };
 

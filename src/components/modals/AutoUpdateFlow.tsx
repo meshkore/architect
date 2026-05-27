@@ -6,18 +6,18 @@
 import { JSX, Show, Switch, Match, createSignal } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { daemonStore } from '~/state/daemon';
-import { activeProject } from '~/state/projects';
-import { switchProject } from '~/components/ProjectsRailRow';
 import { discoverProjects } from '~/components/ProjectsRail';
 import { openDaemonOutdatedModal } from './DaemonOutdatedModal';
-import { StepView, ResumeView, BusyView, DoneView } from './auto-update/views';
+import { StepView, ResumeView, BusyView, DoneView, ErrorView } from './auto-update/views';
+import { daemonHttpBase } from '~/lib/transport';
 import { log } from '~/lib/log';
 
 type Phase =
   | { kind: 'step'; idx: number; sub?: string }
   | { kind: 'busy'; convs: string[] }
   | { kind: 'resume' }
-  | { kind: 'done'; newPort: number };
+  | { kind: 'done'; newPort: number }
+  | { kind: 'error'; reason: string; newPort?: number };
 
 const [isOpen, setIsOpen] = createSignal(false);
 const [phase, setPhase] = createSignal<Phase>({ kind: 'step', idx: 0 });
@@ -45,6 +45,26 @@ async function sleep(ms: number): Promise<void> {
   }
 }
 
+/** Poll /health on the new daemon until it answers or we give up.
+ *  Each retry is ~600 ms; total budget ~12 s. Tolerates the brief
+ *  window between spawn() and the new daemon binding its port +
+ *  loading TLS. Returns the parsed health body on success. */
+async function awaitNewDaemon(port: number, runId: number): Promise<unknown | null> {
+  const url = `${daemonHttpBase(port)}/health`;
+  for (let i = 0; i < 20; i += 1) {
+    if (runId !== runToken || cancelled) return null;
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(800) });
+      if (r.ok) {
+        const data = await r.json().catch(() => null);
+        if (data) return data;
+      }
+    } catch { /* not up yet — keep polling */ }
+    await sleep(600);
+  }
+  return null;
+}
+
 async function runFlow(): Promise<void> {
   const myRun = ++runToken;
   cancelled = false;
@@ -63,12 +83,33 @@ async function runFlow(): Promise<void> {
       setPhase({ kind: 'busy', convs });
       return;
     }
-    if (!r.ok) { log.warn('[auto-update] /self-update failed', r.status, r.body); fallback(); return; }
+    if (!r.ok) {
+      log.warn('[auto-update] /self-update failed', r.status, r.body);
+      setPhase({ kind: 'error', reason: `Daemon refused the update: ${r.status} ${r.body.slice(0, 200)}` });
+      return;
+    }
     const { new_port, new_pid } = r.data;
     setPhase({ kind: 'step', idx: 1, sub: 'spawn pid ' + new_pid });
     await sleep(400); if (myRun !== runToken || cancelled) return;
     setPhase({ kind: 'step', idx: 2, sub: 'new port :' + new_port });
-    await sleep(3500); if (myRun !== runToken || cancelled) return;
+    // V86 — wait until the new daemon actually answers /health on
+    // the new port. The previous fixed 3.5 s sleep was a guess;
+    // production has shown the new process can take longer to bind +
+    // load TLS, and the cockpit ended up alert()-ing "No daemon on
+    // port N" right after declaring "all done".
+    const newHealth = await awaitNewDaemon(new_port, myRun);
+    if (myRun !== runToken || cancelled) return;
+    if (!newHealth) {
+      setPhase({
+        kind: 'error',
+        newPort: new_port,
+        reason:
+          `The new daemon spawned (pid ${new_pid}) on port ${new_port} but didn't answer ` +
+          `/health after ~12 s. It may still be loading; retry, or open a terminal in the ` +
+          `repo and run \`python3 .meshkore/scripts/daemon.py --port ${new_port}\` manually.`,
+      });
+      return;
+    }
     setPhase({ kind: 'step', idx: 3 });
     try { await discoverProjects({ fullScan: true }); } catch { /* swallow */ }
     if (myRun !== runToken || cancelled) return;
@@ -76,13 +117,31 @@ async function runFlow(): Promise<void> {
     await sleep(500); if (myRun !== runToken || cancelled) return;
     setPhase({ kind: 'done', newPort: new_port });
     await sleep(400); if (myRun !== runToken || cancelled) return;
-    const p = activeProject();
-    try { switchProject(new_port, p?.cluster_id ?? `port:${new_port}`); }
-    catch (err) { log.warn('[auto-update] switchProject failed', err); window.location.reload(); }
+    // Switch the cockpit to the new daemon. Await the result so we
+    // surface failures INSIDE the modal instead of an alert().
+    const ok = await daemonStore.switchToPort(new_port);
+    if (myRun !== runToken || cancelled) return;
+    if (!ok) {
+      setPhase({
+        kind: 'error',
+        newPort: new_port,
+        reason:
+          `The new daemon answered /health but the cockpit couldn't attach to it. ` +
+          `This is usually a TLS handshake failure — make sure the new daemon picked ` +
+          `up the tls/ bundle. Click Retry to try again, or use the manual options.`,
+      });
+      return;
+    }
+    // Attach succeeded — close the modal. daemonStore.outdated will
+    // flip back to false on its own; Cockpit re-mounts the columns.
+    setIsOpen(false);
   } catch (err) {
     if (myRun !== runToken) return;
     log.warn('[auto-update] flow threw', err);
-    fallback();
+    setPhase({
+      kind: 'error',
+      reason: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -119,6 +178,9 @@ export function AutoUpdateFlowHost(): JSX.Element {
               </Match>
               <Match when={phase().kind === 'done' && (phase() as Extract<Phase, { kind: 'done' }>)}>
                 {(p) => <DoneView newPort={p().newPort} />}
+              </Match>
+              <Match when={phase().kind === 'error' && (phase() as Extract<Phase, { kind: 'error' }>)}>
+                {(p) => <ErrorView reason={p().reason} newPort={p().newPort} onRetry={() => void runFlow()} onFallback={fallback} onDismiss={dismiss} />}
               </Match>
             </Switch>
           </div>
