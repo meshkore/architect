@@ -10,6 +10,7 @@
 
 import { Show } from 'solid-js';
 import type { ConvMeta, AgentStatusKind } from '~/state/chat';
+import { agentTypeInfo } from '~/lib/agent-types';
 
 export interface AgentCardProps {
   conv: string;
@@ -31,6 +32,11 @@ export interface AgentCardProps {
 export default function AgentCard(props: AgentCardProps) {
   const isRemote = () => props.meta.location?.type === 'remote';
   const title = () => props.meta.title || props.conv;
+  // V86 — the agent-type chip used to live in the chat header. Moved
+  // here so the rail card is the canonical place to learn "what kind
+  // of agent this is", and the chat header stays compact for the
+  // name + actions.
+  const typeInfo = () => agentTypeInfo(props.meta.type);
 
   return (
     <button
@@ -69,16 +75,27 @@ export default function AgentCard(props: AgentCardProps) {
     >
       <span class="flex items-center gap-1.5 text-[10px] font-mono">
         <span
-          class={`px-1.5 py-0.5 rounded text-gray-200 ${props.status === 'working' ? 'animate-pulse-soft' : ''}`}
+          class={`px-1.5 py-0.5 rounded text-gray-200 flex-shrink-0 ${props.status === 'working' ? 'animate-pulse-soft' : ''}`}
           /* dynamic: border tint derived from props.stripe */
           style={{ background: 'rgba(17,24,39,0.7)', border: `1px solid ${props.stripe}55` }}
         >
           {props.meta.agentId}
         </span>
-        <span class="text-gray-500 truncate">{props.meta.model || 'auto'}</span>
+        <span
+          class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] min-w-0 truncate"
+          style={{
+            color: typeInfo().color,
+            'border': `1px solid ${typeInfo().color}44`,
+            background: `${typeInfo().color}10`,
+          }}
+          title={`Agent type: ${typeInfo().label}`}
+        >
+          <span aria-hidden="true">{typeInfo().emoji}</span>
+          <span class="truncate">{typeInfo().label}</span>
+        </span>
         <span
           class={[
-            'ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px]',
+            'ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] flex-shrink-0',
             isRemote()
               ? 'text-blue-300 border-blue-300/35'
               : 'text-gray-400 border-gray-500/30',
@@ -90,6 +107,9 @@ export default function AgentCard(props: AgentCardProps) {
       </span>
       <span class={`text-[12px] leading-tight truncate ${props.active ? 'text-gray-100' : 'text-gray-300'}`}>
         {title()}
+        <Show when={props.meta.model && props.meta.model !== 'auto'}>
+          <span class="text-gray-600 font-mono text-[10px]"> · {props.meta.model}</span>
+        </Show>
       </span>
       <span class="text-[10px] font-mono text-gray-500 flex items-center gap-1.5">
         <Show

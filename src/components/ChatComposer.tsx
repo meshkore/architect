@@ -130,6 +130,11 @@ export default function ChatComposer(props: {
           )}</For>
         </div>
       </Show>
+      {/* V86 — composer row aligned. Both buttons sit on the bottom
+          edge of the textarea, share the same h-9 (36 px) height, and
+          stay horizontally aligned regardless of how tall the textarea
+          grows. Attach is a 36×36 square (SVG paperclip matching the
+          rail's icon family); Send is wider to fit its label. */}
       <div class="flex gap-2 items-end">
         <textarea
           ref={taEl} value={draft()} rows="2" disabled={sending()}
@@ -140,13 +145,17 @@ export default function ChatComposer(props: {
         />
         <input ref={fileEl} type="file" multiple accept={ACCEPT} class="hidden"
           onChange={(e) => { const fs = e.currentTarget.files; if (fs) for (let i = 0; i < fs.length; i += 1) addFile(fs[i]!); e.currentTarget.value = ''; }} />
-        <div class="flex flex-col gap-1.5">
-          <button type="button" title="Attach images or docs" onClick={() => fileEl?.click()}
-            class="px-2 py-2 rounded-md border border-gray-800 hover:border-gray-600 text-gray-400 hover:text-gray-200 text-xs">📎</button>
-          <button type="button" title="Send (Cmd/Ctrl+Enter)" onClick={() => void send()}
-            disabled={sending() || (!draft().trim() && imgs().length === 0 && docs().length === 0)}
-            class="px-3 py-2 rounded-md bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-semibold text-xs transition-colors disabled:opacity-60 disabled:cursor-not-allowed">{sending() ? '…' : 'Send'}</button>
-        </div>
+        <button type="button" title="Attach images or docs" onClick={() => fileEl?.click()}
+          class="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-800 hover:border-gray-600 text-gray-400 hover:text-gray-200 transition-colors flex-shrink-0">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+          </svg>
+        </button>
+        <button type="button" title="Send (Cmd/Ctrl+Enter)" onClick={() => void send()}
+          disabled={sending() || (!draft().trim() && imgs().length === 0 && docs().length === 0)}
+          class="inline-flex items-center justify-center h-9 px-4 rounded-md bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-semibold text-xs transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex-shrink-0">
+          {sending() ? '…' : 'Send'}
+        </button>
       </div>
     </div>
   );
