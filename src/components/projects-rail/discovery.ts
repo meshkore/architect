@@ -1,5 +1,6 @@
 import { batch, createSignal } from 'solid-js';
 import { projectsStore } from '~/state/projects';
+import { daemonHttpBase } from '~/lib/transport';
 import * as kp from '~/lib/known-projects';
 import { log } from '~/lib/log';
 
@@ -14,11 +15,12 @@ export const [liveClusters, setLiveClusters] = createSignal<Map<string, LiveProb
 export const [scanning, setScanning] = createSignal(false);
 
 async function probe(port: number): Promise<LiveProbe | null> {
+  const base = daemonHttpBase(port);
   try {
-    const r = await fetch(`http://localhost:${port}/health`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    const r = await fetch(`${base}/health`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
     if (!r.ok) return null;
     const data = await r.json().catch(() => ({})) as { cluster_id?: string; cluster_name?: string };
-    return { port, base: `http://localhost:${port}`, cluster_id: data.cluster_id ?? null, cluster_name: data.cluster_name ?? null };
+    return { port, base, cluster_id: data.cluster_id ?? null, cluster_name: data.cluster_name ?? null };
   } catch { return null; }
 }
 

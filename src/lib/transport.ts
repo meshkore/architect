@@ -32,16 +32,57 @@ export interface TransportConfig {
 export const DEFAULT_DAEMON_PORTS = [5570, 5571, 5572, 5573, 5574];
 
 /**
+ * V85e — Loopback DNS endpoint. `daemon.meshkore.com` resolves to
+ * 127.0.0.1 via a public CF DNS A record. When the daemon serves
+ * TLS for this name on its port, the cockpit can talk to it from
+ * any HTTPS origin without mixed-content or Local Network Access
+ * Issues.
+ *
+ * Switching is feature-flagged via `localStorage['mc-daemon-via-tls']`
+ * (or the `?tls=1` query string). Default OFF until the daemon ships
+ * TLS support — flipping the flag without a TLS-serving daemon would
+ * just trade mixed-content errors for TLS-handshake errors.
+ *
+ * About modal shows the current mode so the operator can confirm.
+ */
+export const LOOPBACK_HOSTNAME = 'daemon.meshkore.com';
+
+export function useTlsDaemon(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('tls') === '1') return true;
+    if (url.searchParams.get('tls') === '0') return false;
+    return localStorage.getItem('mc-daemon-via-tls') === '1';
+  } catch { return false; }
+}
+
+/** Compose the HTTP base URL for a daemon on a given port. */
+export function daemonHttpBase(port: number): string {
+  return useTlsDaemon()
+    ? `https://${LOOPBACK_HOSTNAME}:${port}`
+    : `http://localhost:${port}`;
+}
+
+/** Compose the WebSocket base URL for a daemon on a given port. */
+export function daemonWsBase(port: number): string {
+  return useTlsDaemon()
+    ? `wss://${LOOPBACK_HOSTNAME}:${port}`
+    : `ws://localhost:${port}`;
+}
+
+/**
  * Build a LOCAL transport for a given port. No token resolution here — the
  * caller injects it (from localStorage, prompt, or auto-discovery).
  */
 export function localTransport(port: number, token: string): TransportConfig {
+  const tls = useTlsDaemon();
   return {
     kind: 'local',
-    httpBase: `http://localhost:${port}`,
-    wsBase: `ws://localhost:${port}`,
+    httpBase: daemonHttpBase(port),
+    wsBase: daemonWsBase(port),
     token,
-    label: `localhost:${port}`,
+    label: tls ? `${LOOPBACK_HOSTNAME}:${port}` : `localhost:${port}`,
   };
 }
 

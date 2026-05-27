@@ -5,15 +5,22 @@ import { daemonStore } from '~/state/daemon';
 import { activeProject } from '~/state/projects';
 import { uiStore, type Zone } from '~/state/ui';
 import { mcModal } from '~/lib/modal';
+import { useTlsDaemon, LOOPBACK_HOSTNAME } from '~/lib/transport';
 
 const BUILD_VERSION = (import.meta.env.VITE_BUILD_VERSION as string | undefined) ?? 'dev';
 const BUILD_COMMIT  = (import.meta.env.VITE_BUILD_COMMIT  as string | undefined) ?? '';
 const BUILD_DATE    = (import.meta.env.VITE_BUILD_DATE    as string | undefined) ?? '';
 
+function toggleTlsAndReload(next: boolean): void {
+  try { localStorage.setItem('mc-daemon-via-tls', next ? '1' : '0'); } catch { /* quota */ }
+  window.location.reload();
+}
+
 function openAboutModal(): void {
   const port = daemonStore.state.health?.port;
   const cluster = daemonStore.state.health?.cluster_name ?? daemonStore.state.health?.cluster_id ?? '—';
   const daemonV = daemonStore.state.health?.version ?? '—';
+  const tls = useTlsDaemon();
   void mcModal({
     title: 'MeshKore Architect',
     subtitle: 'Operator cockpit for MeshKore clusters',
@@ -35,9 +42,25 @@ function openAboutModal(): void {
           <span class="text-gray-200">{cluster}</span>
           <span class="font-mono text-[10px] text-gray-500 uppercase tracking-wider self-center">Daemon</span>
           <span class="text-gray-200 font-mono text-[11px]">{daemonV}</span>
-          <span class="font-mono text-[10px] text-gray-500 uppercase tracking-wider self-center">Port</span>
-          <span class="text-gray-200 font-mono text-[11px]">{port ? `localhost:${port}` : '—'}</span>
+          <span class="font-mono text-[10px] text-gray-500 uppercase tracking-wider self-center">Endpoint</span>
+          <span class="text-gray-200 font-mono text-[11px]">
+            {port ? `${tls ? `https://${LOOPBACK_HOSTNAME}` : 'http://localhost'}:${port}` : '—'}
+          </span>
+          <span class="font-mono text-[10px] text-gray-500 uppercase tracking-wider self-center">TLS mode</span>
+          <div class="flex items-center gap-2">
+            <span class={`font-mono text-[11px] ${tls ? 'text-emerald-400' : 'text-gray-400'}`}>{tls ? 'ON · daemon.meshkore.com' : 'off · localhost'}</span>
+            <button type="button"
+              class="font-mono text-[9px] uppercase tracking-wider px-2 py-0.5 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500"
+              onClick={() => toggleTlsAndReload(!tls)}>
+              {tls ? 'switch off' : 'switch on'}
+            </button>
+          </div>
         </div>
+        <Show when={tls}>
+          <div class="text-[11px] text-amber-400/80 leading-relaxed">
+            <strong>Heads-up:</strong> TLS mode points the cockpit at <code class="font-mono">https://{LOOPBACK_HOSTNAME}:&lt;port&gt;</code>. The daemon must serve TLS with a cert for that name. Until that lands in the daemon (task <code class="font-mono">local-tls-subdomain</code>) you'll see TLS-handshake failures instead of mixed-content errors.
+          </div>
+        </Show>
         <div class="h-px bg-gray-700/30" />
         <div class="text-[12.5px] text-gray-300 leading-relaxed">
           Web cockpit for any MeshKore cluster. Connects to your local Python daemon — your roadmap, docs and credentials stay on your machine.

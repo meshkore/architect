@@ -16,6 +16,7 @@ import { DaemonClient, type HealthResponse } from './daemon-client';
 import {
   DEFAULT_DAEMON_PORTS,
   cloudTransport,
+  daemonHttpBase,
   localTransport,
   modeFromUrl,
   type TransportConfig,
@@ -63,7 +64,7 @@ export async function probeLocal(timeoutMs = 1200): Promise<{ port: number; heal
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs);
     try {
-      const res = await fetch(`http://localhost:${port}/health`, { signal: ctl.signal });
+      const res = await fetch(`${daemonHttpBase(port)}/health`, { signal: ctl.signal });
       clearTimeout(t);
       if (res.ok) {
         const health = await res.json() as HealthResponse;

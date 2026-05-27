@@ -321,7 +321,8 @@ async function switchToPort(port: number): Promise<boolean> {
 
   // New project — probe /health, build a client, attach.
   const oldToken = state.client?.transport.token ?? '';
-  const probeUrl = `http://localhost:${port}/health`;
+  const { daemonHttpBase } = await import('~/lib/transport');
+  const probeUrl = `${daemonHttpBase(port)}/health`;
   let health: HealthResponse;
   try {
     console.log('[RAIL] switchToPort probing', probeUrl);
