@@ -1,6 +1,7 @@
 import { createMemo } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { projectsStore } from '~/state/projects';
+import { chatStore } from '~/state/chat';
 import * as kp from '~/lib/known-projects';
 import type { RailRowData } from '~/components/ProjectsRailRow';
 import { livePorts, liveClusters } from './discovery';
@@ -56,15 +57,26 @@ export const rows = createMemo<RailRowData[]>(() => {
     const active =
       (k.cluster_id && activeClusterId && k.cluster_id === activeClusterId) ||
       (!k.cluster_id && activePort !== null && port === activePort);
+    const rowKey = k.cluster_id ?? `port:${port}`;
+    // MP5 — read activity for this cluster. `working` lights the
+    // bouncing slug whenever any conv on this cluster is mid-stream
+    // (active or inactive). `hasUnread` shows a small dot when the
+    // cluster received an event after the last bindCluster. Active
+    // cluster never shows unread (the operator IS looking at it).
+    const activity = chatStore.state.clusterActivity[rowKey];
+    const working = !!(activity && activity.workingConvs.length > 0);
+    const hasUnread = !!(activity && !active && activity.lastEventAt > activity.lastReadAt);
     result.push({
-      key: k.cluster_id ?? `port:${port}`,
+      key: rowKey,
       port, base: liveProbe?.base ?? k.base,
       cluster_id: k.cluster_id ?? null,
       cluster_name: k.cluster_name ?? null,
       display, initials: initialsFor(display),
       live: isLive,
       active: !!active,
-      isNew: newIds.has(k.cluster_id ?? `port:${port}`),
+      working,
+      hasUnread,
+      isNew: newIds.has(rowKey),
     });
   }
   result.sort((a, b) => a.port - b.port);

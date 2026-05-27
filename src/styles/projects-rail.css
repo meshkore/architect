@@ -418,6 +418,32 @@ body.col-reordering .projects-rail-resize {
   text-shadow: 0 0 8px rgba(52, 211, 153, 0.8);
 }
 
+/* ── MP5 — unread dot for inactive rows with background activity ─── */
+/* Small amber dot in the corner of the row when the cluster received
+   events since the operator last viewed it. Suppressed on the active
+   project (it's already the one being watched) and when the louder
+   `is-new` pill is showing. */
+.proj-row-wrap.has-unread:not(.is-new)::after {
+  content: '';
+  position: absolute;
+  top: 8px; right: 8px;
+  width: 7px; height: 7px;
+  border-radius: 999px;
+  background: #fbbf24;
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.65);
+  pointer-events: none;
+  animation: unread-pulse 1.8s ease-in-out infinite;
+  z-index: 1;
+}
+@keyframes unread-pulse {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 1; box-shadow: 0 0 10px rgba(251, 191, 36, 0.85); }
+}
+.projects-rail[data-mode="short"] .proj-row-wrap.has-unread:not(.is-new)::after {
+  top: 3px; right: 3px;
+  width: 6px; height: 6px;
+}
+
 /* ── V83 — inline delete confirmation strip ──────────────────────── */
 /* Appears as a second row below the project name when the operator
    clicks the delete (forget) action. Replaces the prior browser

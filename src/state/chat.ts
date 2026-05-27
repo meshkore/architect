@@ -61,6 +61,19 @@ export interface ChatMsg {
   _placeholder?: boolean;
 }
 
+/** MP5 — per-cluster activity indicators surfaced on the projects
+ *  rail. Tracked GLOBALLY (across all clusters), not swapped on
+ *  bindCluster, because we want to know "B is working" while we're
+ *  on A. */
+export interface ClusterActivity {
+  /** Wall-clock ts of the last event received on this cluster's WS. */
+  lastEventAt: number;
+  /** Wall-clock ts when the cockpit last bound to this cluster. */
+  lastReadAt: number;
+  /** Convs currently streaming an assistant reply on this cluster. */
+  workingConvs: string[];
+}
+
 export interface ChatStoreState {
   convMap: Record<string, ChatMsg[]>;
   activeConv: string | null;
@@ -68,6 +81,8 @@ export interface ChatStoreState {
   archivedConvs: Record<string, true>;
   convMeta: Record<string, ConvMeta>;
   convTitleOverrides: Record<string, string>;
+  /** MP5 — global per-cluster activity. NOT swapped on bindCluster. */
+  clusterActivity: Record<string, ClusterActivity>;
 }
 
 const initial: ChatStoreState = {
@@ -77,6 +92,7 @@ const initial: ChatStoreState = {
   archivedConvs: {},
   convMeta: {},
   convTitleOverrides: {},
+  clusterActivity: {},
 };
 
 const [state, setState] = createStore<ChatStoreState>(initial);
@@ -185,6 +201,17 @@ function bindCluster(clusterId: string | null): void {
   // boot when prevId is null).
   if (prevId) clusterSnapshots.set(prevId, snapshotCurrent());
   setActiveClusterId(clusterId);
+  // MP5 — stamp lastReadAt so the rail's unread dot clears when the
+  // operator visits this cluster. We keep lastEventAt untouched so
+  // the comparison "did anything happen since I last looked" stays
+  // meaningful.
+  if (clusterId) {
+    setState('clusterActivity', clusterId, (prev) => ({
+      lastEventAt: prev?.lastEventAt ?? 0,
+      lastReadAt: Date.now(),
+      workingConvs: prev?.workingConvs ?? [],
+    }));
+  }
   // Restore the new cluster's slice if we've seen it this session.
   const cached = clusterId ? clusterSnapshots.get(clusterId) : null;
   if (cached) {
@@ -204,9 +231,32 @@ function bindCluster(clusterId: string | null): void {
   loadConvMeta();
 }
 
+/** MP5 — bump a cluster's activity counters from event-bus dispatch. */
+function recordActivity(clusterKey: string, ev: DaemonEvent): void {
+  setState('clusterActivity', clusterKey, (prev) => {
+    const working = new Set(prev?.workingConvs ?? []);
+    const conv = typeof ev.conv === 'string' ? ev.conv : null;
+    if (conv) {
+      if (ev.type === 'chat.assistant.delta') working.add(conv);
+      else if (ev.type === 'chat.assistant.final' || ev.type === 'chat.cancelled') working.delete(conv);
+    }
+    return {
+      lastEventAt: Date.now(),
+      lastReadAt: prev?.lastReadAt ?? 0,
+      workingConvs: [...working],
+    };
+  });
+}
+
 /** Wipe the in-memory slice for a cluster (used by Forget). */
 function clearClusterChat(clusterId: string): void {
   clusterSnapshots.delete(clusterId);
+  // MP5 — also clear activity tracking for this cluster.
+  setState('clusterActivity', (prev) => {
+    const next = { ...prev };
+    delete next[clusterId];
+    return next;
+  });
   if (activeClusterId() === clusterId) {
     setState({
       convMap: {},
@@ -231,6 +281,10 @@ function clearClusterChat(clusterId: string): void {
  * which uses setState so the UI updates in real time.
  */
 function ingestEventForCluster(clusterKey: string, ev: DaemonEvent): void {
+  // MP5 — always record activity (regardless of active/inactive)
+  // so the rail's working slug and unread dot react to events on
+  // background daemons too.
+  recordActivity(clusterKey, ev);
   if (activeClusterId() === clusterKey) {
     ingestEvent(ev);
     return;

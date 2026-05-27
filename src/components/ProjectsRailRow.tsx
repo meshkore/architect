@@ -38,6 +38,9 @@ export type RailRowData = {
   active: boolean;
   isNew: boolean;
   working?: boolean;
+  /** MP5 — true when this (inactive) cluster received events since the
+   *  operator last viewed it. Drives the small amber dot on the row. */
+  hasUnread?: boolean;
   pendingReview?: boolean;
 };
 
@@ -97,6 +100,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
     const cls = ['proj-row-wrap'];
     if (!r().live) cls.push('is-stopped');
     if (r().isNew) cls.push('is-new');
+    if (r().hasUnread) cls.push('has-unread');
     return cls.join(' ');
   };
 
