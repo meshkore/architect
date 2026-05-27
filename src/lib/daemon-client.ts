@@ -141,6 +141,29 @@ export interface LogListResponse {
   entries: LogEntry[];
 }
 
+export interface ProtocolSummary {
+  id: string;
+  title: string;
+  scope?: string;
+  status?: string;
+  priority?: string;
+  owner?: string;
+  updated?: string;
+  tags?: string[];
+  file?: string;
+  log_count?: number;
+}
+export interface ProtocolListResponse {
+  protocols: ProtocolSummary[];
+}
+export interface ProtocolDetail {
+  id: string;
+  title: string;
+  frontmatter: Record<string, unknown>;
+  body: string;
+  file?: string;
+}
+
 export interface DispatchBody {
   conv?: string;
   author?: string;
@@ -211,6 +234,12 @@ export class DaemonClient {
 
   async protocols(signal?: AbortSignal): Promise<Result<unknown>> {
     return this.request<unknown>('GET', '/protocols', undefined, signal);
+  }
+
+  /** V86j — Single protocol body + frontmatter. The daemon serves
+   *  it at `/protocols/<id>` (id is the P<N> slug). */
+  async protocolDetail(id: string, signal?: AbortSignal): Promise<Result<ProtocolDetail>> {
+    return this.request<ProtocolDetail>('GET', `/protocols/${encodeURIComponent(id)}`, undefined, signal);
   }
 
   async links(signal?: AbortSignal): Promise<Result<unknown>> {
