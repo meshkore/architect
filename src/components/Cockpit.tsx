@@ -82,67 +82,116 @@ export default function Cockpit(props: {
         <div class="flex-1 flex min-h-0">
           <ProjectsRail />
           <main class="flex-1 min-h-0 relative">
-            <section class="tab-panel three-col">
-              <aside class="nav-col col">
-                <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
-              </aside>
+            {/* V86 — while the active daemon is outdated, blank out the
+                three-col body so the operator doesn't see (and can't
+                act on) stale data from the version they're being asked
+                to upgrade away from. Header + ProjectsRail stay live so
+                they can keep working in other projects. The neutral
+                placeholder reads through; the DaemonOutdatedModal sits
+                on top with the upgrade actions. The bus's
+                `notifyActiveChanged` will hydrate fresh data
+                automatically once the upgraded daemon checks in. */}
+            <Show
+              when={!daemonStore.state.outdated}
+              fallback={<DaemonPausedPanel />}
+            >
+              <section class="tab-panel three-col">
+                <aside class="nav-col col">
+                  <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
+                </aside>
 
-              <Splitter resize="col-nav" />
+                <Splitter resize="col-nav" />
 
-              <aside class="left-col col">
-                <div class="subtab-bar">
-                  <SubTab id="roadmap"  label="Roadmap"  active={tab() === 'roadmap'}  onSelect={setTab} global />
-                  <span class="subtab-divider" aria-hidden="true">›</span>
-                  <SubTab id="tasks"    label="Tasks"    active={tab() === 'tasks'}    onSelect={setTab} />
-                  <SubTab id="context"  label="Context"  active={tab() === 'context'}  onSelect={setTab} />
-                  <SubTab id="diagrams" label="Diagrams" active={tab() === 'diagrams'} onSelect={setTab} />
-                  <div class="flex-1" />
-                  <div class="flex items-center gap-1 pr-2 self-center">
-                    <button type="button" title="New task" class="text-gray-500 hover:text-emerald-400 transition px-1 py-0.5 rounded hover:bg-emerald-500/10">
-                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path d="M12 4v16M4 12h16" /></svg>
-                    </button>
-                    <button type="button" title="Reload state" class="text-gray-500 hover:text-emerald-400 transition px-1 py-0.5 rounded hover:bg-emerald-500/10"
-                      onClick={() => {
-                        const c = daemonStore.state.client;
-                        const id = daemonStore.state.activeId;
-                        if (c && id) void serverStore.refreshNow(c, id);
-                      }}>
-                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 4v6h6M20 20v-6h-6M5 13a8 8 0 1014.5-3.5M19 11a8 8 0 00-14.5 3.5" /></svg>
-                    </button>
+                <aside class="left-col col">
+                  <div class="subtab-bar">
+                    <SubTab id="roadmap"  label="Roadmap"  active={tab() === 'roadmap'}  onSelect={setTab} global />
+                    <span class="subtab-divider" aria-hidden="true">›</span>
+                    <SubTab id="tasks"    label="Tasks"    active={tab() === 'tasks'}    onSelect={setTab} />
+                    <SubTab id="context"  label="Context"  active={tab() === 'context'}  onSelect={setTab} />
+                    <SubTab id="diagrams" label="Diagrams" active={tab() === 'diagrams'} onSelect={setTab} />
+                    <div class="flex-1" />
+                    <div class="flex items-center gap-1 pr-2 self-center">
+                      <button type="button" title="New task" class="text-gray-500 hover:text-emerald-400 transition px-1 py-0.5 rounded hover:bg-emerald-500/10">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path d="M12 4v16M4 12h16" /></svg>
+                      </button>
+                      <button type="button" title="Reload state" class="text-gray-500 hover:text-emerald-400 transition px-1 py-0.5 rounded hover:bg-emerald-500/10"
+                        onClick={() => {
+                          const c = daemonStore.state.client;
+                          const id = daemonStore.state.activeId;
+                          if (c && id) void serverStore.refreshNow(c, id);
+                        }}>
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 4v6h6M20 20v-6h-6M5 13a8 8 0 1014.5-3.5M19 11a8 8 0 00-14.5 3.5" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <Switch>
+                    <Match when={tab() === 'roadmap'}>
+                      <div class="ws-panel"><InitiativesPanel /></div>
+                    </Match>
+                    <Match when={tab() === 'tasks'}>
+                      <div class="ws-panel"><RoadmapList moduleId={props.selectedModule} /></div>
+                    </Match>
+                    <Match when={tab() === 'context'}>
+                      <div class="ws-panel"><ContextPanel moduleId={props.selectedModule} /></div>
+                    </Match>
+                    <Match when={tab() === 'diagrams'}>
+                      <div class="ws-panel"><DiagramsPanel moduleId={props.selectedModule} /></div>
+                    </Match>
+                  </Switch>
+                </aside>
+
+                <Splitter resize="col-chat" />
+
+                <div class="center-col col" id="chat-col">
+                  <div class="chat-body flex-1 flex min-h-0">
+                    <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />
+                    <Splitter resize="chat-rail" title="Drag to resize agent rail" />
+                    <div class="chat-main flex-1 flex flex-col min-h-0">
+                      <ChatPanel />
+                    </div>
                   </div>
                 </div>
-                <Switch>
-                  <Match when={tab() === 'roadmap'}>
-                    <div class="ws-panel"><InitiativesPanel /></div>
-                  </Match>
-                  <Match when={tab() === 'tasks'}>
-                    <div class="ws-panel"><RoadmapList moduleId={props.selectedModule} /></div>
-                  </Match>
-                  <Match when={tab() === 'context'}>
-                    <div class="ws-panel"><ContextPanel moduleId={props.selectedModule} /></div>
-                  </Match>
-                  <Match when={tab() === 'diagrams'}>
-                    <div class="ws-panel"><DiagramsPanel moduleId={props.selectedModule} /></div>
-                  </Match>
-                </Switch>
-              </aside>
-
-              <Splitter resize="col-chat" />
-
-              <div class="center-col col" id="chat-col">
-                <div class="chat-body flex-1 flex min-h-0">
-                  <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />
-                  <Splitter resize="chat-rail" title="Drag to resize agent rail" />
-                  <div class="chat-main flex-1 flex flex-col min-h-0">
-                    <ChatPanel />
-                  </div>
-                </div>
-              </div>
-            </section>
+              </section>
+            </Show>
           </main>
         </div>
       </Show>
     </div>
+  );
+}
+
+/**
+ * Neutral placeholder shown in the cockpit's center body when the
+ * active daemon is outdated. The DaemonOutdatedModal sits on top of
+ * this; we just want the underlying area to NOT show stale roadmap /
+ * chat data from the version about to be replaced. As soon as the
+ * upgraded daemon connects, `daemonStore.state.outdated` flips false
+ * and the real columns mount again — populated automatically by the
+ * `notifyActiveChanged` side-effect bus.
+ */
+function DaemonPausedPanel() {
+  const cluster = () =>
+    daemonStore.state.health?.cluster_name
+      ?? daemonStore.state.health?.cluster_id
+      ?? 'this project';
+  return (
+    <section class="flex-1 flex items-center justify-center px-6">
+      <div class="max-w-md w-full text-center">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-mono uppercase tracking-wider mb-5">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse-soft" />
+          Daemon update in progress
+        </div>
+        <h2 class="text-lg font-semibold text-gray-100 mb-2">
+          Holding {cluster()}
+        </h2>
+        <p class="text-sm text-gray-400 leading-relaxed">
+          Data from the previous daemon version is hidden so it doesn't
+          mislead. The cockpit will resume the moment the upgraded
+          daemon checks in. Header and projects rail stay live — switch
+          to another project if you have one.
+        </p>
+      </div>
+    </section>
   );
 }
 
