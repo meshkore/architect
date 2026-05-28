@@ -11,9 +11,75 @@
  * store.events() entries into the message stream by ts.
  */
 
-import { Show } from 'solid-js';
+import { Show, createEffect, createSignal, onMount, type JSX } from 'solid-js';
 import type { ChatMsg } from '~/state/chat';
 import type { DaemonEvent } from '~/lib/daemon-client';
+
+/**
+ * V86o — collapse threshold for long messages, in px. Chosen to leave
+ * roughly 4 visible lines at text-sm leading-relaxed (line-height
+ * ≈ 1.625 × 14 ≈ 23 px → 4 lines ≈ 92 px). Slightly above so the
+ * "show more" toggle only kicks in for genuinely long content.
+ */
+const COLLAPSED_MAX_PX = 96;
+
+/**
+ * Collapsible text wrapper. Renders text up to COLLAPSED_MAX_PX tall
+ * by default; if the content overflows, surfaces a "+ show more"
+ * toggle directly below. Expanded state unclamps + flips to
+ * "— show less". Re-measures on every text update so streaming
+ * messages get the toggle once they cross the threshold.
+ *
+ * When `lockExpanded` is true (assistant streaming in-flight), the
+ * component skips collapse entirely — operators want to watch text
+ * grow, not see it clipped.
+ */
+function CollapsibleText(props: { text: string; lockExpanded?: boolean; children?: JSX.Element }) {
+  const [expanded, setExpanded] = createSignal(false);
+  const [overflows, setOverflows] = createSignal(false);
+  let bodyEl: HTMLDivElement | undefined;
+
+  const measure = (): void => {
+    if (!bodyEl) return;
+    // Snapshot the inline cap, lift it briefly to read scrollHeight,
+    // then restore. Avoids the overflow check colliding with the
+    // CSS max-height we already set on the element.
+    const prevMax = bodyEl.style.maxHeight;
+    bodyEl.style.maxHeight = 'none';
+    const full = bodyEl.scrollHeight;
+    bodyEl.style.maxHeight = prevMax;
+    setOverflows(full > COLLAPSED_MAX_PX + 2);
+  };
+
+  onMount(measure);
+  // Re-measure on every text mutation (covers streaming + edits).
+  createEffect(() => { void props.text; queueMicrotask(measure); });
+
+  const collapsedNow = (): boolean => !props.lockExpanded && !expanded() && overflows();
+  const showToggle = (): boolean => !props.lockExpanded && overflows();
+
+  return (
+    <>
+      <div
+        ref={bodyEl}
+        class="whitespace-pre-wrap overflow-hidden transition-[max-height] duration-150"
+        style={{ 'max-height': collapsedNow() ? `${COLLAPSED_MAX_PX}px` : 'none' }}
+      >
+        {props.text}
+        {props.children}
+      </div>
+      <Show when={showToggle()}>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setExpanded(!expanded()); }}
+          class="mt-1.5 self-start text-[10px] font-mono uppercase tracking-wider text-emerald-300/70 hover:text-emerald-200 transition-colors"
+        >
+          {expanded() ? '— show less' : '+ show more'}
+        </button>
+      </Show>
+    </>
+  );
+}
 
 export function MessageBubble(props: { msg: ChatMsg; prepend?: boolean }) {
   return props.msg.kind === 'user'
@@ -30,12 +96,12 @@ export function UserBubble(props: { msg: ChatMsg; prepend?: boolean }) {
           <span class="text-amber-400/80">· queued (merges into next turn)</span>
         </Show>
       </span>
-      <div class={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
+      <div class={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed flex flex-col ${
         props.prepend
           ? 'bg-amber-500/10 text-amber-100 border border-amber-500/30'
           : 'bg-emerald-500/15 text-emerald-100 border border-emerald-500/30'
       }`}>
-        {props.msg.text}
+        <CollapsibleText text={props.msg.text} />
       </div>
     </div>
   );
@@ -53,15 +119,16 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
           <span class="text-red-400">· cancelled</span>
         </Show>
       </span>
-      <div class={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
+      <div class={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed flex flex-col ${
         props.msg.cancelled
           ? 'bg-red-500/10 text-red-200 border border-red-500/30'
           : 'bg-gray-900/70 text-gray-200 border border-gray-800'
       }`}>
-        {props.msg.text}
-        <Show when={props.msg.streaming}>
-          <span class="inline-block w-2 h-3.5 bg-emerald-400 ml-1 align-middle animate-pulse-soft" />
-        </Show>
+        <CollapsibleText text={props.msg.text} lockExpanded={props.msg.streaming}>
+          <Show when={props.msg.streaming}>
+            <span class="inline-block w-2 h-3.5 bg-emerald-400 ml-1 align-middle animate-pulse-soft" />
+          </Show>
+        </CollapsibleText>
       </div>
     </div>
   );

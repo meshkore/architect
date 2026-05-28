@@ -33,7 +33,10 @@ interface LayoutBounds {
 const BOUNDS: Record<string, LayoutBounds> = {
   'col-nav':   { min: 160, max: 360, default: 220 },
   'col-chat':  { min: 280, max: 700, default: 420 },
-  'chat-rail': { min: 140, max: 320, default: 200 },
+  // V86o — min lowered from 140 → 70 so the operator can collapse the
+  // rail into a slim icon column. AgentCard simplifies its layout below
+  // 130 (drops chips + body title, keeps just the id pill + status dot).
+  'chat-rail': { min: 70, max: 320, default: 200 },
 };
 
 function loadLayout(): Record<string, number> {

@@ -3,7 +3,14 @@ import { chatStore, ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
 // isProjectEmpty no longer needed here — Coordinator is permanent (V82).
 import AgentCard from '~/components/AgentCard';
 import { agentTypeColor, isServiceType } from '~/lib/agent-types';
+import { uiStore } from '~/state/ui';
 import { loadRailOrder, saveRailOrder } from './chat/rail-order';
+
+// V86o — when the rail is narrower than this, AgentCard switches to its
+// compact layout: only the id chip + a status dot, no chips / no title.
+// 130 was picked by visual inspection — narrower than that and the
+// id-chip + agent-type chip + location chip overflow on one line.
+const COMPACT_THRESHOLD_PX = 130;
 
 const isService = (meta: ConvMeta | undefined) => isServiceType(meta?.type);
 
@@ -70,10 +77,16 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
     saveRailOrder(current);
   };
 
+  const compact = () => uiStore.state.chatRailWidth < COMPACT_THRESHOLD_PX;
+
   return (
     <aside class="chat-rail-stack">
       <div class="chat-rail-header">
-        <span class="chat-rail-header-label">Agents</span>
+        <Show when={!compact()} fallback={
+          <span class="chat-rail-header-label" title="Agents" aria-label="Agents">···</span>
+        }>
+          <span class="chat-rail-header-label">Agents</span>
+        </Show>
         <button
           type="button"
           onClick={() => props.onNewAgent?.()}
@@ -93,6 +106,7 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
                 status={statusOf(c)}
                 pendingReview={false}
                 stripe={agentTypeColor(meta().type)}
+                compact={compact()}
                 onSelect={chatStore.setActiveConv}
                 onDragStart={(id) => setDragSrc(id)}
                 onDragEnd={() => { setDragSrc(null); setDragTgt(null); }}
