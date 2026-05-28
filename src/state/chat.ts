@@ -206,6 +206,15 @@ function bindCluster(clusterId: string | null): void {
   // boot when prevId is null).
   if (prevId) clusterSnapshots.set(prevId, snapshotCurrent());
   setActiveClusterId(clusterId);
+  // V89.1 — Always reset pendingReplyConvs on cluster swap, BEFORE
+  // either the cached or the fresh path runs. Reason: pendingReplyConvs
+  // is global state (not part of ClusterChatSlice), and the onboarding
+  // conv id is a fixed string shared across clusters. Without this
+  // reset, the operator dispatching on cluster A's coordinator and
+  // then switching to cluster B saw a fake "Processing…" bubble on
+  // B's coordinator. In-flight turn state belongs to the active
+  // session only.
+  setState('pendingReplyConvs', {});
   // MP5 — stamp lastReadAt so the rail's unread dot clears when the
   // operator visits this cluster. We keep lastEventAt untouched so
   // the comparison "did anything happen since I last looked" stays
@@ -695,6 +704,15 @@ async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promis
     }));
   }
   if (contextDocs.length) body.context_docs = contextDocs;
+  // V89.1 — Mark pending BEFORE the HTTP round-trip. The daemon
+  // sometimes emits the first assistant delta (or even the final, for
+  // fast prompts) BEFORE this fetch resolves. If we set the flag
+  // after the fetch, ingestEvent's clearPendingReply runs against an
+  // empty entry and is a no-op, then we set the flag AFTER the events
+  // already cleared → bubble stuck forever showing "Generando…" on a
+  // conv that finished seconds ago. Setting eagerly here lets the
+  // event handler clear it correctly even on the fast-path race.
+  setState('pendingReplyConvs', conv, Date.now());
   const res = await client.chatDispatch(body);
   if (!res.ok) {
     const list = state.convMap[conv] ?? [];
@@ -702,16 +720,20 @@ async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promis
     if (idx >= 0) {
       setState('convMap', conv, list.filter((_, i) => i !== idx));
     }
+    // Roll back the optimistic pending flag if the dispatch failed.
+    clearPendingReply(conv);
     log.warn('chat dispatch failed', res.status, res.body);
     return { ok: false, status: res.status, error: res.body };
   }
   if (!state.activeConv) setState('activeConv', res.data.conv ?? conv);
-  // V86p — flag the conv as "awaiting first assistant chunk". UI uses
-  // this to show a "preparing response…" stripe so the operator gets
-  // movement immediately instead of staring at the user bubble. The
-  // dispatch timestamp drives the elapsed counter.
-  setState('pendingReplyConvs', res.data.conv ?? conv, Date.now());
-  return { ok: true, conv: res.data.conv ?? conv };
+  // If the daemon picked a different conv id (very rare — happens
+  // when we send conv=null in the body), migrate the flag.
+  const finalConv = res.data.conv ?? conv;
+  if (finalConv !== conv) {
+    clearPendingReply(conv);
+    setState('pendingReplyConvs', finalConv, Date.now());
+  }
+  return { ok: true, conv: finalConv };
 }
 
 function clearPendingReply(conv: string): void {

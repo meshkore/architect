@@ -12,7 +12,7 @@
  */
 
 import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from 'solid-js';
-import { chatStore, type ChatMsg } from '~/state/chat';
+import { chatStore, ONBOARDING_CONV_ID, type ChatMsg } from '~/state/chat';
 import { ensureMarked } from '~/lib/cdn-loaders';
 import { log } from '~/lib/log';
 import type { DaemonEvent } from '~/lib/daemon-client';
@@ -239,15 +239,13 @@ function formatBubbleTs(ts: string): string {
 }
 
 export function UserBubble(props: { msg: ChatMsg; prepend?: boolean }) {
-  // V86y — "Usuario" replaces the legacy "architect" author tag
-  // (which was the dispatch-time hardcoded value, not a person).
-  // If the daemon ever exposes an operator-name field via /health
-  // or cluster.yaml we can swap this for that value; for now the
-  // fixed "Usuario" string matches the operator's request.
+  // UI strings are English-only. Legacy "architect"/"operator"/"user"
+  // author tags are normalised to "USER"; any custom author string the
+  // daemon supplies is rendered verbatim.
   const label = (): string => {
     const a = props.msg.author?.trim();
     if (a && a !== 'architect' && a !== 'operator' && a !== 'user') return a;
-    return 'Usuario';
+    return 'USER';
   };
   return (
     <div class="flex flex-col gap-1.5 items-end w-full">
@@ -259,7 +257,7 @@ export function UserBubble(props: { msg: ChatMsg; prepend?: boolean }) {
         suffix={props.prepend ? 'queued · merges into next turn' : undefined}
       />
       <div class={`max-w-[85%] text-sm leading-relaxed text-right pr-2 ${
-        props.prepend ? 'text-amber-200/95' : 'text-emerald-200/95'
+        props.prepend ? 'text-amber-200/95' : 'text-gray-200'
       }`}>
         <CollapsibleText text={props.msg.text} />
       </div>
@@ -277,7 +275,24 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
     return conv ? chatStore.state.convMeta[conv] : null;
   };
   const agentId = () => meta()?.agentId ?? null;
-  const agentName = () => meta()?.title || props.msg.author || 'coordinator';
+  // V89.1 — Author label fallback chain. The daemon emits assistant
+  // events with author=self.identity (the host machine), which is
+  // wrong UX; the assistant IS the agent, not the daemon host. So we
+  // prefer the cockpit's convMeta.title, then the agentId chip, then
+  // the daemon author, then a neutral 'agent'. Critically, the old
+  // 'coordinator' fallback is GONE outside the onboarding conv — it
+  // was leaking into every untitled custom conv.
+  const isOnboarding = () => chatStore.state.activeConv === ONBOARDING_CONV_ID;
+  const agentName = () => {
+    const title = meta()?.title?.trim();
+    if (title) return title;
+    if (isOnboarding()) return 'coordinator';
+    const aid = agentId();
+    if (aid) return aid;
+    const author = props.msg.author?.trim();
+    if (author && author !== 'architect' && author !== 'operator' && author !== 'user') return author;
+    return 'agent';
+  };
   return (
     <div class="flex flex-col gap-1.5 items-start w-full">
       <BubbleHeader
@@ -322,7 +337,7 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
  * first chunk. No caret bar — the user explicitly asked for words,
  * not lines.
  */
-const THINKING_VERBS = ['Pensando', 'Trabajando', 'Generando respuesta', 'Procesando'] as const;
+const THINKING_VERBS = ['Thinking', 'Working', 'Generating response', 'Processing'] as const;
 function ThinkingPlaceholder() {
   const [idx, setIdx] = createSignal(0);
   onMount(() => {
@@ -372,10 +387,22 @@ export function PreparingBubble(_props: { dispatchedAt: number }) {
     const conv = chatStore.state.activeConv;
     return conv ? chatStore.state.convMeta[conv] : null;
   };
+  // V89.1 — Same fallback rules as AssistantBubble: 'coordinator'
+  // ONLY for the onboarding conv. Untitled custom convs fall back
+  // to the agentId chip, never to 'coordinator' (which was leaking
+  // a totally unrelated agent name into the bubble).
+  const isOnboarding = () => chatStore.state.activeConv === ONBOARDING_CONV_ID;
+  const primary = () => {
+    const title = meta()?.title?.trim();
+    if (title) return title;
+    if (isOnboarding()) return 'coordinator';
+    const aid = meta()?.agentId;
+    return aid || 'agent';
+  };
   return (
     <div class="flex flex-col gap-1.5 items-start w-full">
       <BubbleHeader
-        primary={meta()?.title || 'coordinator'}
+        primary={primary()}
         id={meta()?.agentId ?? undefined}
         ts={undefined}
         align="left"
