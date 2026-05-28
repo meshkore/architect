@@ -94,6 +94,24 @@ export default function App() {
       viewStore.bindCluster(health.cluster_id ?? null);
     });
     void serverStore.refreshNow(client, activeId);
+    // V86q — Rehydrate chat history from the daemon's timeline so a
+    // browser refresh doesn't wipe the visible chat. The daemon
+    // (py-1.9.2+) replays its `.meshkore/timeline/*.jsonl` ledger into
+    // a per-conv message list; the cockpit's convMap takes whatever
+    // the daemon returns as authoritative. Live WS events continue
+    // updating the same convMap from this point on. Daemons lacking
+    // the `chat.history` feature are silently skipped — the chat
+    // starts empty as it did before, no regression.
+    void (async () => {
+      if (!(health.features ?? []).includes('chat.history')) return;
+      const r = await client.chatHistory();
+      if (!r.ok) {
+        log.warn('chatHistory fetch failed', r.status, r.body?.slice(0, 200));
+        return;
+      }
+      chatStore.hydrateHistory(r.data);
+      log.info('chat history hydrated', { convs: Object.keys(r.data.convs).length });
+    })();
   });
 
   // Once the server snapshot lands, fall back to the Coordinator conv

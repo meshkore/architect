@@ -141,6 +141,21 @@ export interface LogListResponse {
   entries: LogEntry[];
 }
 
+export interface ChatHistoryMsg {
+  kind: 'user' | 'assistant';
+  text: string;
+  author?: string;
+  ts?: string;
+  stream_id?: string;
+  streaming?: boolean;
+  cancelled?: boolean;
+}
+export interface ChatHistoryResponse {
+  convs: Record<string, ChatHistoryMsg[]>;
+  streams_open: Record<string, string>;
+  generated_at: string;
+}
+
 export interface ProtocolSummary {
   id: string;
   title: string;
@@ -251,6 +266,13 @@ export class DaemonClient {
    *  uses this to drive its scroll-paged viewer. */
   async logList(signal?: AbortSignal): Promise<Result<LogListResponse>> {
     return this.request<LogListResponse>('GET', '/log', undefined, signal);
+  }
+
+  /** py-1.9.2 — Rehydrate chat history. Returns every conv this
+   *  daemon has seen, reconstructed from the timeline ledger. Called
+   *  on cockpit boot so a refresh doesn't wipe the chat visually. */
+  async chatHistory(signal?: AbortSignal): Promise<Result<ChatHistoryResponse>> {
+    return this.request<ChatHistoryResponse>('GET', '/chat/history', undefined, signal);
   }
 
   /** py-1.9.0 — fetch ONE day-log body as raw markdown. Returns the

@@ -694,6 +694,35 @@ function clearPendingReply(conv: string): void {
   });
 }
 
+/**
+ * V86q — Bulk-hydrate `convMap` from the daemon's /chat/history
+ * payload. Called by App.tsx after attachClient so a browser refresh
+ * doesn't wipe the visible chat. Strategy:
+ *
+ *   - For each conv in the response, REPLACE convMap[conv] with the
+ *     server's reconstruction. This is authoritative — local
+ *     placeholders from a half-completed dispatch are discarded.
+ *   - Convs already in convMap that the server doesn't know about
+ *     (synthetic ones like ONBOARDING) are kept as-is.
+ *   - `streams_open` is informational; the assistant bubble's
+ *     `streaming` flag already encodes per-message state.
+ *   - DOES NOT touch convMeta — that's operator-defined (agent name,
+ *     id) and persists via localStorage separately.
+ */
+function hydrateHistory(payload: {
+  convs: Record<string, ChatMsg[]>;
+  streams_open?: Record<string, string>;
+}): void {
+  const next: Record<string, ChatMsg[]> = { ...state.convMap };
+  for (const [conv, msgs] of Object.entries(payload.convs)) {
+    next[conv] = msgs.map((m) => ({ ...m }));
+    // Make sure we have meta for any conv coming from the server so
+    // it shows up in the rail.
+    if (!state.convMeta[conv]) ensureConvMeta(conv);
+  }
+  setState('convMap', next);
+}
+
 export const chatStore = {
   state,
   bindCluster,
@@ -711,6 +740,7 @@ export const chatStore = {
   ingestEvent,
   ingestEventForCluster,
   dispatchMessage,
+  hydrateHistory,
 };
 
 log.debug('state/chat loaded');
