@@ -13,6 +13,8 @@
 
 import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from 'solid-js';
 import { chatStore, type ChatMsg } from '~/state/chat';
+import { ensureMarked } from '~/lib/cdn-loaders';
+import { log } from '~/lib/log';
 import type { DaemonEvent } from '~/lib/daemon-client';
 
 /**
@@ -46,9 +48,35 @@ const COLLAPSED_MAX_PX = 96;
  * component skips collapse entirely — operators want to watch text
  * grow, not see it clipped.
  */
-function CollapsibleText(props: { text: string; lockExpanded?: boolean; children?: JSX.Element }) {
+function CollapsibleText(props: { text: string; lockExpanded?: boolean; markdown?: boolean; children?: JSX.Element }) {
   const [expanded, setExpanded] = createSignal(false);
   const [overflows, setOverflows] = createSignal(false);
+  // V86r — Markdown rendering for assistant responses. The daemon
+  // streams plain text that's actually markdown (headings, tables,
+  // bold, lists, code fences). The vanilla V80 monolith rendered it
+  // with marked; the Solid port had been dumping raw text into
+  // <whitespace-pre-wrap>, so tables and bold landed as literal `**`
+  // / `|---|`. Now we parse with marked the SAME way ContextPanel /
+  // Diary / Protocols do. User bubbles stay plain on purpose (their
+  // input is plain text, not markdown).
+  const [html, setHtml] = createSignal<string | null>(null);
+  createEffect(() => {
+    const t = props.text;
+    if (!props.markdown) { setHtml(null); return; }
+    // ensureMarked is CDN-loaded; cached after first call.
+    void ensureMarked().then((m) => {
+      try {
+        setHtml(m.parse(t, { gfm: true }));
+      } catch (e) {
+        log.warn('chat marked render failed', e instanceof Error ? e.message : String(e));
+        setHtml(null);
+      }
+    }).catch((e) => {
+      log.warn('chat ensureMarked failed', e instanceof Error ? e.message : String(e));
+      setHtml(null);
+    });
+  });
+
   let bodyEl: HTMLDivElement | undefined;
 
   const measure = (): void => {
@@ -64,22 +92,40 @@ function CollapsibleText(props: { text: string; lockExpanded?: boolean; children
   };
 
   onMount(measure);
-  // Re-measure on every text mutation (covers streaming + edits).
-  createEffect(() => { void props.text; queueMicrotask(measure); });
+  // Re-measure on every text mutation (covers streaming + edits + the
+  // marked render lifecycle since the parsed HTML lands async).
+  createEffect(() => { void props.text; void html(); queueMicrotask(measure); });
 
   const collapsedNow = (): boolean => !props.lockExpanded && !expanded() && overflows();
   const showToggle = (): boolean => !props.lockExpanded && overflows();
 
   return (
     <>
-      <div
-        ref={bodyEl}
-        class="whitespace-pre-wrap overflow-hidden transition-[max-height] duration-150"
-        style={{ 'max-height': collapsedNow() ? `${COLLAPSED_MAX_PX}px` : 'none' }}
+      <Show
+        when={props.markdown && html() !== null}
+        fallback={
+          <div
+            ref={(el) => { if (!props.markdown) bodyEl = el; }}
+            class="whitespace-pre-wrap overflow-hidden transition-[max-height] duration-150"
+            style={{ 'max-height': collapsedNow() ? `${COLLAPSED_MAX_PX}px` : 'none' }}
+          >
+            {props.text}
+            {props.children}
+          </div>
+        }
       >
-        {props.text}
+        {/* Rendered markdown lives in a separate node so the prose
+            classes apply only to the assistant's structured output;
+            the inline streaming caret (children) rides outside the
+            markdown root so it doesn't get reflowed. */}
+        <div
+          ref={(el) => { bodyEl = el; }}
+          class="md prose prose-invert prose-sm max-w-none overflow-hidden transition-[max-height] duration-150"
+          style={{ 'max-height': collapsedNow() ? `${COLLAPSED_MAX_PX}px` : 'none' }}
+          innerHTML={html() ?? ''}
+        />
         {props.children}
-      </div>
+      </Show>
       <Show when={showToggle()}>
         <button
           type="button"
@@ -135,22 +181,10 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
     }
     return props.msg.author || 'coordinator';
   };
-  const charCount = () => props.msg.text.length;
   return (
     <div class="flex flex-col gap-1 items-start w-full">
       <span class="text-[10px] font-mono text-gray-600 flex items-center gap-1.5">
         <span class="text-gray-400">{byline()}</span>
-        <Show when={props.msg.streaming}>
-          <span class="text-emerald-400 inline-flex items-center gap-1">
-            ·
-            <span class="inline-flex items-center gap-0.5">
-              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft" />
-              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:150ms]" />
-              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:300ms]" />
-            </span>
-            <span>working · {charCount()} chars</span>
-          </span>
-        </Show>
         <Show when={props.msg.cancelled}>
           <span class="text-red-400">· cancelled</span>
         </Show>
@@ -165,18 +199,21 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
         <Show
           when={props.msg.streaming}
           fallback={
-            <CollapsibleText text={props.msg.text}>
+            <CollapsibleText text={props.msg.text} markdown>
               <Show when={props.msg.cancelled}>
                 <span class="text-red-400/80 text-[11px]"> · cancelled</span>
               </Show>
             </CollapsibleText>
           }
         >
-          {/* Streaming tail — fixed height, column-reverse so the
-              LATEST content sits flush with the bottom edge and older
-              lines scroll off the top. Operator sees movement, never
-              loses their place. */}
-          <StreamingTail text={props.msg.text} />
+          {/* V86s — Empty-streaming → ThinkingPlaceholder; populated
+              streaming → tail clamp showing the latest 3 lines. The
+              "working" badge no longer rides the byline; the rail's
+              agent card already says "working", and the operator
+              wants the activity signal INSIDE the bubble. */}
+          <Show when={props.msg.text.trim().length > 0} fallback={<ThinkingPlaceholder />}>
+            <StreamingTail text={props.msg.text} />
+          </Show>
         </Show>
       </div>
     </div>
@@ -184,11 +221,36 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
 }
 
 /**
+ * V86s — Animated "thinking / working / generating" loader. Rotates
+ * through three verbs every ~1.8s so the operator gets continuous
+ * motion in the bubble body while the daemon is still preparing the
+ * first chunk. No caret bar — the user explicitly asked for words,
+ * not lines.
+ */
+const THINKING_VERBS = ['Pensando', 'Trabajando', 'Generando respuesta', 'Procesando'] as const;
+function ThinkingPlaceholder() {
+  const [idx, setIdx] = createSignal(0);
+  onMount(() => {
+    const iv = setInterval(() => setIdx((i) => (i + 1) % THINKING_VERBS.length), 1800);
+    onCleanup(() => clearInterval(iv));
+  });
+  return (
+    <div class="flex items-center gap-2 text-emerald-300/90 italic">
+      <span class="inline-flex items-center gap-0.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft" />
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:200ms]" />
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:400ms]" />
+      </span>
+      <span class="transition-opacity duration-300">{THINKING_VERBS[idx()]}…</span>
+    </div>
+  );
+}
+
+/**
  * Live streaming preview — clips to the LAST 3 lines of the assistant
- * response while it's writing. column-reverse + overflow:hidden is
- * the canonical CSS recipe for "stick to bottom of overflowing box".
- * The blinking caret rides at the very end of the text so the eye
- * tracks the latest token.
+ * response. column-reverse + overflow:hidden keeps the bottom of the
+ * overflowing content visible. No caret bar — once real text starts
+ * landing, the operator follows the words, not a green stripe.
  */
 function StreamingTail(props: { text: string }) {
   return (
@@ -196,45 +258,37 @@ function StreamingTail(props: { text: string }) {
       class="overflow-hidden flex flex-col-reverse"
       style={{ 'max-height': `${STREAM_TAIL_HEIGHT_PX}px` }}
     >
-      <div class="whitespace-pre-wrap">
-        {props.text}
-        <span class="inline-block w-2 h-3.5 bg-emerald-400 ml-1 align-middle animate-pulse-soft" />
-      </div>
+      <div class="whitespace-pre-wrap">{props.text}</div>
     </div>
   );
 }
 
 /**
- * V86p — "Preparing response…" placeholder. Shown when the operator
- * just dispatched a message but no assistant chunk has arrived over
- * the WS yet. Carries an elapsed counter so the operator can tell
- * the difference between "the daemon's thinking" (2-5s typical) and
- * "the daemon is stuck" (>30s).
+ * V86s — Renamed from "PreparingBubble". Renders exactly like an
+ * assistant bubble in the streaming-with-empty-text state: same
+ * byline (A001 · Master from convMeta), same shell, same glow,
+ * `<ThinkingPlaceholder>` in the body. The hand-off to the real
+ * assistant bubble (once the first chunk lands) is visually
+ * seamless — the bubble keeps its position, just swaps placeholder
+ * → tail.
  */
-export function PreparingBubble(props: { dispatchedAt: number }) {
-  const [elapsed, setElapsed] = createSignal(0);
-  const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - props.dispatchedAt) / 1000)));
-  onMount(() => {
-    tick();
-    const iv = setInterval(tick, 1000);
-    onCleanup(() => clearInterval(iv));
-  });
+export function PreparingBubble(_props: { dispatchedAt: number }) {
+  const byline = () => {
+    const conv = chatStore.state.activeConv;
+    const meta = conv ? chatStore.state.convMeta[conv] : null;
+    if (meta) {
+      const idLabel = meta.agentId ? `${meta.agentId} · ` : '';
+      return `${idLabel}${meta.title || 'agent'}`;
+    }
+    return 'coordinator';
+  };
   return (
     <div class="flex flex-col gap-1 items-start w-full">
       <span class="text-[10px] font-mono text-gray-600 flex items-center gap-1.5">
-        <span class="text-gray-400">coordinator</span>
-        <span class="text-emerald-400 inline-flex items-center gap-1">
-          ·
-          <span class="inline-flex items-center gap-0.5">
-            <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft" />
-            <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:150ms]" />
-            <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:300ms]" />
-          </span>
-          <span>preparing response · {elapsed()}s</span>
-        </span>
+        <span class="text-gray-400">{byline()}</span>
       </span>
-      <div class="max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed border border-emerald-500/30 bg-gray-900/50 text-gray-400 italic">
-        Waiting for the daemon's first chunk…
+      <div class="max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed flex flex-col bg-gray-900/70 text-gray-200 border border-emerald-500/40 shadow-[0_0_0_1px_rgba(52,211,153,0.15),0_0_20px_-6px_rgba(52,211,153,0.45)]">
+        <ThinkingPlaceholder />
       </div>
     </div>
   );
