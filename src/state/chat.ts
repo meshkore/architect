@@ -56,6 +56,14 @@ export interface ChatMsg {
   streaming?: boolean;
   stream_id?: string;
   cancelled?: boolean;
+  /** V89.2 — Ephemeral flag set when the cockpit witnesses
+   *  `chat.assistant.final` LIVE (not during a timeline rehydrate).
+   *  Causes the bubble to auto-expand on arrival so the operator
+   *  sees the full summary without having to click. Once they toggle
+   *  the bubble manually OR the page is reloaded, the flag isn't
+   *  carried (CollapsibleText keeps its own local expand state and
+   *  rehydration goes through the gated codepath). */
+  _freshFinal?: boolean;
   _placeholder_user?: boolean;
   _placeholder?: boolean;
 }
@@ -87,6 +95,12 @@ export interface ChatStoreState {
    *  so the UI can show "preparing… Ns elapsed". Cleared when the
    *  first `chat.assistant.delta` (or `final` / `cancelled`) lands. */
   pendingReplyConvs: Record<string, number>;
+  /** V89.2 — wall-clock ts of the most recent `chat.assistant.delta`
+   *  seen for each conv. The streaming AssistantBubble reads this to
+   *  decide whether the agent has been quiet "too long" (>~1.5 s) and
+   *  should swap the streaming-tail view for a rotating "Working…
+   *  Planning… Researching…" placeholder. Cleared on final/cancelled. */
+  lastDeltaTsByConv: Record<string, number>;
 }
 
 const initial: ChatStoreState = {
@@ -98,6 +112,7 @@ const initial: ChatStoreState = {
   convTitleOverrides: {},
   clusterActivity: {},
   pendingReplyConvs: {},
+  lastDeltaTsByConv: {},
 };
 
 const [state, setState] = createStore<ChatStoreState>(initial);
@@ -215,6 +230,8 @@ function bindCluster(clusterId: string | null): void {
   // B's coordinator. In-flight turn state belongs to the active
   // session only.
   setState('pendingReplyConvs', {});
+  // V89.2 — same logic for the streaming-idle marker.
+  setState('lastDeltaTsByConv', {});
   // MP5 — stamp lastReadAt so the rail's unread dot clears when the
   // operator visits this cluster. We keep lastEventAt untouched so
   // the comparison "did anything happen since I last looked" stays
@@ -567,6 +584,13 @@ function stripRememberLines(text: string): string {
     .trimEnd();
 }
 
+// V89.2 — Set while replaying timeline events on cockpit boot. Read by
+// ingestEvent's chat.assistant.final branch to skip the auto-expand
+// "_freshFinal" flag — otherwise every rehydrated assistant message
+// would expand on reload, defeating the design ("only the LIVE summary
+// auto-expands; persisted bubbles default to collapsed").
+let hydrating = false;
+
 /**
  * Ingest one daemon event into the chat store. Idempotent — same
  * stream_id replaces in place rather than appending duplicates.
@@ -621,6 +645,9 @@ function ingestEvent(ev: DaemonEvent): void {
     }
     // V86p — first assistant chunk is here; drop the "preparing" flag.
     clearPendingReply(conv);
+    // V89.2 — stamp last-delta timestamp so the bubble's idle-loader
+    // can tell when the agent has been silent for a while.
+    setState('lastDeltaTsByConv', conv, Date.now());
     return;
   }
   if (ev.type === 'chat.assistant.final') {
@@ -630,10 +657,16 @@ function ingestEvent(ev: DaemonEvent): void {
     const idx = arr.findIndex(
       (m) => m.kind === 'assistant' && streamId !== undefined && m.stream_id === streamId,
     );
+    // V89.2 — only flag _freshFinal on LIVE events. During timeline
+    // rehydration we re-run every historical final through the same
+    // reducer; flagging fresh on those would make every old summary
+    // auto-expand on reload, which is the opposite of the design.
+    const freshFinal = !hydrating;
     if (idx >= 0) {
       setState('convMap', conv, idx, {
         text: cleaned,
         streaming: false,
+        _freshFinal: freshFinal || undefined,
       });
     } else {
       setState('convMap', conv, [
@@ -645,11 +678,19 @@ function ingestEvent(ev: DaemonEvent): void {
           ts: typeof ev.ts === 'string' ? ev.ts : undefined,
           streaming: false,
           stream_id: streamId,
+          _freshFinal: freshFinal || undefined,
         },
       ]);
     }
     // V86p — final without prior delta also drops the pending flag.
     clearPendingReply(conv);
+    // V89.2 — turn is over; drop the idle-loader marker.
+    if (state.lastDeltaTsByConv[conv] !== undefined) {
+      setState('lastDeltaTsByConv', (xs) => {
+        const { [conv]: _drop, ...rest } = xs;
+        return rest;
+      });
+    }
     return;
   }
   if (ev.type === 'chat.cancelled') {
@@ -658,6 +699,12 @@ function ingestEvent(ev: DaemonEvent): void {
       setState('convMap', conv, arr.length - 1, { streaming: false, cancelled: true });
     }
     clearPendingReply(conv);
+    if (state.lastDeltaTsByConv[conv] !== undefined) {
+      setState('lastDeltaTsByConv', (xs) => {
+        const { [conv]: _drop, ...rest } = xs;
+        return rest;
+      });
+    }
   }
 }
 
@@ -767,16 +814,21 @@ function hydrateFromTimeline(events: DaemonEvent[]): void {
   // Reset the chat-relevant slice first so a re-hydrate after project
   // hot-swap doesn't merge two clusters' bubbles.
   setState('convMap', {});
-  for (const ev of events) {
-    const t = typeof ev.type === 'string' ? ev.type : '';
-    if (
-      t === 'chat.user' ||
-      t === 'chat.assistant.delta' ||
-      t === 'chat.assistant.final' ||
-      t === 'chat.cancelled'
-    ) {
-      ingestEvent(ev);
+  hydrating = true;
+  try {
+    for (const ev of events) {
+      const t = typeof ev.type === 'string' ? ev.type : '';
+      if (
+        t === 'chat.user' ||
+        t === 'chat.assistant.delta' ||
+        t === 'chat.assistant.final' ||
+        t === 'chat.cancelled'
+      ) {
+        ingestEvent(ev);
+      }
     }
+  } finally {
+    hydrating = false;
   }
   // The daemon emits the timeline oldest→newest already; ingestEvent
   // handles the streaming/final/cancelled lifecycle in that order.

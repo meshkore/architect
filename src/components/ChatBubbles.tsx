@@ -13,6 +13,7 @@
 
 import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from 'solid-js';
 import { chatStore, ONBOARDING_CONV_ID, type ChatMsg } from '~/state/chat';
+import { daemonStore } from '~/state/daemon';
 import { ensureMarked } from '~/lib/cdn-loaders';
 import { log } from '~/lib/log';
 import type { DaemonEvent } from '~/lib/daemon-client';
@@ -48,8 +49,19 @@ const COLLAPSED_MAX_PX = 96;
  * component skips collapse entirely — operators want to watch text
  * grow, not see it clipped.
  */
-function CollapsibleText(props: { text: string; lockExpanded?: boolean; markdown?: boolean; children?: JSX.Element }) {
-  const [expanded, setExpanded] = createSignal(false);
+function CollapsibleText(props: {
+  text: string;
+  lockExpanded?: boolean;
+  markdown?: boolean;
+  /** V89.2 — When true, the bubble starts EXPANDED. Used by the
+   *  assistant bubble for fresh-final summaries (auto-expand once the
+   *  agent just finished its turn). After the operator toggles, the
+   *  internal `expanded` signal owns the state — the prop only
+   *  influences the initial value. */
+  initialExpanded?: boolean;
+  children?: JSX.Element;
+}) {
+  const [expanded, setExpanded] = createSignal(!!props.initialExpanded);
   const [overflows, setOverflows] = createSignal(false);
   // V86r — Markdown rendering for assistant responses. The daemon
   // streams plain text that's actually markdown (headings, tables,
@@ -171,6 +183,12 @@ function BubbleHeader(props: {
   align: 'left' | 'right';
   tone: 'agent' | 'operator' | 'cancelled';
   suffix?: string;
+  /** V89.2 — When present, renders a subtle Stop control at the far
+   *  end of the header line (after the fade). Used by streaming
+   *  AssistantBubble + PreparingBubble so the operator can interrupt
+   *  the turn from the same row as the byline, no extra bar above
+   *  the composer. */
+  onStop?: () => void;
 }) {
   // V86y — color stops for the fade line. Picked per tone so the
   // line reads as "this is the same speaker's territory" without
@@ -216,6 +234,16 @@ function BubbleHeader(props: {
           carries a soft tinted underline that telegraphs which side
           owns the row at a glance, beyond just the alignment. */}
       <span aria-hidden="true" class={`flex-1 h-px min-w-[12px] ${fadeClasses()}`} />
+      <Show when={props.onStop}>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); props.onStop?.(); }}
+          title="Stop this turn"
+          class="flex-shrink-0 font-mono text-[10px] uppercase tracking-wider text-red-300/70 hover:text-red-200 border border-red-500/25 hover:border-red-500/55 rounded px-1.5 py-0.5 transition-colors leading-none"
+        >
+          ■ stop
+        </button>
+      </Show>
     </div>
   );
 }
@@ -293,6 +321,15 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
     if (author && author !== 'architect' && author !== 'operator' && author !== 'user') return author;
     return 'agent';
   };
+  // V89.2 — Inline Stop control on the streaming agent bubble.
+  // Replaces the standalone StopBar above the composer; lives on the
+  // same row as the byline, at the far right after the fade.
+  const onStop = (): void => {
+    const conv = chatStore.state.activeConv;
+    const client = daemonStore.state.client;
+    if (!conv || !client) return;
+    void client.chatCancel(conv);
+  };
   return (
     <div class="flex flex-col gap-1.5 items-start w-full">
       <BubbleHeader
@@ -302,6 +339,7 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
         align="left"
         tone={props.msg.cancelled ? 'cancelled' : 'agent'}
         suffix={props.msg.cancelled ? 'cancelled' : undefined}
+        onStop={props.msg.streaming && !props.msg.cancelled ? onStop : undefined}
       />
       <div class={`text-sm leading-relaxed max-w-[90%] pl-2 ${
         props.msg.cancelled ? 'text-red-300/95' : 'text-gray-200'
@@ -309,7 +347,7 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
         <Show
           when={props.msg.streaming}
           fallback={
-            <CollapsibleText text={props.msg.text} markdown>
+            <CollapsibleText text={props.msg.text} markdown initialExpanded={props.msg._freshFinal}>
               <Show when={props.msg.cancelled}>
                 <span class="text-red-400/80 text-[11px]"> · cancelled</span>
               </Show>
@@ -317,12 +355,17 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
           }
         >
           {/* V86s — Empty-streaming → ThinkingPlaceholder; populated
-              streaming → tail clamp showing the latest 3 lines. The
-              "working" badge no longer rides the byline; the rail's
-              agent card already says "working", and the operator
-              wants the activity signal INSIDE the bubble. */}
+              streaming → tail clamp showing the latest 3 lines. */}
           <Show when={props.msg.text.trim().length > 0} fallback={<ThinkingPlaceholder />}>
             <StreamingTail text={props.msg.text} />
+          </Show>
+          {/* V89.2 — While streaming AND nothing new has arrived for
+              >1.5 s, append the rotating-verbs idle hint so the
+              operator gets visible motion even if the agent is mid
+              tool-call or pausing to think. Disappears the moment a
+              new delta lands. */}
+          <Show when={props.msg.streaming && props.msg.text.trim().length > 0}>
+            <StreamingIdleHint />
           </Show>
         </Show>
       </div>
@@ -337,7 +380,50 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
  * first chunk. No caret bar — the user explicitly asked for words,
  * not lines.
  */
-const THINKING_VERBS = ['Thinking', 'Working', 'Generating response', 'Processing'] as const;
+const THINKING_VERBS = ['Thinking', 'Working', 'Researching', 'Planning', 'Generating response', 'Processing'] as const;
+
+/**
+ * V89.2 — Inline idle hint shown UNDER a streaming bubble that has
+ * partial text but hasn't received a new chunk for >1.5 s. Keeps the
+ * activity signal alive when the agent is mid tool-call or pausing
+ * mid-thought, so the operator never stares at frozen text. The hint
+ * disappears the instant another delta lands (lastDeltaTsByConv
+ * bumps and idleMs drops below the threshold).
+ *
+ * Reads the active conv's last-delta timestamp from chatStore; ticks
+ * its own 500 ms wall-clock so the threshold check stays reactive
+ * without a global ticker.
+ */
+const IDLE_HINT_MS = 1500;
+function StreamingIdleHint() {
+  const [nowMs, setNowMs] = createSignal(Date.now());
+  const [idx, setIdx] = createSignal(0);
+  onMount(() => {
+    const tick = setInterval(() => setNowMs(Date.now()), 500);
+    const rotate = setInterval(() => setIdx((i) => (i + 1) % THINKING_VERBS.length), 1800);
+    onCleanup(() => { clearInterval(tick); clearInterval(rotate); });
+  });
+  const idleMs = (): number => {
+    const conv = chatStore.state.activeConv;
+    if (!conv) return 0;
+    const last = chatStore.state.lastDeltaTsByConv[conv];
+    if (typeof last !== 'number') return 0;
+    return nowMs() - last;
+  };
+  return (
+    <Show when={idleMs() > IDLE_HINT_MS}>
+      <div class="flex items-center gap-2 text-emerald-300/70 italic text-[12px] mt-1.5">
+        <span class="inline-flex items-center gap-0.5">
+          <span class="w-1 h-1 rounded-full bg-emerald-400/80 animate-pulse-soft" />
+          <span class="w-1 h-1 rounded-full bg-emerald-400/80 animate-pulse-soft [animation-delay:200ms]" />
+          <span class="w-1 h-1 rounded-full bg-emerald-400/80 animate-pulse-soft [animation-delay:400ms]" />
+        </span>
+        <span>{THINKING_VERBS[idx()]}…</span>
+      </div>
+    </Show>
+  );
+}
+
 function ThinkingPlaceholder() {
   const [idx, setIdx] = createSignal(0);
   onMount(() => {
@@ -399,6 +485,13 @@ export function PreparingBubble(_props: { dispatchedAt: number }) {
     const aid = meta()?.agentId;
     return aid || 'agent';
   };
+  // V89.2 — Same inline Stop control as the streaming agent bubble.
+  const onStop = (): void => {
+    const conv = chatStore.state.activeConv;
+    const client = daemonStore.state.client;
+    if (!conv || !client) return;
+    void client.chatCancel(conv);
+  };
   return (
     <div class="flex flex-col gap-1.5 items-start w-full">
       <BubbleHeader
@@ -407,6 +500,7 @@ export function PreparingBubble(_props: { dispatchedAt: number }) {
         ts={undefined}
         align="left"
         tone="agent"
+        onStop={onStop}
       />
       <div class="max-w-[90%] text-sm leading-relaxed pl-2">
         <ThinkingPlaceholder />

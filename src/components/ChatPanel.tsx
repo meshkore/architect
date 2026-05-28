@@ -1,12 +1,11 @@
 import { Show, createMemo, createSignal, createEffect } from 'solid-js';
 import { chatStore, type ChatMsg } from '~/state/chat';
-import { log } from '~/lib/log';
 import ChatScopeStrip from '~/components/ChatScopeStrip';
 import ChatHistoryView from '~/components/ChatHistoryView';
 import ChatComposer from '~/components/ChatComposer';
 import RoleMemoryViewer from '~/components/RoleMemoryViewer';
 import ChatThread from '~/components/chat/ChatThread';
-import { StopBar, AgentRoleHint, EmptyChat } from '~/components/chat/ChatExtras';
+import { AgentRoleHint, EmptyChat } from '~/components/chat/ChatExtras';
 import { isServiceType } from '~/lib/agent-types';
 import { daemonStore } from '~/state/daemon';
 import { openTokenUnlockModal } from '~/components/modals/TokenUnlockModal';
@@ -19,7 +18,6 @@ import { buildStream, type StreamItem } from '~/lib/chat-stream';
 // re-pass a fresh client.
 export default function ChatPanel() {
   const client = () => daemonStore.state.client;
-  const [cancelling, setCancelling] = createSignal(false);
   const [historyOpen, setHistoryOpen] = createSignal(false);
   const [memoryOpen, setMemoryOpen] = createSignal(false);
   let threadEl: HTMLDivElement | undefined;
@@ -47,18 +45,6 @@ export default function ChatPanel() {
     });
   });
   createEffect(() => { void conv(); setHistoryOpen(false); });
-
-  const stop = async () => {
-    const c = conv();
-    const cli = client();
-    if (!c || !cli || cancelling()) return;
-    setCancelling(true);
-    try {
-      log.info('chat cancel', { conv: c });
-      const res = await cli.chatCancel(c);
-      if (!res.ok) log.error('chat cancel failed', res.status, res.body);
-    } finally { setCancelling(false); }
-  };
 
   const archive = () => {
     const c = conv();
@@ -108,9 +94,11 @@ export default function ChatPanel() {
         }>
           <ChatThread ref={(el) => (threadEl = el)} stream={stream()} />
         </Show>
-        <Show when={isRunning()}>
-          <StopBar cancelling={cancelling()} onStop={() => void stop()} />
-        </Show>
+        {/* V89.2 — StopBar removed. The Stop control now lives inline
+            in the streaming agent bubble's BubbleHeader, on the same
+            row as the byline at the far right (subtle but
+            unmistakable). One control per turn — the operator stops
+            the speaker, not a generic bar attached to the composer. */}
         <ChatComposer
           conv={conv()!}
           placeholder={isRunning()
