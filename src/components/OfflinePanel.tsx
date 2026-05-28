@@ -50,6 +50,15 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }) {
   // and the cockpit picks it up.
   const [watching, setWatching] = createSignal(true);
   const [elapsedSec, setElapsedSec] = createSignal(0);
+  // V86m — diagnose state. `tls-missing` is set when the HTTPS probe
+  // fails but a fallback HTTP probe to localhost succeeds — meaning
+  // the daemon IS running, it just lacks the tls/ bundle so the
+  // HTTPS-only cockpit can't speak to it. Requires the daemon to
+  // serve `Access-Control-Allow-Private-Network: true` (py-1.9.1+)
+  // so Chrome's LNA preflight doesn't block the fallback probe.
+  // Older daemons stay in 'unknown' — the panel falls back to its
+  // generic "covers both cases" prompt.
+  const [diagnose, setDiagnose] = createSignal<'unknown' | 'tls-missing'>('unknown');
 
   // Re-run whenever `watching` toggles or the target port changes.
   // Each fresh run resets the elapsed counter, schedules the next
@@ -86,6 +95,22 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }) {
           return;
         }
       } catch { /* not up yet — keep ticking */ }
+      // V86m — HTTPS probe failed. Try plain HTTP localhost as a
+      // diagnostic. If it succeeds, the daemon IS running and the
+      // problem is missing TLS. Requires the daemon to opt into
+      // Chrome's LNA via the Access-Control-Allow-Private-Network
+      // header (py-1.9.1+). Older daemons → fetch throws, no flip.
+      if (diagnose() === 'unknown' && !cancelled) {
+        try {
+          const r2 = await fetch(`http://localhost:${port}/health`, {
+            signal: AbortSignal.timeout(WATCH_TIMEOUT_MS),
+          });
+          if (r2.ok) {
+            log.warn('[OfflinePanel] daemon answers HTTP but not HTTPS — TLS bundle missing', { port });
+            setDiagnose('tls-missing');
+          }
+        } catch { /* both fail — daemon really is dead */ }
+      }
       if (!cancelled) {
         probeTimer = setTimeout(() => { void probe(); }, WATCH_INTERVAL_MS);
       }
@@ -120,34 +145,70 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }) {
     });
   });
 
-  const command = () => {
-    const port = props.sel.port;
-    return `python3 .meshkore/scripts/daemon.py --port ${port}`;
+  const startCommand = () => `python3 .meshkore/scripts/daemon.py --port ${props.sel.port}`;
+  const shutdownCommand = () => {
+    // V86m — Operator runs this when the port is already bound but the
+    // cockpit can't speak to the daemon over TLS (typical: pre-py-1.8
+    // daemon serving plain HTTP). The shutdown is unauthenticated only
+    // when invoked from the same machine via curl localhost; from the
+    // cockpit we'd need a token. So we hand the operator a curl line.
+    return `curl -s -X POST http://localhost:${props.sel.port}/shutdown ` +
+           `-H "Authorization: Bearer $(cat .meshkore/credentials/portal-token)"`;
+  };
+  const upgradeCommand = () => {
+    // Sync this project's daemon.py + tls/ bundle from a known-good
+    // peer (meshkore-main checkout). The operator's local code agent
+    // can adjust the source path. Without the bundle, the cockpit's
+    // HTTPS transport can't speak to the daemon.
+    return [
+      'cp ~/Documents/Prj/asimovia/meshkore/.meshkore/scripts/daemon.py .meshkore/scripts/daemon.py',
+      'cp -R ~/Documents/Prj/asimovia/meshkore/.meshkore/scripts/tls .meshkore/scripts/tls',
+    ].join(' && \\\n');
   };
 
   const agentPrompt = () => {
     const port = props.sel.port;
     const cid = props.sel.cluster_id ? ` (cluster_id=${props.sel.cluster_id})` : '';
     return (
-      `Please start the MeshKore daemon for this project${cid} on port ${port}. ` +
-      `Run: \`python3 .meshkore/scripts/daemon.py --port ${port}\` in this folder. ` +
-      `The architect cockpit at https://architect.meshkore.com will reconnect ` +
-      `automatically once /health responds.`
+`The MeshKore architect cockpit at https://architect.meshkore.com can't reach ` +
+`this project's daemon${cid} on port ${port}. Diagnose and fix:
+
+1. Check if a daemon is already listening:
+   \`lsof -iTCP:${port} -sTCP:LISTEN\`
+
+2a. If NO process owns the port → start the daemon:
+    \`python3 .meshkore/scripts/daemon.py --port ${port}\`
+
+2b. If a process IS bound → the daemon is alive but its TLS bundle is missing,
+    so the HTTPS-only cockpit can't speak to it. Repair:
+    - shutdown the running daemon (curl localhost is fine):
+      \`curl -s -X POST http://localhost:${port}/shutdown -H "Authorization: Bearer $(cat .meshkore/credentials/portal-token)"\`
+    - copy a recent daemon.py + tls/ bundle from a peer project (e.g.
+      \`~/Documents/Prj/asimovia/meshkore/.meshkore/scripts/{daemon.py,tls/}\`)
+      into THIS project's \`.meshkore/scripts/\`.
+    - restart: \`python3 .meshkore/scripts/daemon.py --port ${port}\`
+
+The cockpit will auto-reconnect the moment /health responds over HTTPS at
+https://daemon.meshkore.com:${port}/health.`
     );
   };
 
-  const reasonText = () => {
-    switch (props.sel.reason) {
-      case 'no-daemon':
-        return 'No daemon answered on this port. Either it never started, ' +
-               'crashed, or the port changed.';
-      case 'tls':
-        return 'A daemon is listening, but the TLS handshake failed. Most ' +
-               'likely an older daemon serving plain HTTP — upgrade it to ' +
-               'py-1.8.x and drop the tls/ bundle next to daemon.py.';
-      default:
-        return 'The daemon couldn\'t be reached.';
+  const headerText = () => {
+    if (diagnose() === 'tls-missing') {
+      return (
+        `Daemon detected on :${props.sel.port} but it's serving plain HTTP — ` +
+        `the cockpit only speaks HTTPS via daemon.meshkore.com. ` +
+        `Fix by syncing the TLS bundle and restarting (steps 1 & 3 below). ` +
+        `Once /health responds over HTTPS the cockpit reconnects automatically.`
+      );
     }
+    return (
+      `Can't reach the daemon at https://daemon.meshkore.com:${props.sel.port}. ` +
+      `Either it's not running, OR it's running but missing the TLS bundle ` +
+      `(plain HTTP daemons can't talk to the HTTPS cockpit). The browser ` +
+      `can't tell the two apart, so the prompt below covers both paths — the ` +
+      `code agent in step 4 picks the right one after a quick check.`
+    );
   };
 
   return (
@@ -162,7 +223,7 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }) {
               {(cid) => <span class="offline-panel__cluster">· {cid()}</span>}
             </Show>
           </div>
-          <p class="offline-panel__subtitle">{reasonText()}</p>
+          <p class="offline-panel__subtitle">{headerText()}</p>
         </header>
 
         <div class="offline-panel__steps">
@@ -174,14 +235,21 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }) {
           />
           <Step
             n={2}
-            title="Start the daemon"
-            hint="One-liner — assumes .meshkore/scripts/daemon.py exists."
-            code={command()}
+            title="If the daemon isn't running yet — start it"
+            hint="One-liner. Assumes .meshkore/scripts/daemon.py + tls/ bundle are in place."
+            code={startCommand()}
           />
           <Step
             n={3}
-            title="Or ask your local code agent"
-            hint="Paste this prompt into Claude Code / Cursor / Cline in the project root."
+            title="If the port is already bound — the daemon is missing TLS"
+            hint="Shut it down, sync daemon.py + tls/ from a healthy peer, restart. The cockpit only speaks HTTPS so plain-HTTP daemons stay invisible."
+            code={[shutdownCommand(), upgradeCommand(), startCommand()].join('\n\n# then\n')}
+            multiline
+          />
+          <Step
+            n={4}
+            title="Or hand the whole job to your local code agent"
+            hint="Paste this into Claude Code / Cursor / Cline in the project root — it covers both paths above."
             code={agentPrompt()}
             multiline
           />
