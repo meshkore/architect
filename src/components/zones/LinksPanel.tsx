@@ -60,7 +60,7 @@ export default function LinksPanel() {
   };
 
   return (
-    <div class="flex-1 min-h-0 flex flex-col bg-canvas">
+    <div class="flex-1 min-h-0 flex flex-col">
       <header class="px-6 pt-6 pb-3 border-b border-gray-800/60 flex items-center gap-3 flex-shrink-0">
         <div class="w-8 h-8 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center">
           <svg class="w-4 h-4 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">

@@ -145,19 +145,87 @@ export function MessageBubble(props: { msg: ChatMsg; prepend?: boolean }) {
     : <AssistantBubble msg={props.msg} />;
 }
 
-export function UserBubble(props: { msg: ChatMsg; prepend?: boolean }) {
+/**
+ * V86u — Shared bubble header. Renders the agent id chip + name (or
+ * just the operator label) and a HH:MM timestamp. Removed the
+ * surrounding rounded card from both bubble kinds, so the header is
+ * the only visual anchor that separates one turn from the next.
+ *
+ * `tone` only changes the name colour — id chips stay emerald,
+ * timestamps stay gray. Keeping the chrome minimal is the whole
+ * point of the V86u refactor.
+ */
+function BubbleHeader(props: {
+  primary: string;
+  id?: string;
+  ts?: string;
+  align: 'left' | 'right';
+  tone: 'agent' | 'operator' | 'cancelled';
+  suffix?: string;
+}) {
+  const nameColor = (): string => {
+    if (props.tone === 'cancelled') return 'text-red-300';
+    if (props.tone === 'operator') return 'text-emerald-300';
+    return 'text-gray-100';
+  };
   return (
-    <div class="flex flex-col gap-1 items-end">
-      <span class="text-[10px] font-mono text-gray-600 flex items-center gap-1.5">
-        {props.msg.author || 'operator'}
-        <Show when={props.prepend}>
-          <span class="text-amber-400/80">· queued (merges into next turn)</span>
-        </Show>
-      </span>
-      <div class={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed flex flex-col ${
-        props.prepend
-          ? 'bg-amber-500/10 text-amber-100 border border-amber-500/30'
-          : 'bg-emerald-500/15 text-emerald-100 border border-emerald-500/30'
+    <div class={`flex items-baseline gap-1.5 text-[11px] ${props.align === 'right' ? 'flex-row-reverse' : ''}`}>
+      <Show when={props.id}>
+        <span class="font-mono text-[10px] text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/25 rounded px-1.5 py-0.5 uppercase tracking-wider">
+          {props.id}
+        </span>
+      </Show>
+      <span class={`font-semibold ${nameColor()}`}>{props.primary}</span>
+      <Show when={props.ts}>
+        <span class="font-mono text-[10px] text-gray-600">
+          <time dateTime={props.ts}>{formatBubbleTs(props.ts!)}</time>
+        </span>
+      </Show>
+      <Show when={props.suffix}>
+        <span class={`font-mono text-[10px] uppercase tracking-wider ${
+          props.tone === 'cancelled' ? 'text-red-400/80' : 'text-amber-400/80'
+        }`}>
+          · {props.suffix}
+        </span>
+      </Show>
+    </div>
+  );
+}
+
+function formatBubbleTs(ts: string): string {
+  try {
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return ts;
+    const today = new Date();
+    const sameDay =
+      d.getFullYear() === today.getFullYear() &&
+      d.getMonth() === today.getMonth() &&
+      d.getDate() === today.getDate();
+    const hhmm = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    if (sameDay) return hhmm;
+    const dm = d.toLocaleDateString(undefined, { day: '2-digit', month: 'short' });
+    return `${dm} · ${hhmm}`;
+  } catch {
+    return ts;
+  }
+}
+
+export function UserBubble(props: { msg: ChatMsg; prepend?: boolean }) {
+  // V86u — borderless. Operator's input reads as a right-aligned
+  // block of text with a small monospace byline above it. The
+  // emerald tint on the body text + right-alignment is enough to
+  // distinguish "me" from "the agent" without rounded boxes.
+  return (
+    <div class="flex flex-col gap-0.5 items-end w-full">
+      <BubbleHeader
+        primary={props.msg.author || 'operator'}
+        ts={props.msg.ts}
+        align="right"
+        tone="operator"
+        suffix={props.prepend ? 'queued · merges into next turn' : undefined}
+      />
+      <div class={`max-w-[85%] text-sm leading-relaxed text-right ${
+        props.prepend ? 'text-amber-200/95' : 'text-emerald-200/95'
       }`}>
         <CollapsibleText text={props.msg.text} />
       </div>
@@ -166,35 +234,28 @@ export function UserBubble(props: { msg: ChatMsg; prepend?: boolean }) {
 }
 
 export function AssistantBubble(props: { msg: ChatMsg }) {
-  // V86p — Build the byline from convMeta (operator's agent name +
-  // generated A001 id) instead of falling back to msg.author, which
-  // is the daemon's identity string (e.g. "MacBook-Pro-de-Ricart-py").
-  // The hostname is fine in the timeline ledger; in the chat it
-  // looked alien.
-  const byline = () => {
+  // V86u — borderless. Agent replies read as continuous prose with a
+  // bold byline (A001 chip + agent name) and a timestamp. The body
+  // is rendered markdown (`.md prose`) — headings, tables, code all
+  // styled by the existing prose classes, no surrounding card.
+  const meta = () => {
     const conv = chatStore.state.activeConv;
-    const meta = conv ? chatStore.state.convMeta[conv] : null;
-    if (meta) {
-      const idLabel = meta.agentId ? `${meta.agentId} · ` : '';
-      const name = meta.title || 'agent';
-      return `${idLabel}${name}`;
-    }
-    return props.msg.author || 'coordinator';
+    return conv ? chatStore.state.convMeta[conv] : null;
   };
+  const agentId = () => meta()?.agentId ?? null;
+  const agentName = () => meta()?.title || props.msg.author || 'coordinator';
   return (
-    <div class="flex flex-col gap-1 items-start w-full">
-      <span class="text-[10px] font-mono text-gray-600 flex items-center gap-1.5">
-        <span class="text-gray-400">{byline()}</span>
-        <Show when={props.msg.cancelled}>
-          <span class="text-red-400">· cancelled</span>
-        </Show>
-      </span>
-      <div class={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed flex flex-col ${
-        props.msg.cancelled
-          ? 'bg-red-500/10 text-red-200 border border-red-500/30'
-          : props.msg.streaming
-            ? 'bg-gray-900/70 text-gray-200 border border-emerald-500/40 shadow-[0_0_0_1px_rgba(52,211,153,0.15),0_0_20px_-6px_rgba(52,211,153,0.45)]'
-            : 'bg-gray-900/70 text-gray-200 border border-gray-800'
+    <div class="flex flex-col gap-0.5 items-start w-full">
+      <BubbleHeader
+        primary={agentName()}
+        id={agentId() ?? undefined}
+        ts={props.msg.ts}
+        align="left"
+        tone={props.msg.cancelled ? 'cancelled' : 'agent'}
+        suffix={props.msg.cancelled ? 'cancelled' : undefined}
+      />
+      <div class={`text-sm leading-relaxed max-w-[90%] ${
+        props.msg.cancelled ? 'text-red-300/95' : 'text-gray-200'
       }`}>
         <Show
           when={props.msg.streaming}
@@ -273,21 +334,20 @@ function StreamingTail(props: { text: string }) {
  * → tail.
  */
 export function PreparingBubble(_props: { dispatchedAt: number }) {
-  const byline = () => {
+  const meta = () => {
     const conv = chatStore.state.activeConv;
-    const meta = conv ? chatStore.state.convMeta[conv] : null;
-    if (meta) {
-      const idLabel = meta.agentId ? `${meta.agentId} · ` : '';
-      return `${idLabel}${meta.title || 'agent'}`;
-    }
-    return 'coordinator';
+    return conv ? chatStore.state.convMeta[conv] : null;
   };
   return (
-    <div class="flex flex-col gap-1 items-start w-full">
-      <span class="text-[10px] font-mono text-gray-600 flex items-center gap-1.5">
-        <span class="text-gray-400">{byline()}</span>
-      </span>
-      <div class="max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed flex flex-col bg-gray-900/70 text-gray-200 border border-emerald-500/40 shadow-[0_0_0_1px_rgba(52,211,153,0.15),0_0_20px_-6px_rgba(52,211,153,0.45)]">
+    <div class="flex flex-col gap-0.5 items-start w-full">
+      <BubbleHeader
+        primary={meta()?.title || 'coordinator'}
+        id={meta()?.agentId ?? undefined}
+        ts={undefined}
+        align="left"
+        tone="agent"
+      />
+      <div class="max-w-[90%] text-sm leading-relaxed">
         <ThinkingPlaceholder />
       </div>
     </div>

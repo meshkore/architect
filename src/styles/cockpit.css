@@ -614,7 +614,7 @@
     /* V25 — three floating panels. Same panel bg, soft radius, drop
        shadow → each reads as a discrete object on the canvas. The
        splitter columns sit between them as transparent gaps. */
-    .nav-col, .left-col, .center-col {
+    .nav-col, .left-col, .center-col, .zone-host {
       background: var(--bg-panel);
       border-radius: var(--panel-radius);
       box-shadow: var(--panel-shadow);
