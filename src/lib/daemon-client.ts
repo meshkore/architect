@@ -142,6 +142,23 @@ export interface LogListResponse {
 }
 
 
+export interface InitiativeActivityCommit {
+  repo?: string;
+  sha: string;
+  short_sha: string;
+  ts: string;
+  author: string;
+  subject: string;
+  files: string[];
+  files_truncated?: boolean;
+}
+export interface InitiativeActivity {
+  initiative_id: string;
+  commits: InitiativeActivityCommit[];
+  generated_at: string;
+  error?: string;
+}
+
 export interface LinksLocal {
   url?: string;
   command?: string;
@@ -266,6 +283,14 @@ export class DaemonClient {
 
   async protocols(signal?: AbortSignal): Promise<Result<unknown>> {
     return this.request<unknown>('GET', '/protocols', undefined, signal);
+  }
+
+  /** V86w — Per-initiative git activity. Returns commits whose
+   *  subject/body mentions the initiative id, plus the files each
+   *  commit touched. Multi-repo workspaces walk depth-1
+   *  sub-repos and combine results. */
+  async initiativeActivity(id: string, signal?: AbortSignal): Promise<Result<InitiativeActivity>> {
+    return this.request<InitiativeActivity>('GET', `/initiative/${encodeURIComponent(id)}/activity`, undefined, signal);
   }
 
   /** V86j — Single protocol body + frontmatter. The daemon serves

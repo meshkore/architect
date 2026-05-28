@@ -11,8 +11,10 @@ import { For, Show, createSignal, createMemo } from 'solid-js';
 import { allInitiatives, allTasks, isProjectEmpty, type ServerInitiative, type ServerTask } from '~/state/server';
 import InitiativeCard from '~/components/InitiativeCard';
 import EmptyOnboardingPanel from '~/components/EmptyOnboardingPanel';
+import { viewStore } from '~/state/view';
 
 type StatusFilter = 'all' | 'active' | 'next' | 'backlog';
+type VisibilityFilter = 'active' | 'archived' | 'all';
 
 const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: 'all',     label: 'all' },
@@ -21,8 +23,15 @@ const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: 'backlog', label: 'backlog' },
 ];
 
+const VISIBILITY_FILTERS: { id: VisibilityFilter; label: string }[] = [
+  { id: 'active',   label: 'active' },
+  { id: 'archived', label: 'archived' },
+  { id: 'all',      label: 'all' },
+];
+
 export default function InitiativesPanel() {
   const [status, setStatus] = createSignal<StatusFilter>('all');
+  const [visibility, setVisibility] = createSignal<VisibilityFilter>('active');
   const [query, setQuery] = createSignal('');
 
   const tasksByInitiative = createMemo(() => {
@@ -38,7 +47,15 @@ export default function InitiativesPanel() {
   const filtered = createMemo<ServerInitiative[]>(() => {
     const q = query().trim().toLowerCase();
     const st = status();
+    const vis = visibility();
     return allInitiatives().filter((it) => {
+      // V86w — visibility filter. `active` (default) hides archived
+      // initiatives; `archived` shows ONLY archived; `all` shows
+      // both. Archive state is stored per-cluster in viewStore so it
+      // doesn't bleed across projects.
+      const arch = viewStore.isInitiativeArchived(it.id);
+      if (vis === 'active' && arch) return false;
+      if (vis === 'archived' && !arch) return false;
       if (st !== 'all' && it.status !== st) return false;
       if (!q) return true;
       const hay = `${it.title} ${it.id} ${it.oneliner ?? ''}`.toLowerCase();
@@ -51,6 +68,31 @@ export default function InitiativesPanel() {
       <Show when={!isProjectEmpty()} fallback={<EmptyOnboardingPanel />}>
         <header class="flex flex-wrap items-center gap-2 mb-4">
           <h2 class="text-sm font-mono uppercase tracking-wider text-gray-500">Initiatives</h2>
+          {/* V86w — visibility filter sits between the search box and
+              the status pills. `active` keeps the roadmap clean; the
+              operator toggles to `archived` to dig out older work. */}
+          <div class="flex items-center gap-1">
+            <For each={VISIBILITY_FILTERS}>
+              {(f) => (
+                <button
+                  type="button"
+                  onClick={() => setVisibility(f.id)}
+                  class={`px-2 py-1 rounded text-[10px] font-mono uppercase tracking-wider transition-colors ${
+                    visibility() === f.id
+                      ? 'bg-amber-500/15 text-amber-300 border border-amber-500/40'
+                      : 'text-gray-500 hover:text-gray-300 border border-transparent'
+                  }`}
+                  title={
+                    f.id === 'active' ? 'Hide archived initiatives'
+                    : f.id === 'archived' ? 'Show only archived initiatives'
+                    : 'Show both archived and active'
+                  }
+                >
+                  {f.label}
+                </button>
+              )}
+            </For>
+          </div>
           <input
             type="text"
             placeholder="Filter…"

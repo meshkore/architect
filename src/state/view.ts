@@ -31,6 +31,13 @@ interface ProjectView {
   /** taskId → true when the task card is expanded inline (shows the
    *  body alongside the title). V86h. */
   tasks?: Record<string, boolean>;
+  /** V86w — initiativeId → true when the operator hid the initiative
+   *  card from the roadmap. Survives reload; the filter pill at the
+   *  top of InitiativesPanel toggles whether archived rows render. */
+  archivedInitiatives?: Record<string, boolean>;
+  /** V86w — initiativeId → which detail tab is selected when
+   *  expanded ('tasks' default, or 'activity'). */
+  initiativeTab?: Record<string, 'tasks' | 'activity'>;
 }
 
 interface ViewState {
@@ -38,7 +45,10 @@ interface ViewState {
   view: ProjectView;
 }
 
-const EMPTY: ProjectView = { initiatives: {}, modules: {}, groupByPhase: {}, descriptions: {}, tasks: {} };
+const EMPTY: ProjectView = {
+  initiatives: {}, modules: {}, groupByPhase: {}, descriptions: {}, tasks: {},
+  archivedInitiatives: {}, initiativeTab: {},
+};
 
 function keyFor(cluster: string | null): string {
   return `mc-view-v1::${cluster ?? '_local'}`;
@@ -55,6 +65,8 @@ function loadFor(cluster: string | null): ProjectView {
       groupByPhase: parsed.groupByPhase ?? {},
       descriptions: parsed.descriptions ?? {},
       tasks: parsed.tasks ?? {},
+      archivedInitiatives: parsed.archivedInitiatives ?? {},
+      initiativeTab: parsed.initiativeTab ?? {},
     };
   } catch {
     return { ...EMPTY };
@@ -130,6 +142,24 @@ function toggleTask(taskId: string): void {
   persist();
 }
 
+function isInitiativeArchived(id: string): boolean {
+  return state.view.archivedInitiatives?.[id] === true;
+}
+
+function setInitiativeArchived(id: string, value: boolean): void {
+  setState('view', 'archivedInitiatives', id, value);
+  persist();
+}
+
+function initiativeTab(id: string): 'tasks' | 'activity' {
+  return state.view.initiativeTab?.[id] ?? 'tasks';
+}
+
+function setInitiativeTab(id: string, tab: 'tasks' | 'activity'): void {
+  setState('view', 'initiativeTab', id, tab);
+  persist();
+}
+
 export const viewStore = {
   state,
   bindCluster,
@@ -145,4 +175,8 @@ export const viewStore = {
   toggleDescription,
   isTaskExpanded,
   toggleTask,
+  isInitiativeArchived,
+  setInitiativeArchived,
+  initiativeTab,
+  setInitiativeTab,
 };

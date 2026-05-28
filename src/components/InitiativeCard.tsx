@@ -19,13 +19,14 @@
  *      backwards-compat with older localStorage payloads.
  */
 
-import { For, Show, createMemo } from 'solid-js';
+import { For, Show, createMemo, createResource } from 'solid-js';
 import type { ServerInitiative, ServerTask } from '~/state/server';
 import { sortTasks, groupByPhases } from '~/components/initiative/task-grouping';
 import { TaskGrid, StatusBadge } from '~/components/initiative/TaskGrid';
 import { storyStore } from '~/state/story';
 import { chatStore } from '~/state/chat';
 import { viewStore } from '~/state/view';
+import { daemonStore } from '~/state/daemon';
 import { collectStoryTaskIds } from '~/components/story/StoryRunner';
 import StoryProgressPill from '~/components/story/StoryProgressPill';
 import { log } from '~/lib/log';
@@ -90,8 +91,26 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
   const isRunning = () => storyStore.state.run?.initiativeId === props.initiative.id
     && storyStore.state.run?.status !== 'done';
 
+  // V86w — archive / unarchive lives in viewStore (per-cluster
+  // localStorage). When the operator archives an initiative the
+  // panel's `visibility` filter hides it from the active list — the
+  // initiative still exists, can be unarchived, and reappears on
+  // demand.
+  const isArchived = () => viewStore.isInitiativeArchived(props.initiative.id);
+  const toggleArchive = (e: MouseEvent): void => {
+    e.stopPropagation();
+    viewStore.setInitiativeArchived(props.initiative.id, !isArchived());
+  };
+
+  // V86w — Detail tab inside the expanded card. Defaults to 'tasks';
+  // 'activity' fetches /initiative/<id>/activity (commits + files).
+  const tab = () => viewStore.initiativeTab(props.initiative.id);
+  const setTab = (t: 'tasks' | 'activity') => viewStore.setInitiativeTab(props.initiative.id, t);
+
   return (
-    <article class="bg-gray-900/40 border border-gray-800/70 rounded-lg overflow-hidden">
+    <article class={`bg-gray-900/40 border rounded-lg overflow-hidden ${
+      isArchived() ? 'border-amber-500/25 opacity-70' : 'border-gray-800/70'
+    }`}>
       <header class="flex items-center gap-3 px-4 py-3">
         <button
           type="button"
@@ -108,6 +127,11 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
           class="flex-1 flex items-center gap-3 min-w-0 text-left"
         >
           <h3 class="text-sm font-semibold text-gray-100 truncate">{props.initiative.title}</h3>
+          <Show when={isArchived()}>
+            <span class="font-mono text-[9px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5 uppercase tracking-wider flex-shrink-0">
+              archived
+            </span>
+          </Show>
           <Show when={props.initiative.status}>
             <StatusBadge status={props.initiative.status as string} />
           </Show>
@@ -128,6 +152,20 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
             <path d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
           </svg>
         </button>
+        <button
+          type="button"
+          onClick={toggleArchive}
+          title={isArchived() ? 'Restore to active list' : 'Hide from active list'}
+          class="w-7 h-7 rounded-md text-gray-500 hover:text-amber-300 border border-transparent hover:border-amber-500/40 flex items-center justify-center text-[10px] font-mono flex-shrink-0 transition-colors"
+        >
+          <Show when={!isArchived()} fallback={<span aria-hidden="true">↺</span>}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="4" rx="1" />
+              <path d="M5 8v11a1 1 0 001 1h12a1 1 0 001-1V8" />
+              <path d="M10 12h4" />
+            </svg>
+          </Show>
+        </button>
       </header>
 
       <Show when={expanded()}>
@@ -143,17 +181,29 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
             />
           </Show>
 
-          <Show when={props.tasks.length > 0} fallback={<NoTasks />}>
-            <For each={grouped()}>
-              {([phase, tasks]) => (
-                <div class="mb-4 last:mb-0">
-                  <div class="text-[10px] font-mono uppercase tracking-wider text-gray-600 border-b border-gray-800/60 pb-1 mb-2">
-                    {phase}
+          {/* V86w — detail tabs. `tasks` keeps the existing per-phase
+              grid; `activity` surfaces git commits + files modified
+              for this initiative (daemon py-1.9.3+). */}
+          <div class="flex items-center gap-1 border-b border-gray-800/60 -mx-4 px-4 pb-1">
+            <TabPill label="Tasks" active={tab() === 'tasks'} onClick={() => setTab('tasks')} />
+            <TabPill label="Activity" active={tab() === 'activity'} onClick={() => setTab('activity')} />
+          </div>
+
+          <Show when={tab() === 'activity'} fallback={
+            <Show when={props.tasks.length > 0} fallback={<NoTasks />}>
+              <For each={grouped()}>
+                {([phase, tasks]) => (
+                  <div class="mb-4 last:mb-0">
+                    <div class="text-[10px] font-mono uppercase tracking-wider text-gray-600 border-b border-gray-800/60 pb-1 mb-2">
+                      {phase}
+                    </div>
+                    <TaskGrid tasks={tasks} />
                   </div>
-                  <TaskGrid tasks={tasks} />
-                </div>
-              )}
-            </For>
+                )}
+              </For>
+            </Show>
+          }>
+            <ActivityTab initiativeId={props.initiative.id} />
           </Show>
         </div>
       </Show>
@@ -213,4 +263,122 @@ function NoTasks() {
   return (
     <p class="text-xs text-gray-600 italic py-2">No tasks linked to this initiative yet.</p>
   );
+}
+
+function TabPill(props: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={props.onClick}
+      class={`px-2.5 py-1 rounded-t text-[10px] font-mono uppercase tracking-wider transition-colors ${
+        props.active
+          ? 'text-emerald-300 border-b-2 border-emerald-500'
+          : 'text-gray-500 hover:text-gray-300 border-b-2 border-transparent'
+      }`}
+    >
+      {props.label}
+    </button>
+  );
+}
+
+/**
+ * V86w — Activity tab for an expanded initiative card. Fetches
+ * `/initiative/<id>/activity` (py-1.9.3+) — git commits whose
+ * subject/body mentions the initiative id, with the files each
+ * commit touched. Multi-repo workspaces label each commit with its
+ * repo slug so the operator can tell them apart.
+ *
+ * Daemons older than py-1.9.3 don't expose the endpoint; the
+ * createResource error surfaces a "needs daemon py-1.9.3" notice
+ * with the upgrade hint.
+ */
+function ActivityTab(props: { initiativeId: string }) {
+  const [activity] = createResource(
+    () => ({ id: props.initiativeId, client: daemonStore.state.client }),
+    async (input) => {
+      if (!input.client) throw new Error('no daemon client');
+      const r = await input.client.initiativeActivity(input.id);
+      if (!r.ok) throw new Error(r.error ?? `HTTP ${r.status}`);
+      return r.data;
+    },
+  );
+  const supported = () => (daemonStore.state.health?.features ?? []).includes('initiative.activity');
+
+  return (
+    <div class="space-y-2">
+      <Show when={!supported()}>
+        <div class="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+          Daemon doesn't expose <code class="font-mono">initiative.activity</code> yet — upgrade to <span class="font-mono">py-1.9.3</span> (apply protocol <span class="font-mono">P4</span>).
+        </div>
+      </Show>
+      <Show when={supported() && activity.loading}>
+        <p class="text-[11px] text-gray-500 font-mono">scanning git…</p>
+      </Show>
+      <Show when={supported() && activity.error}>
+        <p class="text-[11px] text-red-400 font-mono">load failed — {String(activity.error)}</p>
+      </Show>
+      <Show when={supported() && activity()?.error}>
+        <p class="text-[11px] text-gray-500 italic">{activity()?.error}</p>
+      </Show>
+      <Show when={supported() && activity() && (activity()!.commits.length === 0) && !activity()!.error}>
+        <p class="text-[11px] text-gray-600 italic">
+          No commits reference <code class="font-mono text-gray-400">{props.initiativeId}</code> yet. Commit messages that mention the id get picked up automatically.
+        </p>
+      </Show>
+      <Show when={(activity()?.commits.length ?? 0) > 0}>
+        <ul class="space-y-2.5">
+          <For each={activity()!.commits}>
+            {(c) => <CommitRow commit={c} />}
+          </For>
+        </ul>
+      </Show>
+    </div>
+  );
+}
+
+function CommitRow(props: { commit: import('~/lib/daemon-client').InitiativeActivityCommit }) {
+  return (
+    <li class="rounded border border-gray-800/60 bg-gray-900/40 px-3 py-2">
+      <div class="flex items-center gap-2 text-[11px] font-mono mb-1 flex-wrap">
+        <span class="text-emerald-300/90">{props.commit.short_sha}</span>
+        <Show when={props.commit.repo}>
+          <span class="text-gray-600 bg-gray-800/60 border border-gray-700/60 rounded px-1.5 py-0.5 uppercase tracking-wider text-[9px]">
+            {props.commit.repo}
+          </span>
+        </Show>
+        <span class="text-gray-500 truncate flex-1 min-w-0" title={props.commit.author}>
+          {props.commit.author}
+        </span>
+        <time class="text-gray-600" dateTime={props.commit.ts}>
+          {formatCommitTs(props.commit.ts)}
+        </time>
+      </div>
+      <p class="text-[12px] text-gray-200 leading-snug mb-1.5">{props.commit.subject}</p>
+      <Show when={props.commit.files.length > 0}>
+        <details class="text-[10px] font-mono text-gray-500">
+          <summary class="cursor-pointer hover:text-gray-300">
+            {props.commit.files.length} file{props.commit.files.length === 1 ? '' : 's'}
+            <Show when={props.commit.files_truncated}>
+              <span class="text-amber-400/80"> (truncated)</span>
+            </Show>
+          </summary>
+          <ul class="mt-1 space-y-0.5 max-h-48 overflow-y-auto">
+            <For each={props.commit.files}>
+              {(f) => <li class="text-gray-400 truncate" title={f}>{f}</li>}
+            </For>
+          </ul>
+        </details>
+      </Show>
+    </li>
+  );
+}
+
+function formatCommitTs(ts: string): string {
+  try {
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return ts;
+    return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+  } catch {
+    return ts;
+  }
 }
