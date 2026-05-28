@@ -130,32 +130,48 @@ export default function ChatComposer(props: {
           )}</For>
         </div>
       </Show>
-      {/* V86 — composer row aligned. Both buttons sit on the bottom
-          edge of the textarea, share the same h-9 (36 px) height, and
-          stay horizontally aligned regardless of how tall the textarea
-          grows. Attach is a 36×36 square (SVG paperclip matching the
-          rail's icon family); Send is wider to fit its label. */}
-      <div class="flex gap-2 items-end">
+      {/* V86n — Recovered the textarea width: send + attach are now
+          chrome-less icon buttons stacked vertically to the right.
+          Send is a filled triangle on top (primary action, draws the
+          eye), attach is the paperclip below. Both inherit the
+          textarea's vertical bounds so they sit flush with its
+          rounded corners. Textarea border lifted from gray-800 → 600
+          so the operator can actually see where the box ends. */}
+      <div class="flex gap-2 items-stretch">
         <textarea
           ref={taEl} value={draft()} rows="2" disabled={sending()}
           placeholder={props.placeholder ?? 'Reply…'}
           onInput={(e) => { setDraft(e.currentTarget.value); grow(); }}
           onKeyDown={onKey} onPaste={onPaste}
-          class="flex-1 bg-gray-950 border border-gray-800 rounded-md px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-emerald-500/50 disabled:opacity-60 resize-none"
+          class="flex-1 bg-gray-950 border border-gray-600/70 rounded-md px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-emerald-500/70 disabled:opacity-60 resize-none"
         />
         <input ref={fileEl} type="file" multiple accept={ACCEPT} class="hidden"
           onChange={(e) => { const fs = e.currentTarget.files; if (fs) for (let i = 0; i < fs.length; i += 1) addFile(fs[i]!); e.currentTarget.value = ''; }} />
-        <button type="button" title="Attach images or docs" onClick={() => fileEl?.click()}
-          class="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-800 hover:border-gray-600 text-gray-400 hover:text-gray-200 transition-colors flex-shrink-0">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-          </svg>
-        </button>
-        <button type="button" title="Send (Cmd/Ctrl+Enter)" onClick={() => void send()}
-          disabled={sending() || (!draft().trim() && imgs().length === 0 && docs().length === 0)}
-          class="inline-flex items-center justify-center h-9 px-4 rounded-md bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-semibold text-xs transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex-shrink-0">
-          {sending() ? '…' : 'Send'}
-        </button>
+        <div class="flex flex-col justify-between flex-shrink-0 py-0.5">
+          <button type="button" title="Send (Cmd/Ctrl+Enter)" onClick={() => void send()}
+            disabled={sending() || (!draft().trim() && imgs().length === 0 && docs().length === 0)}
+            class="inline-flex items-center justify-center w-8 h-8 rounded text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent">
+            <Show
+              when={!sending()}
+              fallback={
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" class="animate-spin">
+                  <path d="M21 12a9 9 0 11-6.219-8.56" stroke-linecap="round" />
+                </svg>
+              }
+            >
+              {/* Filled right-pointing triangle — send. */}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M5 4l16 8-16 8V4z" />
+              </svg>
+            </Show>
+          </button>
+          <button type="button" title="Attach images or docs" onClick={() => fileEl?.click()}
+            class="inline-flex items-center justify-center w-8 h-8 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800/60 transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
   );

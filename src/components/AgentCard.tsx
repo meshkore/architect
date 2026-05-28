@@ -1,11 +1,22 @@
 /**
  * AgentCard — single row in the ChatRail.
  *
- * Mirrors the V80 monolith's .agent-card markup: left stripe coloured by
- * agent type, id chip + model + location chip on the head row, title on
- * the body row, and a status line (idle / working with animated dots).
- * Pending-review ring is the V45 yellow-dashed outline; we render the
- * outer ::after via a Tailwind ring* class to stay CSS-free.
+ * V86n — switched to a border state-machine. Removed the V80 left
+ * stripe (the 3px coloured bar on the left edge) because:
+ *   - It ate horizontal room from the title.
+ *   - The agent-type colour is already visible on the inline chip.
+ *   - State signalling now uses the WHOLE border so the eye picks up
+ *     selected / working / review / drag-over at a glance.
+ *
+ * Border states (uniform 1px around, no left stripe):
+ *   idle         · gray-800 solid                          · neutral
+ *   selected     · emerald-500 solid + bg emerald-500/8    · primary
+ *   working      · emerald solid + soft animated halo glow · activity
+ *   review       · amber-400 1.5px dashed + bg amber/5     · attention
+ *   drag-over    · cyan-400 1.5px dashed + bg cyan-500/5   · transient
+ *
+ * Review wins over selected (the operator needs to act on it more than
+ * they need the active marker); drag-over wins over all (transient).
  */
 
 import { Show } from 'solid-js';
@@ -38,6 +49,38 @@ export default function AgentCard(props: AgentCardProps) {
   // name + actions.
   const typeInfo = () => agentTypeInfo(props.meta.type);
 
+  // V86n — border state-machine. Precedence (highest first):
+  //   drag-over  → dashed cyan-400 1.5px + bg cyan-500/5
+  //   review     → dashed amber-400 1.5px + bg amber-400/5
+  //   selected   → solid emerald-500 + bg emerald-500/10
+  //   working    → same border as selected/idle + animated halo
+  //   idle       → solid gray-800/70
+  // The card is always 1.5px on the border to keep the layout stable
+  // when state flips between solid / dashed; idle just uses a duller
+  // colour so the eye still distinguishes it from active.
+  const cardClasses = (): string => {
+    const base = [
+      'group relative w-full text-left rounded-md px-2.5 py-2',
+      'transition-colors flex flex-col gap-1 cursor-grab active:cursor-grabbing',
+      'border-[1.5px]',
+    ];
+    if (props.dragging) base.push('opacity-35');
+    if (props.dragOver) {
+      base.push('border-cyan-400/70 bg-cyan-500/5 border-dashed');
+    } else if (props.pendingReview) {
+      base.push('border-amber-400/75 bg-amber-400/[0.04] border-dashed');
+    } else if (props.active) {
+      base.push('border-emerald-500/60 bg-emerald-500/10');
+    } else {
+      base.push('border-gray-800/70 bg-gray-950/60 hover:border-gray-700');
+    }
+    // Working halo overlays any non-transient state.
+    if (props.status === 'working' && !props.dragOver && !props.pendingReview) {
+      base.push('shadow-[0_0_0_1px_rgba(52,211,153,0.20),0_0_18px_-4px_rgba(52,211,153,0.55)] animate-pulse-soft');
+    }
+    return base.join(' ');
+  };
+
   return (
     <button
       type="button"
@@ -60,18 +103,7 @@ export default function AgentCard(props: AgentCardProps) {
         props.onDrop(props.conv, e);
       }}
       title={`${title()} · ${props.meta.agentId} · ${props.meta.location?.type ?? 'local'}${props.pendingReview ? ' · review pending' : ''}`}
-      class={[
-        'group relative w-full text-left rounded-md border pl-2.5 pr-2 py-2',
-        'transition-colors flex flex-col gap-1 cursor-grab active:cursor-grabbing',
-        props.active
-          ? 'bg-emerald-500/10 border-emerald-500/45'
-          : 'bg-gray-950/60 border-gray-800/70 hover:border-gray-700',
-        props.dragging ? 'opacity-35' : '',
-        props.dragOver ? '!border-emerald-500/55 !bg-emerald-500/5' : '',
-        props.pendingReview ? 'ring-1 ring-amber-400/70 ring-offset-0' : '',
-      ].join(' ')}
-      /* dynamic: stripe colour comes from agent-type registry (props.stripe) */
-      style={{ 'border-left': `3px solid ${props.stripe}` }}
+      class={cardClasses()}
     >
       <span class="flex items-center gap-1.5 text-[10px] font-mono">
         <span
