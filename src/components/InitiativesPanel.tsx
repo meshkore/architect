@@ -48,13 +48,19 @@ export default function InitiativesPanel() {
     const q = query().trim().toLowerCase();
     const st = status();
     const vis = visibility();
+    const tbi = tasksByInitiative();
     return allInitiatives().filter((it) => {
-      // V86w — visibility filter. `active` (default) hides archived
-      // initiatives; `archived` shows ONLY archived; `all` shows
-      // both. Archive state is stored per-cluster in viewStore so it
-      // doesn't bleed across projects.
       const arch = viewStore.isInitiativeArchived(it.id);
-      if (vis === 'active' && arch) return false;
+      // V89.3 — "complete" derived from tasks (every task done +
+      // initiative has tasks). The default `active` view also hides
+      // these so the operator's roadmap shrinks as work lands — the
+      // ask: "a medida que las va haciendo van desapareciendo de la
+      // lista, solo voy viendo lo que está pendiente". `archived`
+      // and `all` still show them; `all` is the only view where the
+      // operator can scan completed + pending side-by-side.
+      const tasks = tbi.get(it.id) ?? [];
+      const complete = tasks.length > 0 && tasks.every((t) => t.status === 'done');
+      if (vis === 'active' && (arch || complete)) return false;
       if (vis === 'archived' && !arch) return false;
       if (st !== 'all' && it.status !== st) return false;
       if (!q) return true;

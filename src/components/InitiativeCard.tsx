@@ -41,6 +41,11 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
 
   const sorted = createMemo(() => sortTasks(props.tasks));
   const done = createMemo(() => props.tasks.filter((t) => t.status === 'done').length);
+  // V89.3 — initiative is "complete" when it has at least one task
+  // and every task is done. Used to swap the play button for a
+  // subtle check mark, and to hide the row from the default
+  // visibility=active list (InitiativesPanel filters on this).
+  const isComplete = createMemo(() => props.tasks.length > 0 && done() === props.tasks.length);
 
   const modules = createMemo<string[]>(() => {
     const m = new Set<string>();
@@ -176,26 +181,46 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
       isArchived() ? 'border-amber-500/25 opacity-70' : 'border-gray-800/70'
     }`}>
       <header class="flex items-center gap-3 px-4 py-3">
-        <button
-          type="button"
-          onClick={toggleRun}
-          disabled={isOtherLive()}
-          title={
-            isThisLive() ? 'Stop the run live on this initiative'
-            : isThisPaused() ? 'Resume this run (the previous turn was cut by a reload)'
-            : isOtherLive() ? 'Another initiative is running — stop it first'
-            : 'Run initiative (spawns a fresh agent)'
+        <Show
+          when={!isComplete()}
+          fallback={
+            <span
+              title="Initiative complete — all tasks done"
+              aria-label="initiative complete"
+              class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 border border-emerald-500/30 bg-emerald-500/5 text-emerald-300/70"
+            >
+              {/* V89.3 — Simple "V" / check mark inside the same square
+                  shape the play button uses. No circle, no fill — just
+                  a subtle stroke so the operator scans "this one's
+                  done" at a glance, especially under the ALL filter
+                  where complete + pending live side by side. */}
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12.5l4.5 4.5L19 7" />
+              </svg>
+            </span>
           }
-          class={`w-7 h-7 rounded-md flex items-center justify-center text-xs flex-shrink-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border ${
-            isThisLive()
-              ? 'bg-red-500/15 hover:bg-red-500/30 text-red-300 border-red-500/40'
-              : isThisPaused()
-                ? 'bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
-                : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
-          }`}
         >
-          {isThisLive() ? '■' : '▶'}
-        </button>
+          <button
+            type="button"
+            onClick={toggleRun}
+            disabled={isOtherLive()}
+            title={
+              isThisLive() ? 'Stop the run live on this initiative'
+              : isThisPaused() ? 'Resume this run (the previous turn was cut by a reload)'
+              : isOtherLive() ? 'Another initiative is running — stop it first'
+              : 'Run initiative (spawns a fresh agent)'
+            }
+            class={`w-7 h-7 rounded-md flex items-center justify-center text-xs flex-shrink-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border ${
+              isThisLive()
+                ? 'bg-red-500/15 hover:bg-red-500/30 text-red-300 border-red-500/40'
+                : isThisPaused()
+                  ? 'bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
+                  : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
+            }`}
+          >
+            {isThisLive() ? '■' : '▶'}
+          </button>
+        </Show>
         <button
           type="button"
           onClick={() => setExpanded(!expanded())}
