@@ -45,13 +45,10 @@ export default function StoryBanner() {
   const onCancel = async (): Promise<void> => {
     const run = r();
     if (!run) return;
-    storyStore.setStatus('stopping');
     const client = daemonStore.state.client;
-    if (client) {
-      const res = await client.chatCancel(run.conv);
-      if (!res.ok) log.warn('story cancel /chat/cancel failed', res.status, res.body);
-    }
-    storyStore.clear();
+    if (!client) return;
+    const ok = await storyStore.cancel(client, run.id);
+    if (!ok) log.warn('story banner: cancel failed');
   };
 
   return (

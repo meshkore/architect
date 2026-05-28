@@ -20,10 +20,11 @@
  * legacy `startLive` pipe stays wired until M9.
  */
 
-import type { DaemonClient } from './daemon-client';
+import type { DaemonClient, RunRecord } from './daemon-client';
 import type { DaemonWS, DaemonEvent } from './ws';
 import { chatStore } from '~/state/chat';
 import { serverStore } from '~/state/server';
+import { storyStore } from '~/state/story';
 import { log } from './log';
 
 const SNAPSHOT_REFRESH_TYPES = new Set<string>([
@@ -42,6 +43,7 @@ const SNAPSHOT_REFRESH_TYPES = new Set<string>([
 ]);
 
 const CHAT_TYPE_PREFIX = 'chat.';
+const RUN_TYPE_PREFIX = 'run.';
 
 /**
  * Attach the bus. Returns a teardown function — call it from
@@ -62,6 +64,17 @@ export function attachEventBus(ws: DaemonWS, client: DaemonClient, clusterKey: s
       // when inactive, it mutates the cached slice so the operator
       // sees the messages on switch back.
       chatStore.ingestEventForCluster(clusterKey, ev);
+      return;
+    }
+    if (t.startsWith(RUN_TYPE_PREFIX)) {
+      // py-1.10.0 — run.started / run.advanced / run.cancelled /
+      // run.done / run.failed. Daemon broadcasts the full RunRecord;
+      // the cockpit's storyStore just upserts by id. Multi-cluster
+      // safe because run records are scoped to the daemon emitting
+      // them (we'd need MP4-style per-cluster runs if cockpit ever
+      // attaches to two daemons in the same tab, not the case today).
+      const run = (ev as { run?: RunRecord }).run;
+      if (run) storyStore.ingestRunEvent({ type: t, run });
       return;
     }
     if (SNAPSHOT_REFRESH_TYPES.has(t)) {

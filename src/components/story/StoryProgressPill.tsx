@@ -20,15 +20,10 @@ interface Props {
 }
 
 export default function StoryProgressPill(props: Props) {
-  const r = () => storyStore.state.run;
-  const matchesRun = () => r()?.initiativeId === props.initiativeId
-    && r()?.status !== 'done'
-    && r()?.status !== 'cancelled';
-  const agentId = () => {
-    const conv = r()?.conv;
-    if (!conv) return null;
-    return chatStore.state.convMeta[conv]?.agentId ?? null;
-  };
+  const r = () => storyStore.runForInitiative(props.initiativeId);
+  const matchesRun = () => !!r();
+  const agentId = () => r()?.agentId ?? null;
+  const isPaused = () => r()?.status === 'paused';
 
   const goToChat = (e: MouseEvent): void => {
     e.stopPropagation();
@@ -55,17 +50,30 @@ export default function StoryProgressPill(props: Props) {
           <button
             type="button"
             onClick={goToChat}
-            class="font-mono text-[10px] text-emerald-300 bg-emerald-500/15 border border-emerald-500/40 rounded px-1.5 py-0.5 hover:bg-emerald-500/30 transition-colors"
-            title={`Story running on ${agentId()} — click to open chat`}
+            class={`font-mono text-[10px] rounded px-1.5 py-0.5 border transition-colors ${
+              isPaused()
+                ? 'text-amber-300 bg-amber-500/15 border-amber-500/40 hover:bg-amber-500/30'
+                : 'text-emerald-300 bg-emerald-500/15 border-emerald-500/40 hover:bg-emerald-500/30'
+            }`}
+            title={`Story ${isPaused() ? 'paused' : 'running'} on ${agentId()} — click to open chat`}
           >
             {agentId()} →
           </button>
         </Show>
         <span
-          class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/40 font-mono text-[10px] text-emerald-300"
+          class={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-mono text-[10px] border ${
+            isPaused()
+              ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+              : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+          }`}
           title="Current task / total in this story run"
         >
-          <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
+          <span
+            class={`inline-block w-1.5 h-1.5 rounded-full ${
+              isPaused() ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'
+            }`}
+            aria-hidden="true"
+          />
           {Math.min(r()!.cursor + 1, r()!.taskIds.length)}/{r()!.taskIds.length}
         </span>
       </span>

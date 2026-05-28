@@ -159,6 +159,39 @@ export interface InitiativeActivity {
   error?: string;
 }
 
+// py-1.10.0 — RunStore endpoints.
+export type RunStatus = 'running' | 'stopping' | 'cancelled' | 'done' | 'failed';
+
+export interface RunRecord {
+  id: string;
+  initiative_id: string;
+  initiative_title: string;
+  conv: string;
+  agent_id: string;
+  agent_title: string;
+  task_ids: string[];
+  cursor: number;
+  status: RunStatus;
+  started_at: string;
+  last_step_at: string;
+  ended_at: string | null;
+  stream_id: string | null;
+  error: string | null;
+  /** Derived server-side: is there a live chat session for the conv right
+   *  now? `false` while between steps OR after the daemon restarts. */
+  live: boolean;
+}
+
+export interface RunsList { runs: RunRecord[]; count: number }
+export interface RunStartBody {
+  initiative_id: string;
+  initiative_title: string;
+  conv: string;
+  agent_id: string;
+  agent_title: string;
+  task_ids: string[];
+}
+
 export interface LinksLocal {
   url?: string;
   command?: string;
@@ -337,6 +370,35 @@ export class DaemonClient {
 
   async chatCancel(conv: string, signal?: AbortSignal): Promise<Result<unknown>> {
     return this.request<unknown>('POST', '/chat/cancel', { conv }, signal);
+  }
+
+  // py-1.10.0 — Story-run coordinator.
+  async runsList(activeOnly = false, signal?: AbortSignal): Promise<Result<RunsList>> {
+    return this.request<RunsList>('GET', `/runs${activeOnly ? '?active=1' : ''}`, undefined, signal);
+  }
+
+  async runStart(body: RunStartBody, signal?: AbortSignal): Promise<Result<{ ok: boolean; run: RunRecord }>> {
+    return this.request<{ ok: boolean; run: RunRecord }>('POST', '/runs', body, signal);
+  }
+
+  async runCancel(id: string, signal?: AbortSignal): Promise<Result<{ ok: boolean; run: RunRecord }>> {
+    return this.request<{ ok: boolean; run: RunRecord }>('POST', `/runs/${encodeURIComponent(id)}/cancel`, {}, signal);
+  }
+
+  async runAdvance(id: string, cursor: number, streamId?: string, signal?: AbortSignal): Promise<Result<{ ok: boolean; run: RunRecord }>> {
+    const body: Record<string, unknown> = { cursor };
+    if (streamId) body.stream_id = streamId;
+    return this.request<{ ok: boolean; run: RunRecord }>('POST', `/runs/${encodeURIComponent(id)}/advance`, body, signal);
+  }
+
+  async runFinish(id: string, status: 'done' | 'failed', error?: string, signal?: AbortSignal): Promise<Result<{ ok: boolean; run: RunRecord }>> {
+    const body: Record<string, unknown> = { status };
+    if (error) body.error = error;
+    return this.request<{ ok: boolean; run: RunRecord }>('POST', `/runs/${encodeURIComponent(id)}/finish`, body, signal);
+  }
+
+  async runSetStream(id: string, streamId: string, signal?: AbortSignal): Promise<Result<{ ok: boolean; run: RunRecord }>> {
+    return this.request<{ ok: boolean; run: RunRecord }>('POST', `/runs/${encodeURIComponent(id)}/stream`, { stream_id: streamId }, signal);
   }
 
   async messages(body: { text: string; author?: string; conv?: string }, signal?: AbortSignal): Promise<Result<DaemonEvent>> {

@@ -1,27 +1,24 @@
 /**
- * StoryRunner — invisible controller. Mount it once in App so a story
- * run can advance from anywhere: it watches WS events + serverStore
- * task transitions and dispatches the next task automatically.
+ * StoryRunner — V89. Invisible controller that drives the active
+ * story run forward.
  *
- * Why a component (instead of a plain helper): so the WS listener is
- * registered + torn down with `onCleanup` (audit §2.3). HMR / route
- * changes do not leak listeners.
+ * State now lives daemon-side (py-1.10.0 RunStore + /runs endpoints).
+ * The runner's job is the same as before — dispatch the next step
+ * when the current task flips done, or after a grace window if the
+ * agent posted its final but the file watcher hasn't caught up — but
+ * every mutation round-trips through the daemon so the persisted
+ * cursor + status are always ground truth.
  *
  * Loop:
- *  - `task.updated` event with status=done for the current task
- *    → advance + dispatch next.
- *  - `chat.assistant.final` matching the run's lastStream
- *    → grace timer; if still no task.updated within ~3 s, advance
- *    optimistically (the agent likely marked it done but the file
- *    watcher hasn't fired yet).
- *  - `chat.cancelled` for the run's conv → clear the run.
- *
- * V80 parity: matches `dispatchNextStoryTask` / `_finishStoryRun`
- * semantics, minus the inflated step counter (M4.5 fix).
+ *  - task.updated (status=done for current task)
+ *    → POST /runs/<id>/advance → cursor++ → dispatch next.
+ *  - chat.assistant.final matching the run's lastStream
+ *    → grace timer; if no task.updated within ~3 s, advance optimistically.
+ *  - chat.cancelled OR run.cancelled WS event for our run → stop loop.
  */
 
 import { onMount, onCleanup, createEffect } from 'solid-js';
-import { storyStore } from '~/state/story';
+import { storyStore, type StoryRun } from '~/state/story';
 import { daemonStore } from '~/state/daemon';
 import { serverStore, allTasks } from '~/state/server';
 import { log } from '~/lib/log';
@@ -68,18 +65,16 @@ export default function StoryRunner() {
     }
   };
 
-  const dispatchCurrent = async (): Promise<void> => {
-    const run = storyStore.state.run;
-    if (!run || run.status !== 'running') return;
+  /** Dispatch the next step. Caller has already ensured the run is
+   *  active and not paused. Returns the stream_id if dispatch went
+   *  through, or null on failure. */
+  const dispatchCurrent = async (run: StoryRun): Promise<string | null> => {
+    const client = daemonStore.state.client;
+    if (!client) return null;
     const taskId = run.taskIds[run.cursor];
     if (!taskId) {
-      storyStore.setStatus('done');
-      return;
-    }
-    const client = daemonStore.state.client;
-    if (!client) {
-      storyStore.recordFailure(taskId, 'no daemon client');
-      return;
+      await storyStore.finish(client, run.id, 'done');
+      return null;
     }
     const prompt = buildPrompt(taskId, run.initiativeTitle, run.cursor, run.taskIds.length);
     const res = await client.chatDispatch({
@@ -91,10 +86,13 @@ export default function StoryRunner() {
     });
     if (!res.ok) {
       log.warn('story dispatch failed', res.status, res.body);
-      storyStore.recordFailure(taskId, `dispatch ${res.status}`);
-      return;
+      // Surface as failure on daemon so the panel shows it; cockpit
+      // doesn't have to track failure state locally.
+      await storyStore.finish(client, run.id, 'failed', `dispatch ${res.status}`);
+      return null;
     }
-    storyStore.setStream(res.data.stream_id);
+    await storyStore.setStream(client, run.id, res.data.stream_id);
+    return res.data.stream_id;
   };
 
   // Watch for task-status flips → advance the cursor when the current task hits done.
@@ -102,7 +100,10 @@ export default function StoryRunner() {
   createEffect(() => {
     const tasks = allTasks();
     const run = storyStore.state.run;
-    if (!run || run.status !== 'running') return;
+    if (!run) return;
+    // Only act on LIVE runs (status==='running' && live===true). A
+    // paused run waits for the operator's explicit ▶ Resume.
+    if (run.status !== 'running' || !run.live) return;
     const taskId = run.taskIds[run.cursor];
     if (!taskId) return;
     const t = tasks.find((x) => x.id === taskId);
@@ -111,10 +112,29 @@ export default function StoryRunner() {
       lastSeenTaskId = taskId;
       log.info('story: task done, advancing', taskId);
       clearGrace();
-      storyStore.advance();
-      // Kick the next task.
-      void dispatchCurrent();
+      const client = daemonStore.state.client;
+      if (!client) return;
+      void (async () => {
+        await storyStore.advance(client, run.id, run.cursor + 1);
+        const next = storyStore.runForInitiative(run.initiativeId);
+        if (next && next.status === 'running' && next.cursor < next.taskIds.length) {
+          await dispatchCurrent(next);
+        }
+      })();
     }
+  });
+
+  // Auto-dispatch when a fresh run is born (cursor=0, no stream yet,
+  // live false). The daemon broadcast `run.started` triggers this.
+  let startedRunId: string | null = null;
+  createEffect(() => {
+    const run = storyStore.state.run;
+    if (!run) return;
+    if (run.id === startedRunId) return;
+    if (run.status !== 'running') return;
+    if (run.lastStream !== null) return; // already dispatched at least once
+    startedRunId = run.id;
+    void dispatchCurrent(run);
   });
 
   // Wire the WS hub for finals + cancellations.
@@ -123,47 +143,33 @@ export default function StoryRunner() {
     if (!ws) return;
     const offFinal = ws.on('chat.assistant.final', (ev) => {
       const run = storyStore.state.run;
-      if (!run || run.status !== 'running') return;
+      if (!run || run.status !== 'running' || !run.live) return;
       if (typeof ev.conv !== 'string' || ev.conv !== run.conv) return;
       const streamId = typeof ev.stream_id === 'string' ? ev.stream_id : null;
       if (run.lastStream && streamId !== run.lastStream) return;
-      // Final arrived. Give the file watcher a grace window to flip
-      // the task to done. If it doesn't, advance optimistically.
       clearGrace();
       graceTimer = setTimeout(() => {
         const r2 = storyStore.state.run;
         if (!r2 || r2.status !== 'running') return;
         log.info('story: grace expired, advancing optimistically');
-        storyStore.advance();
         const c = daemonStore.state.client;
         const id = daemonStore.state.activeId;
         if (c && id) void serverStore.refreshNow(c, id);
-        void dispatchCurrent();
+        if (c) {
+          void (async () => {
+            await storyStore.advance(c, r2.id, r2.cursor + 1);
+            const next = storyStore.runForInitiative(r2.initiativeId);
+            if (next && next.status === 'running' && next.cursor < next.taskIds.length) {
+              await dispatchCurrent(next);
+            }
+          })();
+        }
       }, ADVANCE_GRACE_MS);
-    });
-    const offCancel = ws.on('chat.cancelled', (ev) => {
-      const run = storyStore.state.run;
-      if (!run) return;
-      if (typeof ev.conv !== 'string' || ev.conv !== run.conv) return;
-      log.info('story: cancelled by daemon');
-      clearGrace();
-      storyStore.clear();
     });
     onCleanup(() => {
       offFinal();
-      offCancel();
       clearGrace();
     });
-  });
-
-  // Auto-dispatch when a fresh run is started (cursor=0, no stream yet).
-  let startedRunId: string | null = null;
-  createEffect(() => {
-    const run = storyStore.state.run;
-    if (!run || run.status !== 'running') return;
-    if (run.id === startedRunId) return;
-    startedRunId = run.id;
-    void dispatchCurrent();
   });
 
   return null;

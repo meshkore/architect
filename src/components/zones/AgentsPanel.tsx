@@ -74,15 +74,16 @@ function typeBadge(t: ConvMeta['type']): string {
 }
 
 export default function AgentsPanel() {
+  const activeRuns = createMemo(() => storyStore.state.runs.filter(
+    (r) => r.status !== 'done' && r.status !== 'cancelled' && r.status !== 'failed',
+  ));
+
   const rows = createMemo<AgentRow[]>(() => {
     const out: AgentRow[] = [];
+    const runsByConv = new Map(activeRuns().map((r) => [r.conv, r]));
     for (const [conv, meta] of Object.entries(chatStore.state.convMeta)) {
       if (chatStore.state.archivedConvs[conv]) continue;
-      const run = storyStore.state.run;
-      const inRun = !!run
-        && run.conv === conv
-        && run.status !== 'done'
-        && run.status !== 'cancelled';
+      const run = runsByConv.get(conv) ?? null;
       const { ts, text } = lastMessage(conv);
       out.push({
         conv,
@@ -90,13 +91,12 @@ export default function AgentsPanel() {
         status: isStreaming(conv) ? 'streaming' : 'idle',
         lastTs: ts,
         lastText: text,
-        runInitiativeId: inRun ? run!.initiativeId : null,
-        runTaskId: inRun ? (run!.taskIds[run!.cursor] ?? null) : null,
+        runInitiativeId: run?.initiativeId ?? null,
+        runTaskId: run ? (run.taskIds[run.cursor] ?? null) : null,
         isOnboarding: conv === ONBOARDING_CONV_ID,
       });
     }
     out.sort((a, b) => {
-      // active runs first, then streaming, then by last activity desc
       const aRun = a.runInitiativeId ? 1 : 0;
       const bRun = b.runInitiativeId ? 1 : 0;
       if (aRun !== bRun) return bRun - aRun;
@@ -111,32 +111,23 @@ export default function AgentsPanel() {
   });
 
   const runRows = createMemo(() => {
-    const r = storyStore.state.run;
-    if (!r) return [];
-    if (r.status === 'done' || r.status === 'cancelled') return [];
-    const init = allInitiatives().find((i) => i.id === r.initiativeId);
-    const task = allTasks().find((t) => t.id === r.taskIds[r.cursor]);
-    const meta = chatStore.state.convMeta[r.conv];
-    return [{
-      run: r,
-      initiativeTitle: init?.title ?? r.initiativeTitle ?? r.initiativeId,
-      taskTitle: task?.title ?? r.taskIds[r.cursor] ?? '—',
-      agentId: meta?.agentId ?? '—',
-    }];
+    return activeRuns().map((r) => {
+      const init = allInitiatives().find((i) => i.id === r.initiativeId);
+      const task = allTasks().find((t) => t.id === r.taskIds[r.cursor]);
+      return {
+        run: r,
+        initiativeTitle: init?.title ?? r.initiativeTitle ?? r.initiativeId,
+        taskTitle: task?.title ?? r.taskIds[r.cursor] ?? '—',
+        agentId: r.agentId ?? '—',
+      };
+    });
   });
 
-  const stopRun = async (conv: string): Promise<void> => {
-    const r = storyStore.state.run;
-    if (!r || r.conv !== conv) return;
-    storyStore.setStatus('stopping');
+  const stopRun = async (runId: string): Promise<void> => {
     const c = daemonStore.state.client;
-    if (!c) {
-      storyStore.clear();
-      return;
-    }
-    const res = await c.chatCancel(conv);
-    if (!res.ok) log.warn('agents panel: cancel failed', res.status);
-    storyStore.clear();
+    if (!c) return;
+    const ok = await storyStore.cancel(c, runId);
+    if (!ok) log.warn('agents panel: cancel failed', runId);
   };
 
   const goToChat = (conv: string): void => {
@@ -191,11 +182,16 @@ export default function AgentsPanel() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void stopRun(rr.run.conv)}
+                      onClick={() => void stopRun(rr.run.id)}
                       class="text-[10px] font-mono uppercase tracking-wider text-red-300/90 hover:text-red-200 border border-red-500/30 hover:border-red-500/60 rounded px-2 py-1 transition-colors"
                     >
                       ■ Stop
                     </button>
+                    <Show when={!rr.run.live}>
+                      <span class="font-mono text-[9px] text-amber-300 bg-amber-500/15 border border-amber-500/40 rounded px-1.5 py-0.5 uppercase tracking-wider">
+                        paused · reload cut the turn
+                      </span>
+                    </Show>
                   </div>
                 </li>
               )}

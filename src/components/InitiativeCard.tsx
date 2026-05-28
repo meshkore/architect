@@ -66,71 +66,93 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
     return b.length > DESCRIPTION_PREVIEW_CHARS || b.includes('\n');
   };
 
-  const startRun = (): void => {
+  // V89 — All run state lives daemon-side. Cockpit just reflects.
+  const thisRun = () => storyStore.runForInitiative(props.initiative.id);
+  const isThisLive = () => {
+    const r = thisRun();
+    return !!r && r.live && r.status !== 'paused';
+  };
+  const isThisPaused = () => {
+    const r = thisRun();
+    return !!r && r.status === 'paused';
+  };
+  const isOtherLive = () => {
+    const r = storyStore.state.run;
+    if (!r || !r.live) return false;
+    return r.initiativeId !== props.initiative.id;
+  };
+
+  const startRun = async (): Promise<void> => {
     const taskIds = collectStoryTaskIds(props.initiative.id);
     if (taskIds.length === 0) {
       log.warn('initiative has no open tasks to run', props.initiative.id);
       return;
     }
-    const existing = storyStore.state.run;
-    if (existing && existing.status !== 'done' && existing.status !== 'cancelled') {
-      log.warn('another story run is already in flight', existing.initiativeId);
+    const client = daemonStore.state.client;
+    if (!client) {
+      log.warn('startRun: no daemon client');
       return;
     }
-    // V87 — Always spawn a fresh agent + conv. Reusing
-    // chatStore.state.activeConv stacked the story dispatch on top of
-    // whatever the currently-focused agent was doing — that's the bug
-    // the operator hit ("le he dado a play y se ha puesto una segunda
-    // tarea sobre el mismo agente"). The new conv is an isolated
-    // cancellation domain: chat_cancel(conv) on the daemon touches
-    // ONLY this run, leaves other agents alone.
+    // Always spawn a fresh agent + conv — isolated cancellation domain.
     const conv = chatStore.createStoryConv({
       initiativeId: props.initiative.id,
       initiativeTitle: props.initiative.title,
     });
-    storyStore.start({
-      id: `${props.initiative.id}-${Date.now().toString(36)}`,
+    const agentId = chatStore.state.convMeta[conv]?.agentId ?? '?';
+    const res = await storyStore.start(client, {
       initiativeId: props.initiative.id,
       initiativeTitle: props.initiative.title,
       conv,
+      agentId,
+      agentTitle: props.initiative.title,
       taskIds,
     });
+    if (!res.ok) log.warn('startRun: daemon create failed', res.status, res.error);
   };
 
   const stopRun = async (): Promise<void> => {
-    const run = storyStore.state.run;
-    if (!run || run.initiativeId !== props.initiative.id) return;
-    storyStore.setStatus('stopping');
+    const run = thisRun();
+    if (!run) return;
     const client = daemonStore.state.client;
-    if (!client) {
-      storyStore.clear();
+    if (!client) return;
+    await storyStore.cancel(client, run.id);
+  };
+
+  /** V89 — When the run is paused (status='running' server-side but
+   *  no live chat session), the play button resumes it: re-dispatch
+   *  the current step on the existing conv. Reuses the same prompt
+   *  builder StoryRunner uses on auto-advance. */
+  const resumeRun = async (): Promise<void> => {
+    const run = thisRun();
+    if (!run) return;
+    const client = daemonStore.state.client;
+    if (!client) return;
+    const taskId = run.taskIds[run.cursor];
+    if (!taskId) {
+      // Cursor past the end — finish it.
+      await storyStore.finish(client, run.id, 'done');
       return;
     }
-    // Fire-and-clear: chat_cancel SIGTERMs the in-flight runner; the
-    // chat.cancelled WS event will also trigger StoryRunner.clear()
-    // but that's idempotent so we eagerly clear here to update the UI
-    // even if the WS round-trip is slow.
-    const res = await client.chatCancel(run.conv);
-    if (!res.ok) log.warn('story stop: daemon cancel failed', res.status);
-    storyStore.clear();
+    chatStore.setActiveConv(run.conv);
+    const prompt = buildResumePrompt(taskId, run.initiativeTitle, run.cursor, run.taskIds.length);
+    const res = await client.chatDispatch({
+      conv: run.conv,
+      author: 'architect',
+      text: prompt,
+      initiative_id: run.initiativeId,
+      task_id: taskId,
+    });
+    if (!res.ok) {
+      log.warn('resumeRun: dispatch failed', res.status, res.body);
+      return;
+    }
+    await storyStore.setStream(client, run.id, res.data.stream_id);
   };
 
   const toggleRun = (): void => {
-    if (isThisRunning()) void stopRun();
-    else startRun();
-  };
-
-  const isThisRunning = () => {
-    const r = storyStore.state.run;
-    if (!r) return false;
-    if (r.initiativeId !== props.initiative.id) return false;
-    return r.status !== 'done' && r.status !== 'cancelled';
-  };
-  const isOtherRunning = () => {
-    const r = storyStore.state.run;
-    if (!r) return false;
-    if (r.initiativeId === props.initiative.id) return false;
-    return r.status !== 'done' && r.status !== 'cancelled';
+    if (isThisLive()) void stopRun();
+    else if (isThisPaused()) void resumeRun();
+    else void startRun();
   };
 
   // V86w — archive / unarchive lives in viewStore (per-cluster
@@ -157,19 +179,22 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
         <button
           type="button"
           onClick={toggleRun}
-          disabled={isOtherRunning()}
+          disabled={isOtherLive()}
           title={
-            isThisRunning() ? 'Stop the story run on this initiative'
-            : isOtherRunning() ? 'Another initiative is running — stop it first'
+            isThisLive() ? 'Stop the run live on this initiative'
+            : isThisPaused() ? 'Resume this run (the previous turn was cut by a reload)'
+            : isOtherLive() ? 'Another initiative is running — stop it first'
             : 'Run initiative (spawns a fresh agent)'
           }
           class={`w-7 h-7 rounded-md flex items-center justify-center text-xs flex-shrink-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border ${
-            isThisRunning()
+            isThisLive()
               ? 'bg-red-500/15 hover:bg-red-500/30 text-red-300 border-red-500/40'
-              : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
+              : isThisPaused()
+                ? 'bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
+                : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
           }`}
         >
-          {isThisRunning() ? '■' : '▶'}
+          {isThisLive() ? '■' : '▶'}
         </button>
         <button
           type="button"
@@ -421,6 +446,29 @@ function CommitRow(props: { commit: import('~/lib/daemon-client').InitiativeActi
       </Show>
     </li>
   );
+}
+
+/** V89 — Resume prompt used when the operator clicks ▶ on a paused
+ *  run (status=running server-side but no live chat session, e.g.
+ *  cockpit reloaded mid-run). Same shape as StoryRunner.buildPrompt
+ *  with a header that tells the agent the prior turn was cut. */
+function buildResumePrompt(taskId: string, initiativeTitle: string, cursor: number, total: number): string {
+  const stepLabel = `${cursor + 1}/${total}`;
+  return [
+    `[story-run · resuming step ${stepLabel} of "${initiativeTitle}"]`,
+    ``,
+    `The previous turn for this story step was interrupted (cockpit reload`,
+    `or daemon restart). Pick the work back up on task \`${taskId}\`:`,
+    ``,
+    `1. Open the task file under \`.meshkore/modules/<module>/tasks/${taskId}*.md\` and read its body.`,
+    `2. Continue the work described under "Done when" / the task body.`,
+    `3. Mark the task \`status: done\` in its frontmatter when finished.`,
+    `4. Post a 1-sentence summary of what you did here in chat.`,
+    `5. STOP and wait — the story runner will dispatch the next task automatically.`,
+    ``,
+    `If you can detect from the timeline that this step was already finished,`,
+    `say so in one line and stop — the runner will advance.`,
+  ].join('\n');
 }
 
 function formatCommitTs(ts: string): string {

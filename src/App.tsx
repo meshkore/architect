@@ -28,6 +28,7 @@ import { serverStore, isProjectEmpty } from '~/state/server';
 import { projectsStore } from '~/state/projects';
 import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
 import { viewStore } from '~/state/view';
+import { storyStore } from '~/state/story';
 import { log } from '~/lib/log';
 import { applyStoredLayout } from '~/components/Splitter';
 import { ModalHost } from '~/lib/modal';
@@ -93,6 +94,10 @@ export default function App() {
       projectsStore.setActive(health.port, health.cluster_id ?? null);
       chatStore.bindCluster(health.cluster_id ?? null);
       viewStore.bindCluster(health.cluster_id ?? null);
+      // V89 — run state is now daemon-owned. Reset the in-memory
+      // mirror so the previous cluster's runs don't bleed in, then
+      // hydrate from `/runs?active=1` once attach() resolves.
+      storyStore.resetForClusterSwap();
     });
     // V86q — Rehydrate convMap from the snapshot's
     // `timeline.recent_events` (py-1.1.0+ — the daemon has been
@@ -109,6 +114,11 @@ export default function App() {
         chatStore.hydrateFromTimeline(events);
         log.info('chat hydrated from timeline', { events: events.length });
       }
+      // V89 — fetch any active runs from the daemon so the UI paints
+      // ground truth immediately (the WS handles updates from here on).
+      void storyStore.hydrate(client).then(() => {
+        log.info('runs hydrated from daemon', { count: storyStore.state.runs.length });
+      });
     });
   });
 

@@ -1,166 +1,239 @@
 /**
- * state/story.ts — reactive store for the active story run.
+ * state/story.ts — V89, daemon-backed story runs.
  *
- * One story run is active at a time, owned by the cockpit. When the
- * operator hits RUN on an initiative card, the runner builds the
- * task list, kicks off task 1 via `/chat/dispatch`, and watches the
- * daemon's WS feed to advance.
+ * The cockpit no longer owns story-run state. The daemon's RunStore
+ * (py-1.10.0) is the single source of truth, persisted to
+ * `.meshkore/.runtime/runs.json`. This module is a reactive mirror:
  *
- * The visible counter MUST be tasks, never claude-code tool-use
- * steps — that was the V80 UX bug M4.5 exists to fix.
+ *  - On `bindCluster` → `hydrate(client)` calls `GET /runs?active=1`
+ *    to repopulate the store from disk. Survives cockpit reload and
+ *    daemon restart without any localStorage involvement.
+ *  - WS events `run.started` / `run.advanced` / `run.cancelled` /
+ *    `run.done` / `run.failed` keep the in-memory mirror live.
+ *  - Mutations go to the daemon via the client and round-trip back
+ *    through the WS — never write to the local store directly.
  *
- * Persistence: serialised to `mk-story-run-v1` so a reload during a
- * run resumes the banner. Restored runs come back as `paused` (the
- * tab can't reliably resume an in-flight turn).
+ * Why this rewrite: V87 fixed "play stacks on busy" but kept state in
+ * `mk-story-run-v1` localStorage. After reload the cockpit resurrected
+ * the run as 'paused' and the UI lied: the daemon didn't know there
+ * was a run, the chat panel didn't show the agent, the button stayed
+ * stuck on ■. With the daemon owning the run, the cockpit just paints
+ * ground truth.
+ *
+ * Backwards compatibility: the `storyStore` export keeps a singleton
+ * "current run" selector (`state.run`) so existing components
+ * (StoryProgressPill, StoryBanner, AgentsPanel) don't need a sweeping
+ * refactor. Multi-run native UI lands in the agent-run-coordinator
+ * initiative's later phases.
  */
 
 import { createStore } from 'solid-js/store';
 import { createSignal } from 'solid-js';
 import { log } from '~/lib/log';
+import type { RunRecord, RunStatus, DaemonClient } from '~/lib/daemon-client';
 
-const STORE_KEY = 'mk-story-run-v1';
+// Legacy alias — kept so the existing UI code keeps compiling.
+export type StoryStatus = RunStatus | 'paused';
 
-export type StoryStatus = 'running' | 'paused' | 'stopping' | 'cancelled' | 'done' | 'failed';
-
+/** Legacy shape — same field names the V87 store exposed, derived
+ *  from a RunRecord. `paused` is a derived UI status: status === 'running'
+ *  && !live. */
 export interface StoryRun {
   id: string;
   initiativeId: string;
   initiativeTitle: string;
   conv: string;
+  agentId: string;
   taskIds: string[];
   cursor: number;
   startedAt: string;
   taskStartedAt: string;
   status: StoryStatus;
   lastStream: string | null;
+  live: boolean;
   failures: Array<{ taskId: string; reason: string }>;
 }
 
 interface StoryStoreState {
+  /** All non-final runs known on this cluster, newest first. */
+  runs: StoryRun[];
+  /** Legacy singleton — the newest active run, or null. Many components
+   *  still consume this shape; kept compatible so the refactor stays
+   *  surgical. */
   run: StoryRun | null;
-  /** Updated every second while a run is active so the elapsed timer ticks. */
+  /** Wall-clock tick (1 Hz). Drives elapsed-time labels. */
   nowMs: number;
+  /** True once the first hydration round-trip has completed for the
+   *  current cluster. Components can use this to suppress spurious
+   *  "no runs" empty states during boot. */
+  hydrated: boolean;
 }
 
-const [state, setState] = createStore<StoryStoreState>({ run: null, nowMs: Date.now() });
+const [state, setState] = createStore<StoryStoreState>({
+  runs: [],
+  run: null,
+  nowMs: Date.now(),
+  hydrated: false,
+});
 const [tickerStarted, setTickerStarted] = createSignal(false);
 
-function persist(): void {
-  try {
-    if (state.run) localStorage.setItem(STORE_KEY, JSON.stringify(state.run));
-    else localStorage.removeItem(STORE_KEY);
-  } catch {
-    /* quota / private mode */
-  }
+function fromRecord(r: RunRecord): StoryRun {
+  const isLive = !!r.live;
+  let uiStatus: StoryStatus = r.status;
+  if (r.status === 'running' && !isLive) uiStatus = 'paused';
+  return {
+    id: r.id,
+    initiativeId: r.initiative_id,
+    initiativeTitle: r.initiative_title,
+    conv: r.conv,
+    agentId: r.agent_id,
+    taskIds: r.task_ids,
+    cursor: r.cursor,
+    startedAt: r.started_at,
+    taskStartedAt: r.last_step_at,
+    status: uiStatus,
+    lastStream: r.stream_id,
+    live: isLive,
+    failures: r.error ? [{ taskId: r.task_ids[r.cursor] ?? '?', reason: r.error }] : [],
+  };
 }
 
-function loadFromStorage(): void {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return;
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return;
-    const r = parsed as Partial<StoryRun>;
-    if (!r.id || !r.initiativeId || !Array.isArray(r.taskIds) || typeof r.conv !== 'string') return;
-    const restored: StoryRun = {
-      id: r.id,
-      initiativeId: r.initiativeId,
-      initiativeTitle: r.initiativeTitle ?? r.initiativeId,
-      conv: r.conv,
-      taskIds: r.taskIds,
-      cursor: typeof r.cursor === 'number' ? r.cursor : 0,
-      startedAt: r.startedAt ?? new Date().toISOString(),
-      taskStartedAt: r.taskStartedAt ?? new Date().toISOString(),
-      // Resumed runs are always paused — we can't pick up an in-flight turn.
-      status: r.status === 'done' ? 'done' : 'paused',
-      lastStream: null,
-      failures: Array.isArray(r.failures) ? r.failures : [],
-    };
-    setState('run', restored);
-  } catch (e) {
-    log.warn('story load failed', e instanceof Error ? e.message : String(e));
+function isActive(s: StoryStatus): boolean {
+  return s !== 'done' && s !== 'cancelled' && s !== 'failed';
+}
+
+function recomputeSingleton(): void {
+  const active = state.runs.filter((r) => isActive(r.status));
+  if (active.length === 0) {
+    setState('run', null);
+    return;
   }
+  // Newest startedAt first.
+  active.sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''));
+  setState('run', active[0]!);
+}
+
+function upsertFromRecord(r: RunRecord): void {
+  const sr = fromRecord(r);
+  const idx = state.runs.findIndex((x) => x.id === sr.id);
+  if (idx === -1) {
+    setState('runs', [sr, ...state.runs]);
+  } else {
+    const next = state.runs.slice();
+    next[idx] = sr;
+    setState('runs', next);
+  }
+  recomputeSingleton();
 }
 
 function ensureTicker(): void {
-  // 1 Hz wall-clock tick. Intentionally never cleared: this store is
-  // a singleton that lives for the lifetime of the page, the ticker
-  // is idempotent (guarded by `tickerStarted`), and the cost is
-  // negligible. Audit exception to the onCleanup rule.
   if (tickerStarted()) return;
   setTickerStarted(true);
   setInterval(() => setState('nowMs', Date.now()), 1000);
 }
 
-// ── Actions ────────────────────────────────────────────────────────
+// ── Hydration ──────────────────────────────────────────────────────
 
-function start(input: {
-  id: string;
-  initiativeId: string;
-  initiativeTitle: string;
-  conv: string;
-  taskIds: string[];
-}): void {
-  const now = new Date().toISOString();
-  const run: StoryRun = {
-    id: input.id,
-    initiativeId: input.initiativeId,
-    initiativeTitle: input.initiativeTitle,
-    conv: input.conv,
-    taskIds: input.taskIds,
-    cursor: 0,
-    startedAt: now,
-    taskStartedAt: now,
-    status: 'running',
-    lastStream: null,
-    failures: [],
-  };
-  setState('run', run);
-  persist();
+async function hydrate(client: DaemonClient): Promise<void> {
+  const res = await client.runsList(true);
+  if (!res.ok) {
+    log.warn('story hydrate failed', res.status, res.error);
+    setState('hydrated', true);
+    return;
+  }
+  const records = res.data.runs ?? [];
+  setState('runs', records.map(fromRecord));
+  setState('hydrated', true);
+  recomputeSingleton();
   ensureTicker();
 }
 
-function advance(): void {
-  const r = state.run;
-  if (!r) return;
-  if (r.cursor + 1 >= r.taskIds.length) {
-    setState('run', { ...r, cursor: r.taskIds.length, status: 'done', lastStream: null });
-  } else {
-    setState('run', {
-      ...r,
-      cursor: r.cursor + 1,
-      taskStartedAt: new Date().toISOString(),
-      lastStream: null,
-    });
-  }
-  persist();
-}
-
-function setStream(streamId: string | null): void {
-  if (!state.run) return;
-  setState('run', { ...state.run, lastStream: streamId });
-  persist();
-}
-
-function setStatus(status: StoryStatus): void {
-  if (!state.run) return;
-  setState('run', { ...state.run, status });
-  persist();
-}
-
-function recordFailure(taskId: string, reason: string): void {
-  if (!state.run) return;
-  setState('run', {
-    ...state.run,
-    failures: [...state.run.failures, { taskId, reason }],
-    status: 'paused',
-  });
-  persist();
-}
-
-function clear(): void {
+function resetForClusterSwap(): void {
+  setState('runs', []);
   setState('run', null);
-  persist();
+  setState('hydrated', false);
+}
+
+// ── Event ingestion (called by the daemon WS bus) ─────────────────
+
+/** Returns true if the event was consumed (run.*). Caller filters. */
+function ingestRunEvent(ev: { type?: string; run?: RunRecord }): boolean {
+  if (!ev || typeof ev.type !== 'string') return false;
+  if (!ev.type.startsWith('run.')) return false;
+  const r = ev.run;
+  if (!r) return true;
+  upsertFromRecord(r);
+  return true;
+}
+
+// ── Mutation helpers (round-trip through daemon) ──────────────────
+
+async function start(
+  client: DaemonClient,
+  body: {
+    initiativeId: string;
+    initiativeTitle: string;
+    conv: string;
+    agentId: string;
+    agentTitle: string;
+    taskIds: string[];
+  },
+): Promise<{ ok: true; run: StoryRun } | { ok: false; status: number; error?: string }> {
+  const res = await client.runStart({
+    initiative_id: body.initiativeId,
+    initiative_title: body.initiativeTitle,
+    conv: body.conv,
+    agent_id: body.agentId,
+    agent_title: body.agentTitle,
+    task_ids: body.taskIds,
+  });
+  if (!res.ok) return { ok: false, status: res.status, error: res.error };
+  upsertFromRecord(res.data.run);
+  // The daemon will also broadcast run.started — that's idempotent
+  // (upsert by id) so no double-write.
+  const sr = state.runs.find((x) => x.id === res.data.run.id);
+  if (!sr) return { ok: false, status: 0, error: 'race: missing after upsert' };
+  return { ok: true, run: sr };
+}
+
+async function cancel(client: DaemonClient, runId: string): Promise<boolean> {
+  const res = await client.runCancel(runId);
+  if (!res.ok) {
+    log.warn('story cancel failed', res.status, res.error);
+    return false;
+  }
+  upsertFromRecord(res.data.run);
+  return true;
+}
+
+async function advance(
+  client: DaemonClient,
+  runId: string,
+  cursor: number,
+  streamId?: string,
+): Promise<boolean> {
+  const res = await client.runAdvance(runId, cursor, streamId);
+  if (!res.ok) {
+    log.warn('story advance failed', res.status, res.error);
+    return false;
+  }
+  upsertFromRecord(res.data.run);
+  return true;
+}
+
+async function finish(client: DaemonClient, runId: string, status: 'done' | 'failed', error?: string): Promise<boolean> {
+  const res = await client.runFinish(runId, status, error);
+  if (!res.ok) {
+    log.warn('story finish failed', res.status, res.error);
+    return false;
+  }
+  upsertFromRecord(res.data.run);
+  return true;
+}
+
+async function setStream(client: DaemonClient, runId: string, streamId: string): Promise<void> {
+  const res = await client.runSetStream(runId, streamId);
+  if (res.ok) upsertFromRecord(res.data.run);
 }
 
 // ── Selectors ──────────────────────────────────────────────────────
@@ -179,18 +252,27 @@ function elapsedTaskMs(): number {
   return Math.max(0, state.nowMs - started);
 }
 
+function runForInitiative(initiativeId: string): StoryRun | null {
+  for (const r of state.runs) {
+    if (r.initiativeId === initiativeId && isActive(r.status)) return r;
+  }
+  return null;
+}
+
 export const storyStore = {
   state,
+  hydrate,
+  resetForClusterSwap,
+  ingestRunEvent,
   start,
+  cancel,
   advance,
+  finish,
   setStream,
-  setStatus,
-  recordFailure,
-  clear,
   currentTaskId,
   elapsedTaskMs,
+  runForInitiative,
 };
 
-loadFromStorage();
 ensureTicker();
-log.debug('state/story loaded');
+log.debug('state/story loaded (V89, daemon-backed)');
