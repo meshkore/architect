@@ -142,6 +142,37 @@ export interface LogListResponse {
 }
 
 
+export interface LinksLocal {
+  url?: string;
+  command?: string;
+  health?: string;
+}
+export interface LinksProd {
+  url?: string;
+  provider?: string;
+  project?: string;
+  region?: string;
+  deploy_command?: string;
+  deployed_version?: string;
+  deployed_sha?: string;
+  deployed_at?: string;
+  deployed_by?: string;
+}
+export interface LinksRepo {
+  branch?: string;
+  head_sha?: string;
+}
+export interface LinksModule {
+  id: string;
+  local?: LinksLocal;
+  prod?: LinksProd;
+  repo?: LinksRepo;
+}
+export interface LinksRegistry {
+  version?: number;
+  modules: LinksModule[];
+}
+
 export interface ProtocolSummary {
   id: string;
   title: string;
@@ -243,8 +274,8 @@ export class DaemonClient {
     return this.request<ProtocolDetail>('GET', `/protocols/${encodeURIComponent(id)}`, undefined, signal);
   }
 
-  async links(signal?: AbortSignal): Promise<Result<unknown>> {
-    return this.request<unknown>('GET', '/links', undefined, signal);
+  async links(signal?: AbortSignal): Promise<Result<LinksRegistry>> {
+    return this.request<LinksRegistry>('GET', '/links', undefined, signal);
   }
 
   /** py-1.9.0 — daily narrative log index. Returns descending-by-date
