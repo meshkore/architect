@@ -114,6 +114,16 @@ export default function App() {
         chatStore.hydrateFromTimeline(events);
         log.info('chat hydrated from timeline', { events: events.length });
       }
+      // V89.4 — Seed agent-rail "working" + chat preparing bubble
+      // from /health.chat_active_convs (py-1.10.2). Closes the
+      // ~20 s gap between F5 and the next WS delta when the daemon
+      // had a turn in flight: the operator now sees the live agent
+      // immediately, before any new event arrives.
+      const activeConvs = health.chat_active_convs ?? [];
+      if (activeConvs.length > 0) {
+        chatStore.hydrateActiveConvs(activeConvs);
+        log.info('active convs hydrated from health', { count: activeConvs.length, convs: activeConvs });
+      }
       // V89 — fetch any active runs from the daemon so the UI paints
       // ground truth immediately (the WS handles updates from here on).
       void storyStore.hydrate(client).then(() => {

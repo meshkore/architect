@@ -59,6 +59,10 @@ export interface HealthResponse {
     auto_update?: boolean;
     auto_update_source?: string;
   };
+  /** py-1.10.2 — convs with a live ChatRunner right now. Cockpit
+   *  consumes this at boot to mark agents working + show the
+   *  preparing bubble without waiting for the next WS delta. */
+  chat_active_convs?: string[];
   ts?: string;
 }
 

@@ -691,6 +691,11 @@ function ingestEvent(ev: DaemonEvent): void {
         return rest;
       });
     }
+    // V89.4 — clear server-derived agentStatus (set by
+    // hydrateActiveConvs on boot). Without this, the rail card stays
+    // on "working" forever after a final because statusOf checks
+    // agentStatus BEFORE the streaming derivation.
+    clearAgentStatusFor(conv);
     return;
   }
   if (ev.type === 'chat.cancelled') {
@@ -705,7 +710,16 @@ function ingestEvent(ev: DaemonEvent): void {
         return rest;
       });
     }
+    clearAgentStatusFor(conv);
   }
+}
+
+/** V89.4 — derive the agentId for a conv and clear its status. Used
+ *  by ingestEvent on terminal turn events so the rail card flips
+ *  back to "idle" once the daemon's chat session is gone. */
+function clearAgentStatusFor(conv: string): void {
+  const meta = state.convMeta[conv];
+  if (meta?.agentId) clearAgentStatus(meta.agentId);
 }
 
 export interface DispatchOpts {
@@ -839,6 +853,46 @@ function hydrateFromTimeline(events: DaemonEvent[]): void {
   }
 }
 
+/**
+ * V89.4 — Seed agent-rail "working" + chat preparing-bubble state
+ * from the daemon's /health.chat_active_convs at boot/reconnect.
+ *
+ * Operator bug: after F5, the cockpit replayed timeline.recent_events
+ * (which gave finalised history) and waited for the next WS delta to
+ * realise that A001 was still mid-turn. That gap could be ~20 s if
+ * the runner was deep in a tool call. py-1.10.2 surfaces the live
+ * conv list on /health so the cockpit can paint "working" the
+ * instant attach() resolves — zero wait.
+ *
+ * For each conv in the list:
+ *   - Map conv → agentId via convMeta. If no agentId yet, skip (the
+ *     rail entry will appear later via ensureConvMeta).
+ *   - Mark agentStatus[agentId] = {state: 'working', conv} so
+ *     ChatRail.statusOf returns 'working' immediately.
+ *   - If no streaming assistant bubble exists in the conv yet,
+ *     stamp pendingReplyConvs[conv] so the chat panel shows the
+ *     PreparingBubble (rotating verbs). Cleared automatically by
+ *     the next delta/final/cancelled.
+ *
+ * Idempotent — calling it twice with overlapping lists is safe.
+ */
+function hydrateActiveConvs(convs: string[]): void {
+  if (!convs || convs.length === 0) return;
+  const now = Date.now();
+  for (const conv of convs) {
+    if (!conv) continue;
+    const meta = state.convMeta[conv];
+    if (meta?.agentId) {
+      setAgentStatus(meta.agentId, { state: 'working', conv });
+    }
+    const list = state.convMap[conv] ?? [];
+    const hasStream = list.some((m) => m.kind === 'assistant' && m.streaming);
+    if (!hasStream && state.pendingReplyConvs[conv] === undefined) {
+      setState('pendingReplyConvs', conv, now);
+    }
+  }
+}
+
 export const chatStore = {
   state,
   bindCluster,
@@ -858,6 +912,7 @@ export const chatStore = {
   ingestEventForCluster,
   dispatchMessage,
   hydrateFromTimeline,
+  hydrateActiveConvs,
 };
 
 log.debug('state/chat loaded');
