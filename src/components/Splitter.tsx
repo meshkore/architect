@@ -32,11 +32,15 @@ interface LayoutBounds {
 
 const BOUNDS: Record<string, LayoutBounds> = {
   'col-nav':   { min: 160, max: 360, default: 220 },
-  'col-chat':  { min: 280, max: 700, default: 420 },
-  // V86o — min lowered from 140 → 70 so the operator can collapse the
-  // rail into a slim icon column. AgentCard simplifies its layout below
-  // 130 (drops chips + body title, keeps just the id pill + status dot).
-  'chat-rail': { min: 70, max: 320, default: 200 },
+  // V86z — col-chat max raised 700 → 960 so the operator can expand
+  // the chat panel further and shrink the central roadmap column by
+  // the same amount (roadmap is the flex middle, has no explicit min).
+  'col-chat':  { min: 280, max: 960, default: 420 },
+  // V86z — agents-rail min lowered 70 → 50 so the column can collapse
+  // to just the A001-style id chip + status dot (~44 px chip + 6 px
+  // padding). AgentCard already drops chips + body title below 130 px
+  // (V86o compact mode), so the layout stays sane all the way down.
+  'chat-rail': { min: 50, max: 320, default: 200 },
 };
 
 function loadLayout(): Record<string, number> {
