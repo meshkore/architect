@@ -20,7 +20,6 @@
 import { For, Show, createMemo, createResource, createSignal, onCleanup, onMount } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { uiStore } from '~/state/ui';
-import { allModules } from '~/state/server';
 import { log } from '~/lib/log';
 import type { LinksModule, LinksRegistry } from '~/lib/daemon-client';
 
@@ -53,11 +52,6 @@ export default function LinksPanel() {
   });
 
   const modules = createMemo<LinksModule[]>(() => registry()?.modules ?? []);
-
-  const moduleName = (id: string): string => {
-    const m = allModules().find((mm) => mm.id === id);
-    return (m?.name as string | undefined) ?? id;
-  };
 
   return (
     <div class="flex-1 min-h-0 flex flex-col">
@@ -102,9 +96,9 @@ export default function LinksPanel() {
             <EmptyNotice />
           </Show>
 
-          <ul class="space-y-4">
+          <ul class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
             <For each={modules()}>
-              {(m) => <ModuleCard mod={m} displayName={moduleName(m.id)} />}
+              {(m) => <ModuleCard mod={m} />}
             </For>
           </ul>
         </div>
@@ -113,165 +107,70 @@ export default function LinksPanel() {
   );
 }
 
-function ModuleCard(props: { mod: LinksModule; displayName: string }) {
-  const repoSha = () => props.mod.repo?.head_sha?.slice(0, 7) ?? '';
-  const prodSha = () => props.mod.prod?.deployed_sha?.slice(0, 7) ?? '';
-  const outOfSync = () => {
-    const r = props.mod.repo?.head_sha;
-    const p = props.mod.prod?.deployed_sha;
-    return !!r && !!p && r !== p;
-  };
-  const prodHref = () => props.mod.prod?.url ?? null;
-  const localHref = () => props.mod.local?.url ?? null;
+function ModuleCard(props: { mod: LinksModule }) {
+  // V86v — compact card. Operator's feedback: tarjetas a la mitad,
+  // menos contenido, más al grano. Dropped fields: displayName,
+  // project (we know which project we're in), region, deploy_command
+  // (deploy agent handles it), deployed sha/ts/by (timeline tracks
+  // that), repo footer, health endpoint, out-of-sync banner.
+  //
+  // What stays: module id (header chip), prod URL pill + optional
+  // provider tag, local URL pill + optional run command. The card
+  // collapses to whatever it has — empty slots render nothing.
+  const prodHref = () => props.mod.prod?.url?.trim() || null;
+  const localHref = () => props.mod.local?.url?.trim() || null;
+  const localCmd = () => props.mod.local?.command?.trim() || null;
+  const provider = () => props.mod.prod?.provider?.trim() || null;
 
   return (
-    <li class="rounded-xl border border-gray-800/70 bg-gray-900/40 overflow-hidden">
-      <header class="px-4 py-3 flex items-center gap-3 border-b border-gray-800/60">
+    <li class="rounded-lg border border-gray-800/60 bg-gray-900/30 px-3 py-2.5 flex flex-col gap-1.5">
+      <header class="flex items-center gap-2">
         <span class="font-mono text-[10px] text-sky-300/90 bg-sky-500/10 border border-sky-500/25 rounded px-1.5 py-0.5 uppercase tracking-wider flex-shrink-0">
           {props.mod.id}
         </span>
-        <h2 class="text-sm font-semibold text-gray-100 truncate flex-1 min-w-0">{props.displayName}</h2>
-        <Show when={outOfSync()}>
-          <span
-            class="font-mono text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5 uppercase tracking-wider flex-shrink-0"
-            title={`Repo HEAD ${repoSha()} ≠ deployed ${prodSha()}`}
-          >
-            out of sync
+        <Show when={provider()}>
+          <span class="font-mono text-[9px] text-gray-500 uppercase tracking-wider">
+            {provider()}
           </span>
         </Show>
       </header>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 divide-x divide-gray-800/60">
-        {/* PROD — primary slot. The operator's mental model: "click
-            this to verify the deploy actually works in the wild". */}
-        <Section
-          label="Production"
-          accent="sky"
-          fallback="No prod deploy declared. Add a `prod:` block in links.yaml."
-          when={!!props.mod.prod}
+      <Show when={prodHref()}>
+        <a
+          href={prodHref()!}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="block px-2 py-1 rounded bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-200 font-mono text-[11px] truncate transition-colors"
+          title={prodHref()!}
         >
-          <Show when={props.mod.prod}>
-            {(prod) => (
-              <>
-                <Show when={prodHref()}>
-                  <a
-                    href={prodHref()!}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="block px-2 py-1.5 rounded-md bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/35 text-sky-200 font-mono text-[11px] truncate transition-colors"
-                    title={prodHref()!}
-                  >
-                    ↗ {prodHref()}
-                  </a>
-                </Show>
-                <KvRow k="provider" v={prod().provider} />
-                <KvRow k="project" v={prod().project} />
-                <KvRow k="region" v={prod().region} />
-                <KvRow k="deployed" v={fmtDeployed(prod().deployed_at, prod().deployed_by)} />
-                <Show when={prod().deployed_sha}>
-                  <KvRow
-                    k="sha"
-                    v={prodSha()}
-                    accent={outOfSync() ? 'amber' : undefined}
-                  />
-                </Show>
-                <Show when={prod().deploy_command}>
-                  <CommandBlock cmd={prod().deploy_command!} label="deploy" />
-                </Show>
-              </>
-            )}
-          </Show>
-        </Section>
+          ↗ {prodHref()}
+        </a>
+      </Show>
 
-        {/* LOCAL — secondary. URL + the command the operator runs in
-            their terminal. No "play" button — cockpit never spawns
-            processes (operator preference). */}
-        <Section
-          label="Local dev"
-          accent="emerald"
-          fallback="No local dev declared. Add a `local:` block in links.yaml if you want a hint."
-          when={!!props.mod.local}
+      <Show when={localHref()}>
+        <a
+          href={localHref()!}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="block px-2 py-1 rounded bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25 text-emerald-200 font-mono text-[11px] truncate transition-colors"
+          title={localHref()!}
         >
-          <Show when={props.mod.local}>
-            {(local) => (
-              <>
-                <Show when={localHref()}>
-                  <a
-                    href={localHref()!}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="block px-2 py-1.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-200 font-mono text-[11px] truncate transition-colors"
-                    title={localHref()!}
-                  >
-                    ↗ {localHref()}
-                  </a>
-                </Show>
-                <KvRow k="health" v={local().health} />
-                <Show when={local().command}>
-                  <CommandBlock cmd={local().command!} label="run" />
-                </Show>
-              </>
-            )}
-          </Show>
-        </Section>
-      </div>
+          ⌂ {localHref()}
+        </a>
+      </Show>
 
-      <Show when={props.mod.repo}>
-        {(repo) => (
-          <footer class="px-4 py-2 border-t border-gray-800/60 flex items-center gap-3 flex-wrap text-[10px] font-mono text-gray-500">
-            <span class="text-gray-600 uppercase tracking-wider">repo</span>
-            <Show when={repo().branch}>
-              <span class="text-gray-400">
-                <span class="text-gray-600">branch</span> {repo().branch}
-              </span>
-            </Show>
-            <Show when={repo().head_sha}>
-              <span class={outOfSync() ? 'text-amber-300' : 'text-gray-400'}>
-                <span class="text-gray-600">head</span> {repoSha()}
-              </span>
-            </Show>
-          </footer>
-        )}
+      <Show when={localCmd()}>
+        <CommandBlock cmd={localCmd()!} />
+      </Show>
+
+      <Show when={!prodHref() && !localHref() && !localCmd()}>
+        <p class="text-[11px] text-gray-600 italic">No links yet.</p>
       </Show>
     </li>
   );
 }
 
-function Section(props: {
-  label: string;
-  accent: 'sky' | 'emerald';
-  when: boolean;
-  fallback?: string;
-  children: any;
-}) {
-  return (
-    <div class="px-4 py-3 space-y-1.5">
-      <div class={`text-[10px] font-mono uppercase tracking-wider mb-1 ${
-        props.accent === 'sky' ? 'text-sky-300/80' : 'text-emerald-300/80'
-      }`}>
-        {props.label}
-      </div>
-      <Show when={props.when} fallback={<p class="text-[11px] text-gray-600 italic">{props.fallback ?? '—'}</p>}>
-        {props.children}
-      </Show>
-    </div>
-  );
-}
-
-function KvRow(props: { k: string; v?: string; accent?: 'amber' }) {
-  return (
-    <Show when={props.v}>
-      <div class="flex items-baseline gap-2 text-[11px] font-mono">
-        <span class="text-gray-600 min-w-[68px]">{props.k}</span>
-        <span class={`truncate ${props.accent === 'amber' ? 'text-amber-300' : 'text-gray-300'}`} title={props.v}>
-          {props.v}
-        </span>
-      </div>
-    </Show>
-  );
-}
-
-function CommandBlock(props: { cmd: string; label: string }) {
+function CommandBlock(props: { cmd: string }) {
   const [copied, setCopied] = createSignal(false);
   const onCopy = async () => {
     try {
@@ -281,20 +180,17 @@ function CommandBlock(props: { cmd: string; label: string }) {
     } catch { /* clipboard denied */ }
   };
   return (
-    <div class="mt-1 flex items-start gap-2">
-      <span class="text-[10px] font-mono text-gray-600 uppercase tracking-wider mt-1 min-w-[68px] flex-shrink-0">
-        {props.label}
-      </span>
-      <div class="flex-1 min-w-0 flex items-start gap-2 rounded-md border border-gray-800/70 bg-gray-950/70 px-2 py-1.5">
-        <code class="flex-1 min-w-0 text-[11px] font-mono text-gray-300 break-all leading-snug">{props.cmd}</code>
-        <button
-          type="button"
-          onClick={onCopy}
-          class="text-[9px] font-mono uppercase tracking-wider text-gray-500 hover:text-emerald-300 flex-shrink-0"
-        >
-          {copied() ? 'copied' : 'copy'}
-        </button>
-      </div>
+    <div class="flex items-center gap-2 rounded border border-gray-800/60 bg-gray-950/60 px-2 py-1">
+      <code class="flex-1 min-w-0 text-[10px] font-mono text-gray-400 truncate" title={props.cmd}>
+        {props.cmd}
+      </code>
+      <button
+        type="button"
+        onClick={onCopy}
+        class="text-[9px] font-mono uppercase tracking-wider text-gray-500 hover:text-emerald-300 flex-shrink-0"
+      >
+        {copied() ? 'copied' : 'copy'}
+      </button>
     </div>
   );
 }
@@ -331,13 +227,3 @@ modules:
   );
 }
 
-function fmtDeployed(at?: string, by?: string): string | undefined {
-  if (!at && !by) return undefined;
-  const parts: string[] = [];
-  if (at) {
-    try { parts.push(new Date(at).toLocaleString()); }
-    catch { parts.push(at); }
-  }
-  if (by) parts.push(`by ${by}`);
-  return parts.join(' · ');
-}
