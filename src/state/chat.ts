@@ -26,7 +26,6 @@ import { createStore } from 'solid-js/store';
 import { createSignal } from 'solid-js';
 import type { DaemonClient, DaemonEvent, DispatchBody } from '~/lib/daemon-client';
 import { log } from '~/lib/log';
-import { welcomeForAgentType, ONBOARDING_COORDINATOR_AUTHOR } from '~/lib/onboarding-brief';
 
 export const ONBOARDING_CONV_ID = '_onboarding_v1';
 
@@ -426,42 +425,18 @@ function setActiveConv(conv: string | null): void {
  * conversation is currently active, this one becomes active so the
  * user lands on the welcome bubble.
  */
-/** V86r — true when ANY non-ONBOARDING conv carries at least one
- *  real message. Drives the gate on the Coordinator welcome bubble:
- *  if the operator already has a chat history (from the timeline
- *  rehydrate or live activity), we never want to greet them with
- *  "this is your first turn here". */
-function hasAnyChatHistory(): boolean {
-  for (const [conv, msgs] of Object.entries(state.convMap)) {
-    if (conv === ONBOARDING_CONV_ID) continue;
-    if (Array.isArray(msgs) && msgs.length > 0) return true;
-  }
-  return false;
-}
-
 function seedOnboardingConv(): void {
   if (state.convMap[ONBOARDING_CONV_ID]) return;
-  // V86r — gate the welcome on a TRULY fresh project. If hydrate has
-  // already filled in other convs (or the operator has dispatched a
-  // single live turn elsewhere), the Coordinator card still exists in
-  // the rail but starts as an empty conv. No welcome bubble, no
-  // "first time here" framing.
-  const showWelcome = !hasAnyChatHistory();
-  setState(
-    'convMap',
-    ONBOARDING_CONV_ID,
-    showWelcome
-      ? [
-          {
-            kind: 'assistant',
-            text: welcomeForAgentType('custom'),
-            author: ONBOARDING_COORDINATOR_AUTHOR,
-            ts: new Date().toISOString(),
-            streaming: false,
-          },
-        ]
-      : [],
-  );
+  // V86x — Operator's rule: NEVER inject synthetic messages into a
+  // conv. The Coordinator's "welcome bubble" was always a fake — it
+  // had a fresh timestamp every refresh, it survived next to real
+  // chat history, and it landed in the conv as if the agent had
+  // just said hello. Now we just create the empty slot so the rail
+  // card stays (V82 design), and let the Coordinator introduce
+  // itself organically when the operator sends the first prompt.
+  // The bootstrap brief still attaches as context_doc to the first
+  // dispatch (see ChatComposer + onboardingBootstrapBrief).
+  setState('convMap', ONBOARDING_CONV_ID, []);
   ensureConvMeta(ONBOARDING_CONV_ID, {
     title: 'Coordinator',
     type: 'custom',
@@ -506,24 +481,14 @@ function createConv(opts: {
   } else {
     slug = `${opts.type}-${Date.now().toString(36).slice(-5)}`;
   }
-  if (!state.convMap[slug]) {
-    // V86r — seed the new conv with its agent-type's welcome bubble
-    // (custom → Coordinator copy, deploy → Deploy copy, etc.). Same
-    // freshness gate as seedOnboardingConv: only show on projects
-    // with no prior chat history elsewhere — operators on a long-lived
-    // project don't need a "hi, I'm new" intro every time they
-    // create a typed agent.
-    const seed: ChatMsg[] = hasAnyChatHistory()
-      ? []
-      : [{
-          kind: 'assistant',
-          text: welcomeForAgentType(opts.type),
-          author: ONBOARDING_COORDINATOR_AUTHOR,
-          ts: new Date().toISOString(),
-          streaming: false,
-        }];
-    setState('convMap', slug, seed);
-  }
+  // V86x — Operator's rule: never inject synthetic messages. New
+  // typed agents (deploy / db / testing / audit / docs / review)
+  // arrive as empty convs; the agent itself introduces itself on
+  // the first turn (its prompt + role is already loaded server-side
+  // via cluster.yaml / agent_type registry). Per-type welcomes
+  // (welcomeForAgentType) live in onboarding-brief.ts for the
+  // operator's own reference but no longer auto-render.
+  if (!state.convMap[slug]) setState('convMap', slug, []);
   ensureConvMeta(slug, { type: opts.type, title: opts.title, model: opts.model });
   setState('activeConv', slug);
   return slug;
