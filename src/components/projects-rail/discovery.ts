@@ -75,3 +75,44 @@ export const projectsRailScan = {
   stop: (): void => { setScanning(false); },
   isScanning: (): boolean => scanning(),
 };
+
+/**
+ * V86l — Locate a specific cluster_id across the standard port range.
+ * Used by `switchProject` when the operator's stored port for that
+ * cluster comes back ERR_CONNECTION_REFUSED (typical case: a daemon
+ * self-update briefly moved the port, the bookmark / kp.list() entry
+ * captured the transient port, the daemon since came back on the
+ * original one).
+ *
+ * Strategy: probe every port in [PORT_LO, PORT_HI] in parallel with a
+ * short timeout, return the FIRST probe whose `cluster_id` matches.
+ * Updates `livePorts` / `liveClusters` and upserts into
+ * `projectsStore` so the rail self-heals — the next switchProject for
+ * this cluster will use the new authoritative port without another
+ * round trip.
+ */
+export async function findClusterPort(targetClusterId: string): Promise<LiveProbe | null> {
+  const ports: number[] = [];
+  for (let p = PORT_LO; p <= PORT_HI; p += 1) ports.push(p);
+  const probes = await Promise.all(ports.map(probe));
+  const live = probes.filter((x): x is LiveProbe => !!x);
+  const match = live.find((p) => p.cluster_id === targetClusterId);
+  // Update the discovery signals + projectsStore in a single batch so
+  // memos downstream (rows.ts, OfflinePanel) see one consistent tick.
+  batch(() => {
+    const portSet = new Set(live.map((l) => l.port));
+    const clusterMap = new Map<string, LiveProbe>();
+    for (const l of live) {
+      if (l.cluster_id) clusterMap.set(l.cluster_id, l);
+      projectsStore.upsert({
+        port: l.port, base: l.base,
+        cluster_id: l.cluster_id ?? undefined,
+        cluster_name: l.cluster_name ?? undefined,
+        status: 'live',
+      });
+    }
+    setLivePorts(portSet);
+    setLiveClusters(clusterMap);
+  });
+  return match ?? null;
+}

@@ -25,6 +25,8 @@ import { projectsStore } from '~/state/projects';
 import { serverStore } from '~/state/server';
 import { chatStore } from '~/state/chat';
 import { railUiStore } from '~/state/rail-ui';
+import { findClusterPort, liveClusters } from '~/components/projects-rail/discovery';
+import { log } from '~/lib/log';
 import * as kp from '~/lib/known-projects';
 
 export type RailRowData = {
@@ -93,9 +95,54 @@ export async function switchProject(
 ): Promise<boolean> {
   console.log('[RAIL] switchProject called', { port, key });
   projectsStore.clearNewBadge(key);
-  try { localStorage.setItem('meshcore-last-port', String(port)); } catch { /* quota */ }
-  const outcome = await daemonStore.switchToPortDetailed(port);
-  console.log('[RAIL] switchProject result', { port, key, outcome });
+
+  // V86l — reconcile against live discovery BEFORE probing. If the
+  // operator's stored port is stale (typical case: a daemon
+  // self-update briefly moved the port, the bookmark / kp.list()
+  // entry captured the transient port) but the discovery scan
+  // already knows the cluster_id is alive at a different port, use
+  // the live port instead. `/health` is authoritative.
+  let effectivePort = port;
+  if (fallback?.cluster_id) {
+    const live = liveClusters().get(fallback.cluster_id);
+    if (live && live.port !== port) {
+      log.info('[RAIL] reconciling stale port via live discovery', {
+        cluster_id: fallback.cluster_id, stale: port, live: live.port,
+      });
+      effectivePort = live.port;
+    }
+  }
+
+  try { localStorage.setItem('meshcore-last-port', String(effectivePort)); } catch { /* quota */ }
+  let outcome = await daemonStore.switchToPortDetailed(effectivePort);
+  console.log('[RAIL] switchProject result', { port: effectivePort, key, outcome });
+
+  // V86l — second-chance reconciliation. If the probe failed AND we
+  // know which cluster_id we're after, do a one-shot scan of the
+  // 5570–5589 range looking for that cluster. This covers the boot
+  // path where discovery hadn't run yet so liveClusters was empty.
+  if (!outcome.ok && fallback?.cluster_id && outcome.reason === 'no-daemon') {
+    log.info('[RAIL] probe failed, scanning ports for cluster_id', {
+      cluster_id: fallback.cluster_id, stale: effectivePort,
+    });
+    const found = await findClusterPort(fallback.cluster_id);
+    if (found && found.port !== effectivePort) {
+      log.info('[RAIL] cluster found at new port', {
+        cluster_id: fallback.cluster_id, port: found.port,
+      });
+      try { localStorage.setItem('meshcore-last-port', String(found.port)); } catch { /* quota */ }
+      const retry = await daemonStore.switchToPortDetailed(found.port);
+      if (retry.ok) {
+        // Drop any prior offline pick that was anchored to the
+        // stale port — the canonical attach above already cleared
+        // it, but be explicit.
+        daemonStore.clearOfflineSelection();
+        return true;
+      }
+      outcome = retry;
+    }
+  }
+
   if (!outcome.ok) {
     // V86b — switch failed, but we still register the operator's
     // selection so the rail shows the row as selected and the cockpit
@@ -103,14 +150,14 @@ export async function switchProject(
     if (fallback) {
       daemonStore.selectOffline({
         key,
-        port,
+        port: effectivePort,
         cluster_id: fallback.cluster_id,
         cluster_name: fallback.cluster_name,
         display: fallback.display,
         reason: outcome.reason,
       });
     } else {
-      console.warn('[RAIL] switch failed — no fallback provided', { port });
+      console.warn('[RAIL] switch failed — no fallback provided', { port: effectivePort });
     }
   }
   return outcome.ok;

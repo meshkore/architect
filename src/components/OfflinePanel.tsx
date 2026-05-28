@@ -14,6 +14,7 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { daemonStore, type OfflineSelection } from '~/state/daemon';
 import { switchProject } from '~/components/ProjectsRailRow';
+import { liveClusters } from '~/components/projects-rail/discovery';
 import { daemonHttpBase } from '~/lib/transport';
 import { log } from '~/lib/log';
 import * as kp from '~/lib/known-projects';
@@ -95,6 +96,27 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }) {
       cancelled = true;
       if (probeTimer !== null) clearTimeout(probeTimer);
       clearInterval(elapsedTimer);
+    });
+  });
+
+  // V86l — reactive reconciliation. If a manual Rescan (or any other
+  // discovery sweep) finds the offline-selected cluster_id alive at
+  // a DIFFERENT port than the one we're watching, switch to that
+  // port automatically. Covers the "daemon migrated to a new port"
+  // case without making the operator click anything.
+  createEffect(() => {
+    const cid = props.sel.cluster_id;
+    if (!cid) return;
+    const live = liveClusters().get(cid);
+    if (!live) return;
+    if (live.port === props.sel.port) return;
+    log.info('[OfflinePanel] live discovery surfaced cluster at new port', {
+      cluster_id: cid, stale: props.sel.port, live: live.port,
+    });
+    void switchProject(live.port, props.sel.key, {
+      display: props.sel.display,
+      cluster_id: props.sel.cluster_id,
+      cluster_name: props.sel.cluster_name,
     });
   });
 
