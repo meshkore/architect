@@ -11,9 +11,21 @@
  * store.events() entries into the message stream by ts.
  */
 
-import { Show, createEffect, createSignal, onMount, type JSX } from 'solid-js';
-import type { ChatMsg } from '~/state/chat';
+import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from 'solid-js';
+import { chatStore, type ChatMsg } from '~/state/chat';
 import type { DaemonEvent } from '~/lib/daemon-client';
+
+/**
+ * V86p — Live streaming window. While the daemon is still writing,
+ * the assistant bubble shows only the LATEST 3 lines of output via a
+ * fixed-height clip + `flex-direction: column-reverse` (the standard
+ * CSS trick to keep the bottom of overflowing content visible). This
+ * is "muestrame que la gente está trabajando aunque no veamos mucho
+ * detalle" — the operator sees movement at all times, doesn't lose
+ * scroll position to a growing wall of text. The full text reflows
+ * the moment `streaming` flips to false (see AssistantBubble).
+ */
+const STREAM_TAIL_HEIGHT_PX = 84;
 
 /**
  * V86o — collapse threshold for long messages, in px. Chosen to leave
@@ -108,12 +120,36 @@ export function UserBubble(props: { msg: ChatMsg; prepend?: boolean }) {
 }
 
 export function AssistantBubble(props: { msg: ChatMsg }) {
+  // V86p — Build the byline from convMeta (operator's agent name +
+  // generated A001 id) instead of falling back to msg.author, which
+  // is the daemon's identity string (e.g. "MacBook-Pro-de-Ricart-py").
+  // The hostname is fine in the timeline ledger; in the chat it
+  // looked alien.
+  const byline = () => {
+    const conv = chatStore.state.activeConv;
+    const meta = conv ? chatStore.state.convMeta[conv] : null;
+    if (meta) {
+      const idLabel = meta.agentId ? `${meta.agentId} · ` : '';
+      const name = meta.title || 'agent';
+      return `${idLabel}${name}`;
+    }
+    return props.msg.author || 'coordinator';
+  };
+  const charCount = () => props.msg.text.length;
   return (
-    <div class="flex flex-col gap-1 items-start">
+    <div class="flex flex-col gap-1 items-start w-full">
       <span class="text-[10px] font-mono text-gray-600 flex items-center gap-1.5">
-        {props.msg.author || 'coordinator'}
+        <span class="text-gray-400">{byline()}</span>
         <Show when={props.msg.streaming}>
-          <span class="text-emerald-400">· streaming</span>
+          <span class="text-emerald-400 inline-flex items-center gap-1">
+            ·
+            <span class="inline-flex items-center gap-0.5">
+              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft" />
+              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:150ms]" />
+              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:300ms]" />
+            </span>
+            <span>working · {charCount()} chars</span>
+          </span>
         </Show>
         <Show when={props.msg.cancelled}>
           <span class="text-red-400">· cancelled</span>
@@ -122,13 +158,83 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
       <div class={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed flex flex-col ${
         props.msg.cancelled
           ? 'bg-red-500/10 text-red-200 border border-red-500/30'
-          : 'bg-gray-900/70 text-gray-200 border border-gray-800'
+          : props.msg.streaming
+            ? 'bg-gray-900/70 text-gray-200 border border-emerald-500/40 shadow-[0_0_0_1px_rgba(52,211,153,0.15),0_0_20px_-6px_rgba(52,211,153,0.45)]'
+            : 'bg-gray-900/70 text-gray-200 border border-gray-800'
       }`}>
-        <CollapsibleText text={props.msg.text} lockExpanded={props.msg.streaming}>
-          <Show when={props.msg.streaming}>
-            <span class="inline-block w-2 h-3.5 bg-emerald-400 ml-1 align-middle animate-pulse-soft" />
-          </Show>
-        </CollapsibleText>
+        <Show
+          when={props.msg.streaming}
+          fallback={
+            <CollapsibleText text={props.msg.text}>
+              <Show when={props.msg.cancelled}>
+                <span class="text-red-400/80 text-[11px]"> · cancelled</span>
+              </Show>
+            </CollapsibleText>
+          }
+        >
+          {/* Streaming tail — fixed height, column-reverse so the
+              LATEST content sits flush with the bottom edge and older
+              lines scroll off the top. Operator sees movement, never
+              loses their place. */}
+          <StreamingTail text={props.msg.text} />
+        </Show>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Live streaming preview — clips to the LAST 3 lines of the assistant
+ * response while it's writing. column-reverse + overflow:hidden is
+ * the canonical CSS recipe for "stick to bottom of overflowing box".
+ * The blinking caret rides at the very end of the text so the eye
+ * tracks the latest token.
+ */
+function StreamingTail(props: { text: string }) {
+  return (
+    <div
+      class="overflow-hidden flex flex-col-reverse"
+      style={{ 'max-height': `${STREAM_TAIL_HEIGHT_PX}px` }}
+    >
+      <div class="whitespace-pre-wrap">
+        {props.text}
+        <span class="inline-block w-2 h-3.5 bg-emerald-400 ml-1 align-middle animate-pulse-soft" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * V86p — "Preparing response…" placeholder. Shown when the operator
+ * just dispatched a message but no assistant chunk has arrived over
+ * the WS yet. Carries an elapsed counter so the operator can tell
+ * the difference between "the daemon's thinking" (2-5s typical) and
+ * "the daemon is stuck" (>30s).
+ */
+export function PreparingBubble(props: { dispatchedAt: number }) {
+  const [elapsed, setElapsed] = createSignal(0);
+  const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - props.dispatchedAt) / 1000)));
+  onMount(() => {
+    tick();
+    const iv = setInterval(tick, 1000);
+    onCleanup(() => clearInterval(iv));
+  });
+  return (
+    <div class="flex flex-col gap-1 items-start w-full">
+      <span class="text-[10px] font-mono text-gray-600 flex items-center gap-1.5">
+        <span class="text-gray-400">coordinator</span>
+        <span class="text-emerald-400 inline-flex items-center gap-1">
+          ·
+          <span class="inline-flex items-center gap-0.5">
+            <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft" />
+            <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:150ms]" />
+            <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:300ms]" />
+          </span>
+          <span>preparing response · {elapsed()}s</span>
+        </span>
+      </span>
+      <div class="max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed border border-emerald-500/30 bg-gray-900/50 text-gray-400 italic">
+        Waiting for the daemon's first chunk…
       </div>
     </div>
   );

@@ -83,6 +83,11 @@ export interface ChatStoreState {
   convTitleOverrides: Record<string, string>;
   /** MP5 — global per-cluster activity. NOT swapped on bindCluster. */
   clusterActivity: Record<string, ClusterActivity>;
+  /** V86p — convs the operator just dispatched into, awaiting the
+   *  first assistant chunk over WS. Carries the dispatch timestamp
+   *  so the UI can show "preparing… Ns elapsed". Cleared when the
+   *  first `chat.assistant.delta` (or `final` / `cancelled`) lands. */
+  pendingReplyConvs: Record<string, number>;
 }
 
 const initial: ChatStoreState = {
@@ -93,6 +98,7 @@ const initial: ChatStoreState = {
   convMeta: {},
   convTitleOverrides: {},
   clusterActivity: {},
+  pendingReplyConvs: {},
 };
 
 const [state, setState] = createStore<ChatStoreState>(initial);
@@ -576,6 +582,8 @@ function ingestEvent(ev: DaemonEvent): void {
         },
       ]);
     }
+    // V86p — first assistant chunk is here; drop the "preparing" flag.
+    clearPendingReply(conv);
     return;
   }
   if (ev.type === 'chat.assistant.final') {
@@ -603,6 +611,8 @@ function ingestEvent(ev: DaemonEvent): void {
         },
       ]);
     }
+    // V86p — final without prior delta also drops the pending flag.
+    clearPendingReply(conv);
     return;
   }
   if (ev.type === 'chat.cancelled') {
@@ -610,6 +620,7 @@ function ingestEvent(ev: DaemonEvent): void {
     if (last && last.kind === 'assistant' && last.streaming) {
       setState('convMap', conv, arr.length - 1, { streaming: false, cancelled: true });
     }
+    clearPendingReply(conv);
   }
 }
 
@@ -667,7 +678,20 @@ async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promis
     return { ok: false, status: res.status, error: res.body };
   }
   if (!state.activeConv) setState('activeConv', res.data.conv ?? conv);
+  // V86p — flag the conv as "awaiting first assistant chunk". UI uses
+  // this to show a "preparing response…" stripe so the operator gets
+  // movement immediately instead of staring at the user bubble. The
+  // dispatch timestamp drives the elapsed counter.
+  setState('pendingReplyConvs', res.data.conv ?? conv, Date.now());
   return { ok: true, conv: res.data.conv ?? conv };
+}
+
+function clearPendingReply(conv: string): void {
+  if (state.pendingReplyConvs[conv] === undefined) return;
+  setState('pendingReplyConvs', (xs) => {
+    const { [conv]: _drop, ...rest } = xs;
+    return rest;
+  });
 }
 
 export const chatStore = {
