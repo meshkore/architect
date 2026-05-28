@@ -25,6 +25,7 @@ import ChatPanel from '~/components/ChatPanel';
 import ChatRail from '~/components/ChatRail';
 import ContextPanel from '~/components/ContextPanel';
 import DiagramsPanel from '~/components/DiagramsPanel';
+import AgentsPanel from '~/components/zones/AgentsPanel';
 import ConfigPanel from '~/components/zones/ConfigPanel';
 import BookmarksPanel from '~/components/zones/BookmarksPanel';
 import CronsPanel from '~/components/zones/CronsPanel';
@@ -41,7 +42,7 @@ import { uiStore, type Zone } from '~/state/ui';
 
 type Tab = 'roadmap' | 'tasks' | 'context' | 'diagrams';
 
-const HASH_ZONES: readonly Zone[] = ['architect', 'bookmarks', 'crons', 'links', 'protocols', 'diary', 'config'];
+const HASH_ZONES: readonly Zone[] = ['architect', 'agents', 'bookmarks', 'crons', 'links', 'protocols', 'diary', 'config'];
 
 export default function Cockpit(props: {
   selectedModule: string | null;
@@ -228,6 +229,7 @@ function SubTab(props: {
 function ZoneView(props: { zone: Zone }) {
   return (
     <Switch fallback={<BookmarksPanel />}>
+      <Match when={props.zone === 'agents'}><AgentsPanel /></Match>
       <Match when={props.zone === 'bookmarks'}><BookmarksPanel /></Match>
       <Match when={props.zone === 'crons'}><CronsPanel /></Match>
       <Match when={props.zone === 'links'}><LinksPanel /></Match>

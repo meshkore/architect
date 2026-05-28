@@ -79,6 +79,7 @@ function openAboutModal(): void {
 
 const ZONES: { id: Zone; label: string; title: string }[] = [
   { id: 'architect', label: 'Architect', title: 'Architect — project dashboard (modules · roadmap · chat)' },
+  { id: 'agents',    label: 'Agents',    title: 'Agents — global view of who is working on what' },
   { id: 'bookmarks', label: 'Bookmarks', title: 'Bookmarks — quick-access shelf' },
   { id: 'crons',     label: 'Crons',     title: 'Crons — scheduled jobs' },
   { id: 'links',     label: 'Links',     title: 'Links — deployment registry' },
@@ -91,6 +92,7 @@ function ZoneIcon(props: { id: Zone }) {
   return (
     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
       <Show when={props.id === 'architect'}><path d="M3 7h18M3 12h18M3 17h13" /></Show>
+      <Show when={props.id === 'agents'}><><circle cx="9" cy="8" r="3" /><circle cx="17" cy="11" r="2.5" /><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" /><path d="M13 20c0-2.2 1.8-4 4-4s4 1.8 4 4" /></></Show>
       <Show when={props.id === 'bookmarks'}><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2v16z" /></Show>
       <Show when={props.id === 'crons'}><><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></></Show>
       <Show when={props.id === 'links'}><><path d="M10 13a5 5 0 007.07 0l3-3a5 5 0 00-7.07-7.07l-1.5 1.5" /><path d="M14 11a5 5 0 00-7.07 0l-3 3a5 5 0 007.07 7.07l1.5-1.5" /></></Show>

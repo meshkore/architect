@@ -12,7 +12,7 @@ import { createStore } from 'solid-js/store';
 import { log } from '~/lib/log';
 
 export type Tab = 'roadmap' | 'manage' | 'history' | 'diagrams';
-export type Zone = 'architect' | 'bookmarks' | 'crons' | 'links' | 'protocols' | 'diary' | 'config';
+export type Zone = 'architect' | 'agents' | 'bookmarks' | 'crons' | 'links' | 'protocols' | 'diary' | 'config';
 export type RailMode = 'full' | 'short';
 export type WsTab = 'tasks' | 'context' | 'diagrams' | 'modules';
 export type ModulesPill = 'all' | 'work' | 'stb';
@@ -87,11 +87,13 @@ const initial: UIStoreState = {
   activeTab: readString<Tab>(KEYS.activeTab, 'roadmap', ['roadmap', 'manage', 'history', 'diagrams']),
   activeZone: readString<Zone>(KEYS.activeZone, 'architect', [
     'architect',
+    'agents',
     'bookmarks',
     'crons',
     'links',
     'protocols',
     'diary',
+    'config',
   ]),
   projectsRailMode: readString<RailMode>(KEYS.projectsRailMode, 'full', ['full', 'short']),
   projectsRailWidth: readInt(KEYS.projectsRailWidth, 240),
