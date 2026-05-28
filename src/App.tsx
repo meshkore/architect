@@ -21,6 +21,7 @@ import {
   readStoredToken,
   type ConnectionStatus,
 } from '~/lib/connection';
+import type { DaemonEvent } from '~/lib/daemon-client';
 import { store } from '~/state/store';
 import { daemonStore } from '~/state/daemon';
 import { serverStore, isProjectEmpty } from '~/state/server';
@@ -93,25 +94,22 @@ export default function App() {
       chatStore.bindCluster(health.cluster_id ?? null);
       viewStore.bindCluster(health.cluster_id ?? null);
     });
-    void serverStore.refreshNow(client, activeId);
-    // V86q — Rehydrate chat history from the daemon's timeline so a
-    // browser refresh doesn't wipe the visible chat. The daemon
-    // (py-1.9.2+) replays its `.meshkore/timeline/*.jsonl` ledger into
-    // a per-conv message list; the cockpit's convMap takes whatever
-    // the daemon returns as authoritative. Live WS events continue
-    // updating the same convMap from this point on. Daemons lacking
-    // the `chat.history` feature are silently skipped — the chat
-    // starts empty as it did before, no regression.
-    void (async () => {
-      if (!(health.features ?? []).includes('chat.history')) return;
-      const r = await client.chatHistory();
-      if (!r.ok) {
-        log.warn('chatHistory fetch failed', r.status, r.body?.slice(0, 200));
-        return;
+    // V86q — Rehydrate convMap from the snapshot's
+    // `timeline.recent_events` (py-1.1.0+ — the daemon has been
+    // emitting up to 500 timeline events inside /state for this exact
+    // purpose since the very first cockpit). The vanilla V80 monolith
+    // had an `indexEvents()` step here that the Solid port dropped on
+    // its way over; now we replay them through the same `ingestEvent`
+    // reducer the WS uses, so dedup / streaming / cancel logic stays
+    // in ONE place and history survives a hard refresh.
+    void serverStore.refreshNow(client, activeId).then(() => {
+      const snap = serverStore.state.snapshot as { timeline?: { recent_events?: DaemonEvent[] } } | null;
+      const events = snap?.timeline?.recent_events ?? [];
+      if (events.length > 0) {
+        chatStore.hydrateFromTimeline(events);
+        log.info('chat hydrated from timeline', { events: events.length });
       }
-      chatStore.hydrateHistory(r.data);
-      log.info('chat history hydrated', { convs: Object.keys(r.data.convs).length });
-    })();
+    });
   });
 
   // Once the server snapshot lands, fall back to the Coordinator conv
