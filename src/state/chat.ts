@@ -494,6 +494,28 @@ function createConv(opts: {
   return slug;
 }
 
+/**
+ * V87 — Spawn a fresh agent + conv for a story run. Called from
+ * `InitiativeCard.startRun`. Always returns a brand-new slug — never
+ * reuses an existing one — because the operator's contract is "play =
+ * new agent, new context, isolated cancel domain". The new conv lands
+ * in convMap so the rail picks it up immediately, with a convMeta
+ * agentId assigned via `nextAgentId` and the initiative's title as
+ * the agent's display name.
+ */
+function createStoryConv(opts: { initiativeId: string; initiativeTitle: string }): string {
+  const stamp = Date.now().toString(36);
+  const slug = `story-${opts.initiativeId}-${stamp}`;
+  if (!state.convMap[slug]) setState('convMap', slug, []);
+  ensureConvMeta(slug, {
+    type: 'custom',
+    title: opts.initiativeTitle,
+    location: { type: 'local', host: 'this machine' },
+  });
+  setState('activeConv', slug);
+  return slug;
+}
+
 function setConvTitle(conv: string, title: string): void {
   ensureConvMeta(conv);
   setState('convMeta', conv, 'title', title);
@@ -749,6 +771,7 @@ export const chatStore = {
   clearClusterChat,
   ensureConvMeta,
   createConv,
+  createStoryConv,
   setActiveConv,
   seedOnboardingConv,
   onboardingHasUserMessages,

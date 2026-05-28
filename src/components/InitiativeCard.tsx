@@ -73,12 +73,21 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
       return;
     }
     const existing = storyStore.state.run;
-    if (existing && existing.status !== 'done') {
-      log.warn('story already running — stop it first', existing.initiativeId);
+    if (existing && existing.status !== 'done' && existing.status !== 'cancelled') {
+      log.warn('another story run is already in flight', existing.initiativeId);
       return;
     }
-    const conv = chatStore.state.activeConv ?? `story-${props.initiative.id}-${Date.now().toString(36)}`;
-    chatStore.setActiveConv(conv);
+    // V87 — Always spawn a fresh agent + conv. Reusing
+    // chatStore.state.activeConv stacked the story dispatch on top of
+    // whatever the currently-focused agent was doing — that's the bug
+    // the operator hit ("le he dado a play y se ha puesto una segunda
+    // tarea sobre el mismo agente"). The new conv is an isolated
+    // cancellation domain: chat_cancel(conv) on the daemon touches
+    // ONLY this run, leaves other agents alone.
+    const conv = chatStore.createStoryConv({
+      initiativeId: props.initiative.id,
+      initiativeTitle: props.initiative.title,
+    });
     storyStore.start({
       id: `${props.initiative.id}-${Date.now().toString(36)}`,
       initiativeId: props.initiative.id,
@@ -88,8 +97,41 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
     });
   };
 
-  const isRunning = () => storyStore.state.run?.initiativeId === props.initiative.id
-    && storyStore.state.run?.status !== 'done';
+  const stopRun = async (): Promise<void> => {
+    const run = storyStore.state.run;
+    if (!run || run.initiativeId !== props.initiative.id) return;
+    storyStore.setStatus('stopping');
+    const client = daemonStore.state.client;
+    if (!client) {
+      storyStore.clear();
+      return;
+    }
+    // Fire-and-clear: chat_cancel SIGTERMs the in-flight runner; the
+    // chat.cancelled WS event will also trigger StoryRunner.clear()
+    // but that's idempotent so we eagerly clear here to update the UI
+    // even if the WS round-trip is slow.
+    const res = await client.chatCancel(run.conv);
+    if (!res.ok) log.warn('story stop: daemon cancel failed', res.status);
+    storyStore.clear();
+  };
+
+  const toggleRun = (): void => {
+    if (isThisRunning()) void stopRun();
+    else startRun();
+  };
+
+  const isThisRunning = () => {
+    const r = storyStore.state.run;
+    if (!r) return false;
+    if (r.initiativeId !== props.initiative.id) return false;
+    return r.status !== 'done' && r.status !== 'cancelled';
+  };
+  const isOtherRunning = () => {
+    const r = storyStore.state.run;
+    if (!r) return false;
+    if (r.initiativeId === props.initiative.id) return false;
+    return r.status !== 'done' && r.status !== 'cancelled';
+  };
 
   // V86w — archive / unarchive lives in viewStore (per-cluster
   // localStorage). When the operator archives an initiative the
@@ -114,12 +156,20 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
       <header class="flex items-center gap-3 px-4 py-3">
         <button
           type="button"
-          onClick={startRun}
-          disabled={isRunning()}
-          title={isRunning() ? 'Story running — use the banner to Stop' : 'Run initiative'}
-          class="w-7 h-7 rounded-md bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 flex items-center justify-center text-xs flex-shrink-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={toggleRun}
+          disabled={isOtherRunning()}
+          title={
+            isThisRunning() ? 'Stop the story run on this initiative'
+            : isOtherRunning() ? 'Another initiative is running — stop it first'
+            : 'Run initiative (spawns a fresh agent)'
+          }
+          class={`w-7 h-7 rounded-md flex items-center justify-center text-xs flex-shrink-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border ${
+            isThisRunning()
+              ? 'bg-red-500/15 hover:bg-red-500/30 text-red-300 border-red-500/40'
+              : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
+          }`}
         >
-          ▶
+          {isThisRunning() ? '■' : '▶'}
         </button>
         <button
           type="button"
