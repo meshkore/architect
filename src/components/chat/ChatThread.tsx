@@ -20,7 +20,7 @@ export default function ChatThread(props: {
     return typeof ts === 'number' ? ts : null;
   };
   return (
-    <div ref={props.ref} class="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
+    <div ref={props.ref} class="flex-1 min-h-0 overflow-y-auto p-3 space-y-6">
       <For each={props.stream.pre}>
         {(it) => {
           if (it.kind === 'msg') return <MessageBubble msg={it.msg} />;

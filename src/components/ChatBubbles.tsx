@@ -127,6 +127,15 @@ function CollapsibleText(props: { text: string; lockExpanded?: boolean; markdown
         {props.children}
       </Show>
       <Show when={showToggle()}>
+        {/* V86z — pale-gray fade line right above the toggle when the
+            content is clamped. Without it the cut looks like a
+            floating / unfinished paragraph; with it the operator
+            reads "this text was deliberately trimmed". Hidden once
+            expanded — at that point nothing is clipped so a fade
+            would be misleading. */}
+        <Show when={!expanded()}>
+          <span aria-hidden="true" class="block h-px w-full bg-gradient-to-r from-gray-400/40 to-transparent mt-0.5" />
+        </Show>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); setExpanded(!expanded()); }}
@@ -163,31 +172,50 @@ function BubbleHeader(props: {
   tone: 'agent' | 'operator' | 'cancelled';
   suffix?: string;
 }) {
+  // V86y — color stops for the fade line. Picked per tone so the
+  // line reads as "this is the same speaker's territory" without
+  // having to chase the byline text colour exactly.
   const nameColor = (): string => {
     if (props.tone === 'cancelled') return 'text-red-300';
     if (props.tone === 'operator') return 'text-emerald-300';
     return 'text-gray-100';
   };
+  const fadeClasses = (): string => {
+    // The gradient starts from the side ADJACENT to the byline
+    // (where the chip + name sit) and fades toward the opposite edge.
+    // For an agent (align=left), the line extends rightward;
+    // for the operator (align=right), it extends leftward.
+    const direction = props.align === 'right' ? 'bg-gradient-to-l' : 'bg-gradient-to-r';
+    const tint =
+      props.tone === 'cancelled' ? 'from-red-400/40'
+      : props.tone === 'operator' ? 'from-emerald-400/45'
+      : 'from-emerald-400/35';
+    return `${direction} ${tint} to-transparent`;
+  };
   return (
-    <div class={`flex items-baseline gap-1.5 text-[11px] ${props.align === 'right' ? 'flex-row-reverse' : ''}`}>
+    <div class={`flex items-center gap-2 text-[11px] w-full ${props.align === 'right' ? 'flex-row-reverse' : ''}`}>
       <Show when={props.id}>
-        <span class="font-mono text-[10px] text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/25 rounded px-1.5 py-0.5 uppercase tracking-wider">
+        <span class="font-mono text-[10px] text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/25 rounded px-1.5 py-0.5 uppercase tracking-wider flex-shrink-0">
           {props.id}
         </span>
       </Show>
-      <span class={`font-semibold ${nameColor()}`}>{props.primary}</span>
+      <span class={`font-semibold flex-shrink-0 ${nameColor()}`}>{props.primary}</span>
       <Show when={props.ts}>
-        <span class="font-mono text-[10px] text-gray-600">
+        <span class="font-mono text-[10px] text-gray-600 flex-shrink-0">
           <time dateTime={props.ts}>{formatBubbleTs(props.ts!)}</time>
         </span>
       </Show>
       <Show when={props.suffix}>
-        <span class={`font-mono text-[10px] uppercase tracking-wider ${
+        <span class={`font-mono text-[10px] uppercase tracking-wider flex-shrink-0 ${
           props.tone === 'cancelled' ? 'text-red-400/80' : 'text-amber-400/80'
         }`}>
           · {props.suffix}
         </span>
       </Show>
+      {/* V86y — fading separator. Fills remaining width so each turn
+          carries a soft tinted underline that telegraphs which side
+          owns the row at a glance, beyond just the alignment. */}
+      <span aria-hidden="true" class={`flex-1 h-px min-w-[12px] ${fadeClasses()}`} />
     </div>
   );
 }
@@ -211,20 +239,26 @@ function formatBubbleTs(ts: string): string {
 }
 
 export function UserBubble(props: { msg: ChatMsg; prepend?: boolean }) {
-  // V86u — borderless. Operator's input reads as a right-aligned
-  // block of text with a small monospace byline above it. The
-  // emerald tint on the body text + right-alignment is enough to
-  // distinguish "me" from "the agent" without rounded boxes.
+  // V86y — "Usuario" replaces the legacy "architect" author tag
+  // (which was the dispatch-time hardcoded value, not a person).
+  // If the daemon ever exposes an operator-name field via /health
+  // or cluster.yaml we can swap this for that value; for now the
+  // fixed "Usuario" string matches the operator's request.
+  const label = (): string => {
+    const a = props.msg.author?.trim();
+    if (a && a !== 'architect' && a !== 'operator' && a !== 'user') return a;
+    return 'Usuario';
+  };
   return (
-    <div class="flex flex-col gap-0.5 items-end w-full">
+    <div class="flex flex-col gap-1.5 items-end w-full">
       <BubbleHeader
-        primary={props.msg.author || 'operator'}
+        primary={label()}
         ts={props.msg.ts}
         align="right"
         tone="operator"
         suffix={props.prepend ? 'queued · merges into next turn' : undefined}
       />
-      <div class={`max-w-[85%] text-sm leading-relaxed text-right ${
+      <div class={`max-w-[85%] text-sm leading-relaxed text-right pr-2 ${
         props.prepend ? 'text-amber-200/95' : 'text-emerald-200/95'
       }`}>
         <CollapsibleText text={props.msg.text} />
@@ -245,7 +279,7 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
   const agentId = () => meta()?.agentId ?? null;
   const agentName = () => meta()?.title || props.msg.author || 'coordinator';
   return (
-    <div class="flex flex-col gap-0.5 items-start w-full">
+    <div class="flex flex-col gap-1.5 items-start w-full">
       <BubbleHeader
         primary={agentName()}
         id={agentId() ?? undefined}
@@ -254,7 +288,7 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
         tone={props.msg.cancelled ? 'cancelled' : 'agent'}
         suffix={props.msg.cancelled ? 'cancelled' : undefined}
       />
-      <div class={`text-sm leading-relaxed max-w-[90%] ${
+      <div class={`text-sm leading-relaxed max-w-[90%] pl-2 ${
         props.msg.cancelled ? 'text-red-300/95' : 'text-gray-200'
       }`}>
         <Show
@@ -339,7 +373,7 @@ export function PreparingBubble(_props: { dispatchedAt: number }) {
     return conv ? chatStore.state.convMeta[conv] : null;
   };
   return (
-    <div class="flex flex-col gap-0.5 items-start w-full">
+    <div class="flex flex-col gap-1.5 items-start w-full">
       <BubbleHeader
         primary={meta()?.title || 'coordinator'}
         id={meta()?.agentId ?? undefined}
@@ -347,7 +381,7 @@ export function PreparingBubble(_props: { dispatchedAt: number }) {
         align="left"
         tone="agent"
       />
-      <div class="max-w-[90%] text-sm leading-relaxed">
+      <div class="max-w-[90%] text-sm leading-relaxed pl-2">
         <ThinkingPlaceholder />
       </div>
     </div>
