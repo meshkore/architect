@@ -1,20 +1,19 @@
 /**
- * InitiativesPanel — central roadmap view (M4.2 · V90).
+ * InitiativesPanel — central roadmap view (M4.2 · V90 header · V92 Run all).
  *
  * Renders initiatives as cards with expand-to-task-grid layout.
  * Real-time: reads from `serverStore` memos, which refresh on
  * `state.rebuilt` / `task.updated` events wired in App.tsx, so
  * frontmatter mutations propagate without operator action.
  *
- * V90 header layout (left → right):
+ * Header layout (left → right):
  *   INITIATIVES · [active | archived | all | backlog] · [filter…] · RUN ALL
  *
- * The right-side status pills (all/active/next/backlog) are gone —
- * "next" was redundant with active visibility, and the meaningful
- * distinctions (archived / completed / backlog) now live as
- * VISIBILITY modes on the left. RUN ALL kicks the sequential
- * orchestrator (RoadmapRunner + roadmapRunStore) over every
- * currently-visible non-complete non-backlog initiative.
+ * V92 — RUN ALL spawns a `roadmap-architect` agent (a Claude Code
+ * subprocess) and dispatches a bootstrap prompt listing the visible
+ * non-backlog initiatives. The agent reads the roadmap, plans
+ * parallel-vs-sequential, dispatches sub-agents via /chat/dispatch,
+ * and narrates progress in its own chat. No cockpit-side queue.
  */
 
 import { For, Show, createSignal, createMemo } from 'solid-js';
