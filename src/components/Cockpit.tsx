@@ -13,7 +13,8 @@
  * replace the cockpit body with their own panel via `ZoneView`.
  */
 
-import { createEffect, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
+import { createEffect, createSignal, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
+import { EXPECTED_DAEMON_VERSION } from '~/lib/version';
 import Header from '~/components/Header';
 import ProjectsRail from '~/components/ProjectsRail';
 import OfflinePanel from '~/components/OfflinePanel';
@@ -79,6 +80,7 @@ export default function Cockpit(props: {
   return (
     <div class="min-h-screen flex flex-col bg-canvas">
       <Header />
+      <DaemonAheadBanner />
       <StoryBanner />
       {/* V86k — ProjectsRail (left) + ChatPanel (right) are now PERMANENT
           across every top-bar zone. Only the two middle columns
@@ -205,6 +207,59 @@ function MigratedZoneHost(props: { zone: Zone }) {
  */
 function DaemonPausedPanel() {
   return <section class="flex-1" />;
+}
+
+/**
+ * V94 — Slim "refresh recommended" banner that appears when the
+ * daemon is ahead of the cockpit's EXPECTED_DAEMON_VERSION. The
+ * operator's tab keeps working (the WS event shapes are backward-
+ * compatible by daemon contract), but new fields / events may not
+ * be rendered until the cockpit reloads to pick up the matching
+ * bundle. Non-blocking by design — a hard lock here would be wrong
+ * because the daemon SHOULD be backward-compatible.
+ *
+ * Dismiss is per-session via sessionStorage; reloading drops the
+ * dismissal naturally because the next bundle has the matching
+ * EXPECTED_DAEMON_VERSION and `ahead` flips back to false anyway.
+ */
+function DaemonAheadBanner() {
+  const [dismissed, setDismissed] = createSignal(
+    typeof sessionStorage !== 'undefined' && sessionStorage.getItem('mc-daemon-ahead-dismissed') === '1',
+  );
+  const visible = () => daemonStore.state.ahead && !dismissed();
+  const dismiss = (): void => {
+    try { sessionStorage.setItem('mc-daemon-ahead-dismissed', '1'); } catch { /* private mode */ }
+    setDismissed(true);
+  };
+  const refresh = (): void => { window.location.reload(); };
+  return (
+    <Show when={visible()}>
+      <div class="border-b border-cyan-500/30 bg-cyan-500/10 text-cyan-100 text-[12px] px-4 py-2 flex items-center gap-3">
+        <span class="font-mono text-cyan-300/90 flex-shrink-0">↻ daemon ahead</span>
+        <span class="flex-1 min-w-0 truncate">
+          The daemon at <span class="font-mono">{daemonStore.state.health?.cluster_name ?? daemonStore.state.health?.identity ?? 'this project'}</span>
+          {' '}is now <span class="font-mono text-cyan-300">{daemonStore.state.version?.raw ?? '?'}</span>.
+          This cockpit bundle was built for <span class="font-mono text-cyan-300">{EXPECTED_DAEMON_VERSION}</span>.
+          Reload to pick up the matching frontend so you don't miss new event fields.
+        </span>
+        <button
+          type="button"
+          onClick={refresh}
+          class="font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/40 border border-cyan-500/50 text-cyan-100 transition-colors flex-shrink-0"
+        >
+          Reload
+        </button>
+        <button
+          type="button"
+          onClick={dismiss}
+          class="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-cyan-500/30 hover:border-cyan-500/60 text-cyan-200/80 hover:text-cyan-100 transition-colors flex-shrink-0"
+          title="Hide until the next refresh"
+        >
+          Later
+        </button>
+      </div>
+    </Show>
+  );
 }
 
 function SubTab(props: {

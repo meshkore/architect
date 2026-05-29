@@ -275,6 +275,26 @@ export interface TaskCreateBody {
 
 // ─── Client ─────────────────────────────────────────────────────────
 
+/**
+ * V94 — Global listener for daemon-version-header changes. Every
+ * successful HTTP response from any DaemonClient invokes this hook
+ * after parsing the `x-meshkore-daemon-version` header. daemonStore
+ * registers a listener to update the active instance's recorded
+ * version and re-compute `outdated` / `ahead` reactively — so a
+ * daemon self-update that bumps the version while the cockpit is
+ * mid-session lands as a UI signal (refresh banner / outdated
+ * lock) within one round-trip instead of waiting for a reconnect.
+ *
+ * Process-wide singleton (not per-client) because the cockpit
+ * inspects WHICH instance the response came from via the
+ * `transport.httpBase` URL inside the listener.
+ */
+type DaemonVersionListener = (httpBase: string, version: string) => void;
+let daemonVersionListener: DaemonVersionListener | null = null;
+export function setDaemonVersionListener(fn: DaemonVersionListener | null): void {
+  daemonVersionListener = fn;
+}
+
 export class DaemonClient {
   constructor(public readonly transport: TransportConfig) {}
 
@@ -502,6 +522,12 @@ export class DaemonClient {
       return { ok: false, status: 0, body: '', error: msg };
     }
     const daemonVersion = res.headers.get('x-meshkore-daemon-version') ?? undefined;
+    // V94 — fan-out the version header to the registered listener so
+    // daemonStore can detect mid-session bumps (self-update on the
+    // daemon, manual P4 upgrade, etc.) and flip outdated/ahead flags.
+    if (daemonVersion && daemonVersionListener) {
+      try { daemonVersionListener(this.transport.httpBase, daemonVersion); } catch { /* never let a listener crash the request */ }
+    }
     const text = await res.text();
     if (!res.ok) {
       log.warn('daemon non-2xx', method, path, res.status, text.slice(0, 200));

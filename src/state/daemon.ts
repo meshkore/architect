@@ -22,9 +22,9 @@
 
 import { batch } from 'solid-js';
 import { createStore } from 'solid-js/store';
-import { DaemonClient, type HealthResponse } from '~/lib/daemon-client';
+import { DaemonClient, type HealthResponse, setDaemonVersionListener } from '~/lib/daemon-client';
 import { DaemonWS, type DaemonWSState } from '~/lib/ws';
-import { parseDaemonVersion, meetsMinimum, type DaemonVersion } from '~/lib/version';
+import { parseDaemonVersion, meetsMinimum, isDaemonAhead, type DaemonVersion } from '~/lib/version';
 import { attachEventBus } from '~/lib/event-bus';
 import { log } from '~/lib/log';
 // V93 — Static imports for everything the project-switch path needs.
@@ -58,7 +58,14 @@ export interface DaemonInstance {
   wsState: DaemonWSState;
   health: HealthResponse;
   version: DaemonVersion | null;
+  /** True when version < MIN_DAEMON_VERSION. Locks the cockpit body
+   *  via the existing DaemonOutdatedModal flow. */
   outdated: boolean;
+  /** V94 — True when version > EXPECTED_DAEMON_VERSION (major or
+   *  minor). The cockpit was built against an older daemon and
+   *  WS event shapes may have changed; surface a "refresh
+   *  recommended" banner. Does not block. */
+  ahead: boolean;
   supportsSelfUpdate: boolean;
 }
 
@@ -124,6 +131,9 @@ export interface DaemonStoreState {
   health: HealthResponse | null;
   version: DaemonVersion | null;
   outdated: boolean;
+  /** V94 — mirrors the active instance's `ahead` flag for top-level
+   *  consumers (banner component). */
+  ahead: boolean;
   autoUpdateEnabled: boolean;
   supportsSelfUpdate: boolean;
 }
@@ -140,11 +150,46 @@ const initial: DaemonStoreState = {
   health: null,
   version: null,
   outdated: false,
+  ahead: false,
   autoUpdateEnabled: false,
   supportsSelfUpdate: false,
 };
 
 const [state, setState] = createStore<DaemonStoreState>(initial);
+
+/**
+ * V94 — Wire the daemon-client's per-response version-header fan-out
+ * into this store. When ANY HTTP call to ANY instance comes back with
+ * a different `x-meshkore-daemon-version` than what we've recorded,
+ * update that instance's version + recompute its outdated/ahead
+ * flags. Closes the gap where a daemon self-update mid-session left
+ * the cockpit thinking it was still talking to the old version.
+ */
+setDaemonVersionListener((httpBase, version) => {
+  // Find the instance whose client's transport matches this URL base.
+  // Iterating is fine — operators rarely connect to >5 projects.
+  const entries = Object.entries(state.instances);
+  for (const [key, inst] of entries) {
+    if (inst.client.transport.httpBase !== httpBase) continue;
+    const recorded = inst.version?.raw;
+    if (recorded === version) return; // unchanged — no-op
+    const next = parseDaemonVersion(version);
+    if (!next) return; // unparseable — ignore (daemon shouldn't ever send this)
+    const nextOutdated = !meetsMinimum(next);
+    const nextAhead = isDaemonAhead(next);
+    log.info('daemon version header changed', {
+      cluster: key, from: recorded ?? null, to: next.raw, outdated: nextOutdated, ahead: nextAhead,
+    });
+    setState('instances', key, (prev) => ({
+      ...prev,
+      version: next,
+      outdated: nextOutdated,
+      ahead: nextAhead,
+    }));
+    if (state.activeId === key) syncFacade();
+    return;
+  }
+});
 
 function clusterKeyFor(health: HealthResponse, port: number): string {
   const cid = health.cluster_id?.trim();
@@ -164,6 +209,7 @@ function syncFacade(): void {
       health: null,
       version: null,
       outdated: false,
+      ahead: false,
       supportsSelfUpdate: false,
     });
     return;
@@ -175,6 +221,7 @@ function syncFacade(): void {
     health: inst.health,
     version: inst.version,
     outdated: inst.outdated,
+    ahead: inst.ahead,
     supportsSelfUpdate: inst.supportsSelfUpdate,
   });
 }
@@ -247,6 +294,7 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
     health,
     version: v,
     outdated: !meetsMinimum(v),
+    ahead: isDaemonAhead(v),
     supportsSelfUpdate,
   };
   // Batch reactive writes (one tick for downstream memos), then

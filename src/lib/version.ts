@@ -72,17 +72,51 @@ export function isDaemonAtLeast(
  * to support. When the connected daemon's version is lower, the
  * cockpit shows the V47 upgrade modal (M6.3) and offers `/self-update`.
  *
- * Current floor: `py-1.8.0` (loopback TLS bundle via
- * `daemon.meshkore.com`). Older daemons still answer at
- * `http://localhost:<port>` with the TLS feature flag off, so they
- * keep working in degraded mode (mixed-content + LNA Issues from
- * any HTTPS cockpit origin). The gate nudges every operator to
- * 1.8.0 so the cockpit can flip to HTTPS by default once a majority
- * have upgraded.
+ * V94 — bumped to `py-1.10.3`. The cockpit now hard-depends on:
+ *   - /runs endpoints + run.* WS events (py-1.10.0)
+ *   - /health.chat_active_convs (py-1.10.2)
+ *   - roadmap-architect agent type (py-1.10.3)
+ * Older daemons would silently no-op those calls, leaving the
+ * operator with a broken UI and no diagnostic. Failing closed via
+ * the outdated modal is the honest behaviour.
  */
-export const MIN_DAEMON_VERSION = 'py-1.8.0';
+export const MIN_DAEMON_VERSION = 'py-1.10.3';
+
+/**
+ * EXPECTED_DAEMON_VERSION — the daemon version THIS COCKPIT BUNDLE
+ * was built against. Used for the "ahead" detector: if the daemon
+ * is *newer* than this, the cockpit may not understand new event
+ * shapes or response fields, so we surface a "refresh recommended"
+ * banner. The operator's tab still works, but a refresh picks up
+ * the matching cockpit bundle.
+ *
+ * Keep this equal to the daemon version of the LAST commit that
+ * cockpit code statically depends on. If you bump the daemon and
+ * the cockpit consumes a new field, bump this too in the same PR.
+ */
+export const EXPECTED_DAEMON_VERSION = 'py-1.10.3';
 
 /** Convenience: gate against the project's MIN. */
 export function meetsMinimum(actual: string | DaemonVersion | undefined | null): boolean {
   return isDaemonAtLeast(actual, MIN_DAEMON_VERSION);
+}
+
+/**
+ * Returns true when the daemon is STRICTLY newer than the version
+ * this cockpit bundle was built against. Triggers a soft "refresh"
+ * nudge (not a hard block) so the operator doesn't keep running
+ * against a daemon whose WS payload contract may have evolved.
+ *
+ * Major/minor only — patch-level bumps (bug fixes, no contract
+ * changes) don't trip the nudge, matching daemon's semver intent.
+ */
+export function isDaemonAhead(actual: string | DaemonVersion | undefined | null): boolean {
+  const a =
+    typeof actual === 'string' || actual === null || actual === undefined
+      ? parseDaemonVersion((actual as string | null) ?? null)
+      : actual;
+  const e = parseDaemonVersion(EXPECTED_DAEMON_VERSION);
+  if (!a || !e) return false;
+  if (a.major !== e.major) return a.major > e.major;
+  return a.minor > e.minor;
 }
