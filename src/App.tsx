@@ -126,6 +126,17 @@ export default function App() {
         chatStore.hydrateActiveConvs(activeConvs);
         log.info('active convs hydrated from health', { count: activeConvs.length, convs: activeConvs });
       }
+      // V102 — fetch the daemon's archived-conv list and seed the
+      // cockpit's filter. Before this, archives done from another
+      // tab, the CLI, or a cleanup script (POST /chat/archive)
+      // never reached this tab's rail filter on refresh.
+      void client.chatArchives().then((res) => {
+        if (res.ok) {
+          chatStore.hydrateArchives(res.data.archived ?? {});
+          const n = Object.keys(res.data.archived ?? {}).length;
+          log.info('archives hydrated from daemon', { count: n });
+        }
+      });
       // V89 — fetch any active runs from the daemon so the UI paints
       // ground truth immediately (the WS handles updates from here on).
       void storyStore.hydrate(client).then(() => {

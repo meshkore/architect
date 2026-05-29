@@ -564,6 +564,24 @@ function unarchiveConv(conv: string): void {
   });
 }
 
+/**
+ * V102 — Hydrate the archive set from the daemon's authoritative
+ * `/chat/archives`. Called once on cluster bind so archived convs
+ * land in the cockpit's filter EVEN if they were archived from
+ * another tab / the CLI / a cleanup script. Before V102 the
+ * cockpit's `archivedConvs` was cockpit-local-only: archiving in
+ * one tab didn't affect another, and `POST /chat/archive` from a
+ * script never reached the rail.
+ */
+function hydrateArchives(map: Record<string, unknown>): void {
+  if (!map) return;
+  const out: Record<string, true> = {};
+  for (const k of Object.keys(map)) {
+    if (k && k !== ONBOARDING_CONV_ID) out[k] = true;
+  }
+  setState('archivedConvs', out);
+}
+
 function setAgentStatus(agentId: string, status: AgentStatus): void {
   setState('agentStatus', agentId, status);
 }
@@ -711,6 +729,22 @@ function ingestEvent(ev: DaemonEvent): void {
       });
     }
     clearAgentStatusFor(conv);
+  }
+  // V102 — daemon-driven archive sync. The daemon broadcasts
+  // `chat.archived` / `chat.unarchived` whenever `/chat/archive`
+  // is hit (from any tab, the CLI, a cleanup script). Before V102
+  // these were ignored — the rail filter stayed cockpit-local.
+  if (ev.type === 'chat.archived') {
+    if (conv && conv !== ONBOARDING_CONV_ID) {
+      setState('archivedConvs', conv, true);
+    }
+  } else if (ev.type === 'chat.unarchived') {
+    if (conv) {
+      setState('archivedConvs', (xs) => {
+        const { [conv]: _drop, ...rest } = xs;
+        return rest;
+      });
+    }
   }
 }
 
@@ -906,6 +940,7 @@ export const chatStore = {
   setConvTitle,
   archiveConv,
   unarchiveConv,
+  hydrateArchives,
   setAgentStatus,
   clearAgentStatus,
   ingestEvent,

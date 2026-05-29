@@ -396,6 +396,17 @@ export class DaemonClient {
     return this.request<unknown>('POST', '/chat/cancel', { conv }, signal);
   }
 
+  /** V102 — Fetch the daemon's archived-conv list. Cockpit calls this
+   *  at boot so locally-deleted-then-refreshed convs stay archived,
+   *  and to pick up archive actions performed outside this tab
+   *  (CLI, another browser). Response shape:
+   *  `{ archived: { <conv>: { archived_at, by } } }`. */
+  async chatArchives(signal?: AbortSignal): Promise<Result<{ archived: Record<string, { archived_at?: string; by?: string }> }>> {
+    return this.request<{ archived: Record<string, { archived_at?: string; by?: string }> }>(
+      'GET', '/chat/archives', undefined, signal, /*requireAuth*/ false,
+    );
+  }
+
   // py-1.10.0 — Story-run coordinator.
   async runsList(activeOnly = false, signal?: AbortSignal): Promise<Result<RunsList>> {
     return this.request<RunsList>('GET', `/runs${activeOnly ? '?active=1' : ''}`, undefined, signal);
