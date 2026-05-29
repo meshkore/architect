@@ -22,11 +22,22 @@
 
 import { batch } from 'solid-js';
 import { createStore } from 'solid-js/store';
-import type { DaemonClient, HealthResponse } from '~/lib/daemon-client';
+import { DaemonClient, type HealthResponse } from '~/lib/daemon-client';
 import { DaemonWS, type DaemonWSState } from '~/lib/ws';
 import { parseDaemonVersion, meetsMinimum, type DaemonVersion } from '~/lib/version';
 import { attachEventBus } from '~/lib/event-bus';
 import { log } from '~/lib/log';
+// V93 — Static imports for everything the project-switch path needs.
+// Previously these were `await import(...)` lower in the file; Vite
+// emitted `~/lib/auth` as its own chunk (no other static importers),
+// and any deploy invalidated that chunk for tabs still running the
+// old main bundle, breaking the switch silently. Static imports put
+// everything in the main chunk, so a stale tab either Just Works
+// (everything already loaded) or the chunk-load guard reloads it.
+import { daemonHttpBase, localTransport } from '~/lib/transport';
+import { clusterTokenKey, tokenForCluster } from '~/lib/tokens';
+import { verifyDaemonIdentity } from '~/lib/auth';
+import { openTokenUnlockModal } from '~/components/modals/TokenUnlockModal';
 
 export type ConnectionPhase =
   | 'idle'
@@ -380,9 +391,18 @@ async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
     return { ok: true };
   }
 
-  // New project — probe /health, build a client, attach.
+  // V93 — All deps that used to be `await import(...)` are now static
+  // imports at the top of this file. The old dynamic imports were
+  // landmines on every deploy: a stale tab loaded the old main bundle
+  // referencing chunk hashes that the new CDN deploy no longer
+  // served. `~/lib/auth` was particularly exposed because it had no
+  // other static importers — Vite emitted it as its own `auth-<hash>.js`
+  // chunk, which 404'd for the operator's old tab. Static-importing
+  // them puts every dep in the main bundle, so the next time the
+  // operator clicks switchProject on a stale tab, it either works
+  // (everything already loaded) or the global chunk-error handler
+  // (see lib/dynamic-import-guard) reloads the page.
   const oldToken = state.client?.transport.token ?? '';
-  const { daemonHttpBase } = await import('~/lib/transport');
   const probeUrl = `${daemonHttpBase(port)}/health`;
   let health: HealthResponse;
   try {
@@ -404,7 +424,6 @@ async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
     const isTls = /ssl|tls|cert/i.test(msg);
     return { ok: false, reason: isTls ? 'tls' : 'no-daemon', detail: msg };
   }
-  const { clusterTokenKey, tokenForCluster } = await import('~/lib/tokens');
   const tokenKey = clusterTokenKey({ cluster_id: health.cluster_id ?? null, port });
   const token = tokenForCluster(tokenKey) || oldToken;
 
@@ -413,7 +432,6 @@ async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
   // require a passing HMAC handshake. A mismatch suggests an
   // attacker-impersonated endpoint (DNS poisoned + valid TLS cert);
   // we refuse to attach and surface a clear error.
-  const { verifyDaemonIdentity } = await import('~/lib/auth');
   const verify = await verifyDaemonIdentity(daemonHttpBase(port), token, health.features ?? []);
   console.log('[RAIL] switchToPort identity', { port, outcome: verify.kind });
   if (verify.kind === 'mismatch') {
@@ -421,29 +439,20 @@ async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
     // V86 — no native alert(). The cockpit's existing
     // TokenUnlockModal handles auth-related interruptions; route the
     // security failure through it so the operator sees a styled
-    // dialog inside the cockpit chrome rather than an OS popup. The
-    // modal explains the situation and lets them paste a fresh
-    // token, the only operator-side mitigation available.
-    try {
-      const { openTokenUnlockModal } = await import('~/components/modals/TokenUnlockModal');
-      openTokenUnlockModal({
-        project: { port, cluster_id: health.cluster_id ?? null, cluster_name: health.cluster_name ?? null },
-        reason:
-          'Auth challenge failed — the daemon at ' +
-          `https://daemon.meshkore.com:${port} couldn't prove ownership of the stored ` +
-          'token. Likely causes: stale local token, or someone impersonating the daemon on ' +
-          'this network. Paste a fresh token from .meshkore/credentials/architect-token, ' +
-          'or move to a trusted network.',
-        onUnlocked: () => { /* operator will retry from the rail */ },
-      });
-    } catch (e) {
-      log.warn('failed to open token modal after auth mismatch', e instanceof Error ? e.message : String(e));
-    }
+    // dialog inside the cockpit chrome rather than an OS popup.
+    openTokenUnlockModal({
+      project: { port, cluster_id: health.cluster_id ?? null, cluster_name: health.cluster_name ?? null },
+      reason:
+        'Auth challenge failed — the daemon at ' +
+        `https://daemon.meshkore.com:${port} couldn't prove ownership of the stored ` +
+        'token. Likely causes: stale local token, or someone impersonating the daemon on ' +
+        'this network. Paste a fresh token from .meshkore/credentials/architect-token, ' +
+        'or move to a trusted network.',
+      onUnlocked: () => { /* operator will retry from the rail */ },
+    });
     return { ok: false, reason: 'unknown', detail: 'auth mismatch' };
   }
 
-  const { localTransport } = await import('~/lib/transport');
-  const { DaemonClient } = await import('~/lib/daemon-client');
   const client = new DaemonClient(localTransport(port, token));
   attachClient(client, health);
   console.log('[RAIL] switchToPort attached new instance', { port, cluster_id: health.cluster_id ?? null });

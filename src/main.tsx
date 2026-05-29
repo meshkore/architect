@@ -2,9 +2,14 @@
 import { render } from 'solid-js/web';
 import App from '~/App';
 import { log } from '~/lib/log';
+import { installChunkGuard } from '~/lib/chunk-guard';
 import './index.css';
 
 log.info('script loaded · version=0.2.0-alpha');
+
+// V93 — Reload-once safety net for stale-deploy dynamic-import failures.
+// Installed before App mounts so it covers chunks loaded during boot too.
+installChunkGuard();
 
 const root = document.getElementById('app');
 if (!root) {
