@@ -531,10 +531,21 @@ function StreamingTail(props: { text: string }) {
       }
     }).catch(() => setHtml(t));
   });
+  // V106.2 — Top mask gradient. The tail clips at `max-height` with
+  // `flex-col-reverse` (anchor bottom). When the clip cuts mid-line
+  // (e.g. half a list marker "2." visible), it looks broken. The
+  // `mask-image` fades the top ~20px so any partial line dissolves
+  // naturally instead of being chopped in half.
   return (
     <div
       class="overflow-hidden flex flex-col-reverse"
-      style={{ 'max-height': `${STREAM_TAIL_HEIGHT_PX}px` }}
+      style={{
+        'max-height': `${STREAM_TAIL_HEIGHT_PX}px`,
+        '-webkit-mask-image':
+          'linear-gradient(to bottom, transparent 0, rgba(0,0,0,0.4) 12px, #000 28px)',
+        'mask-image':
+          'linear-gradient(to bottom, transparent 0, rgba(0,0,0,0.4) 12px, #000 28px)',
+      }}
     >
       <div class="chat-md" innerHTML={html() || props.text} />
     </div>
