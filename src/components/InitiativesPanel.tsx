@@ -16,7 +16,7 @@
  * and narrates progress in its own chat. No cockpit-side queue.
  */
 
-import { For, Show, createSignal, createMemo } from 'solid-js';
+import { For, Show, createSignal, createMemo, createEffect, onCleanup } from 'solid-js';
 import { allInitiatives, allTasks, isProjectEmpty, type ServerInitiative, type ServerTask } from '~/state/server';
 import InitiativeCard from '~/components/InitiativeCard';
 import EmptyOnboardingPanel from '~/components/EmptyOnboardingPanel';
@@ -42,6 +42,14 @@ const VISIBILITY_FILTERS: { id: VisibilityFilter; label: string; title: string }
 export default function InitiativesPanel() {
   const [visibility, setVisibility] = createSignal<VisibilityFilter>('active');
   const [query, setQuery] = createSignal('');
+  // V106.3 — Initiatives currently animating their exit from the
+  // active list. Triggered when all tasks of an initiative flip to
+  // status=done while the operator is on the active filter. The id
+  // stays in this set for ~550ms (the CSS transition), then we flip
+  // viewStore.archived=true and remove from the set, so the card
+  // gracefully fades + collapses before disappearing.
+  const [exiting, setExiting] = createSignal<Set<string>>(new Set());
+  const EXIT_ANIM_MS = 550;
 
   const tasksByInitiative = createMemo(() => {
     const map = new Map<string, ServerTask[]>();
@@ -57,6 +65,7 @@ export default function InitiativesPanel() {
     const q = query().trim().toLowerCase();
     const vis = visibility();
     const tbi = tasksByInitiative();
+    const exitingSet = exiting();
     return allInitiatives().filter((it) => {
       const arch = viewStore.isInitiativeArchived(it.id);
       const tasks = tbi.get(it.id) ?? [];
@@ -67,13 +76,61 @@ export default function InitiativesPanel() {
       //   archived: only the manually-archived
       //   backlog:  only `status === 'backlog'`, not archived
       //   all:      everything (mixed)
-      if (vis === 'active' && (arch || complete || isBacklog)) return false;
+      // V106.3 — During the exit animation, keep the card visible
+      // in the active filter even though it's complete, so the
+      // operator sees it gracefully fade + collapse.
+      if (vis === 'active') {
+        if (exitingSet.has(it.id)) {
+          // Still animating out — leave it visible.
+        } else if (arch || complete || isBacklog) {
+          return false;
+        }
+      }
       if (vis === 'archived' && !arch) return false;
       if (vis === 'backlog' && (arch || !isBacklog)) return false;
       if (!q) return true;
       const hay = `${it.title} ${it.id} ${it.oneliner ?? ''}`.toLowerCase();
       return hay.includes(q);
     });
+  });
+
+  // V106.3 — Auto-archive freshly-completed initiatives. When the
+  // final task of an active, non-archived initiative flips to
+  // status=done, kick off the exit animation (CSS-driven via the
+  // `exiting` flag passed to InitiativeCard), then mark it archived
+  // after the transition. The animation only fires while the
+  // operator is on the `active` filter — on `all`/`archived` the
+  // card stays put.
+  const pendingTimers = new Map<string, number>();
+  createEffect(() => {
+    const tbi = tasksByInitiative();
+    const exitingSet = exiting();
+    for (const it of allInitiatives()) {
+      if (viewStore.isInitiativeArchived(it.id)) continue;
+      const tasks = tbi.get(it.id) ?? [];
+      if (tasks.length === 0) continue;
+      const complete = tasks.every((t) => t.status === 'done');
+      if (!complete) continue;
+      if (exitingSet.has(it.id)) continue;
+      if (pendingTimers.has(it.id)) continue;
+      // Start exit animation on the next microtask so the DOM is
+      // already laid out with full height before max-height -> 0.
+      const id = it.id;
+      const t = window.setTimeout(() => {
+        setExiting((s) => { const n = new Set(s); n.add(id); return n; });
+        const t2 = window.setTimeout(() => {
+          viewStore.setInitiativeArchived(id, true);
+          setExiting((s) => { const n = new Set(s); n.delete(id); return n; });
+          pendingTimers.delete(id);
+        }, EXIT_ANIM_MS);
+        pendingTimers.set(id, t2);
+      }, 30);
+      pendingTimers.set(id, t);
+    }
+  });
+  onCleanup(() => {
+    for (const t of pendingTimers.values()) clearTimeout(t);
+    pendingTimers.clear();
   });
 
   // V92 — RUN ALL is coordinator-driven. The button spawns a
@@ -314,14 +371,26 @@ export default function InitiativesPanel() {
         <Show when={filtered().length > 0} fallback={<NoMatch totalInitiatives={allInitiatives().length} />}>
           <ul class="space-y-4">
             <For each={filtered()}>
-              {(it) => (
-                <li>
-                  <InitiativeCard
-                    initiative={it}
-                    tasks={tasksByInitiative().get(it.id) ?? []}
-                  />
-                </li>
-              )}
+              {(it) => {
+                const isExiting = () => exiting().has(it.id);
+                return (
+                  <li
+                    class="overflow-hidden transition-all ease-in-out"
+                    style={{
+                      'transition-duration': `${EXIT_ANIM_MS}ms`,
+                      'max-height': isExiting() ? '0px' : '4000px',
+                      opacity: isExiting() ? '0' : '1',
+                      transform: isExiting() ? 'scale(0.96)' : 'scale(1)',
+                      'margin-top': isExiting() ? '-1rem' : undefined,
+                    }}
+                  >
+                    <InitiativeCard
+                      initiative={it}
+                      tasks={tasksByInitiative().get(it.id) ?? []}
+                    />
+                  </li>
+                );
+              }}
             </For>
           </ul>
         </Show>
