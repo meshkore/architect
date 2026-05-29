@@ -1,5 +1,6 @@
 import { Show, createMemo, createSignal, createEffect } from 'solid-js';
 import { chatStore, type ChatMsg } from '~/state/chat';
+import { log } from '~/lib/log';
 import ChatScopeStrip from '~/components/ChatScopeStrip';
 import ChatHistoryView from '~/components/ChatHistoryView';
 import ChatComposer from '~/components/ChatComposer';
@@ -50,11 +51,22 @@ export default function ChatPanel() {
   });
   createEffect(() => { void conv(); setHistoryOpen(false); });
 
-  const archive = () => {
+  const archive = async (): Promise<void> => {
     const c = conv();
     if (!c) return;
+    // Optimistic local update so the rail filter takes effect
+    // instantly without waiting for the WS broadcast round-trip.
     chatStore.archiveConv(c);
     chatStore.setActiveConv(null);
+    // V104 — sync to the daemon so the archive persists across
+    // reload AND propagates to every other open tab via the
+    // `chat.archived` WS broadcast. Before V104 the local button
+    // only updated the per-tab signal, so hard refresh + V102
+    // hydrate re-populated the rail with the un-synced convs.
+    const cli = client();
+    if (!cli) return;
+    const res = await cli.chatArchive(c);
+    if (!res.ok) log.warn('chat archive sync to daemon failed', res.status);
   };
 
   const rename = (next: string) => {

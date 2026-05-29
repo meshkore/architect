@@ -10,6 +10,8 @@
 
 import { For, Show, createMemo } from 'solid-js';
 import { chatStore, type ChatMsg } from '~/state/chat';
+import { daemonStore } from '~/state/daemon';
+import { log } from '~/lib/log';
 
 interface Props {
   conv: string;
@@ -30,11 +32,13 @@ function turnsOf(conv: string): Turn[] {
     if (m.kind !== 'assistant') continue;
     if (m.streaming) continue;
     if (!m.stream_id) continue;
-    out.push({
-      streamId: m.stream_id,
-      ts: m.ts ?? '',
-      preview: m.text.split('\n').find((ln) => ln.trim().length > 0)?.slice(0, 120) ?? '(empty)',
-    });
+    // V104 — skip empty-text finals. They show up when claude
+    // exits with no output (pre-py-1.10.5 stdin bug, cancelled
+    // before first delta, etc.) and rendering them as "(empty)"
+    // junk entries makes the History panel look broken.
+    const preview = m.text.split('\n').find((ln) => ln.trim().length > 0)?.slice(0, 120) ?? '';
+    if (!preview) continue;
+    out.push({ streamId: m.stream_id, ts: m.ts ?? '', preview });
   }
   return out.reverse();
 }
@@ -99,7 +103,17 @@ export default function ChatHistoryView(props: Props) {
                     <span class="flex-1 text-xs text-gray-300 truncate">{label}</span>
                     <button
                       type="button"
-                      onClick={() => chatStore.unarchiveConv(c)}
+                      onClick={() => {
+                        // V104 — restore must sync to the daemon too,
+                        // otherwise the next hard refresh re-applies
+                        // the daemon-side archive and the conv
+                        // disappears again.
+                        chatStore.unarchiveConv(c);
+                        const cli = daemonStore.state.client;
+                        if (cli) void cli.chatUnarchive(c).then((r) => {
+                          if (!r.ok) log.warn('chat unarchive sync failed', r.status);
+                        });
+                      }}
                       class="text-[10px] text-emerald-400 hover:text-emerald-300"
                     >restore</button>
                   </li>

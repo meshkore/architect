@@ -127,15 +127,14 @@ export default function App() {
         chatStore.hydrateActiveConvs(activeConvs);
         log.info('active convs hydrated from health', { count: activeConvs.length, convs: activeConvs });
       }
-      // V102 — fetch the daemon's archived-conv list and seed the
-      // cockpit's filter. Before this, archives done from another
-      // tab, the CLI, or a cleanup script (POST /chat/archive)
-      // never reached this tab's rail filter on refresh.
+      // V102 + V104 — fetch the daemon's archived-conv list and seed
+      // the cockpit's filter. V104 fixes the wire shape: the daemon
+      // returns an ARRAY of {conv, archived_at, by}, not a Record.
       void client.chatArchives().then((res) => {
         if (res.ok) {
-          chatStore.hydrateArchives(res.data.archived ?? {});
-          const n = Object.keys(res.data.archived ?? {}).length;
-          log.info('archives hydrated from daemon', { count: n });
+          const list = res.data.archived ?? [];
+          chatStore.hydrateArchives(list);
+          log.info('archives hydrated from daemon', { count: list.length });
         }
       });
       // V89 — fetch any active runs from the daemon so the UI paints

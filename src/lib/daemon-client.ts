@@ -396,15 +396,33 @@ export class DaemonClient {
     return this.request<unknown>('POST', '/chat/cancel', { conv }, signal);
   }
 
-  /** V102 — Fetch the daemon's archived-conv list. Cockpit calls this
-   *  at boot so locally-deleted-then-refreshed convs stay archived,
-   *  and to pick up archive actions performed outside this tab
-   *  (CLI, another browser). Response shape:
-   *  `{ archived: { <conv>: { archived_at, by } } }`. */
-  async chatArchives(signal?: AbortSignal): Promise<Result<{ archived: Record<string, { archived_at?: string; by?: string }> }>> {
-    return this.request<{ archived: Record<string, { archived_at?: string; by?: string }> }>(
+  /** V102 + V104 — Fetch the daemon's archived-conv list. Real wire
+   *  shape (verified live against py-1.10.5):
+   *    `{ archived: [ { conv, archived_at, by }, ... ] }`
+   *  V102 mis-typed this as a Record-of-conv-to-meta and stuffed
+   *  array indices ("0","1",…) into `chatStore.archivedConvs` —
+   *  the rail filter then matched none of the real conv ids and
+   *  archived convs stayed visible. V104 fixes the type AND the
+   *  consumer in `state/chat.ts:hydrateArchives`. */
+  async chatArchives(signal?: AbortSignal): Promise<Result<{ archived: Array<{ conv: string; archived_at?: string; by?: string }> }>> {
+    return this.request<{ archived: Array<{ conv: string; archived_at?: string; by?: string }> }>(
       'GET', '/chat/archives', undefined, signal, /*requireAuth*/ false,
     );
+  }
+
+  /** V104 — POST /chat/archive. The cockpit's local archive button
+   *  used to ONLY update the per-tab `archivedConvs` signal, never
+   *  syncing to the daemon. Hard refresh + V102 hydrate then re-
+   *  populated the rail with the un-synced convs because the daemon
+   *  had no record. Now the local archive path calls this and the
+   *  daemon broadcasts `chat.archived` so EVERY tab updates. */
+  async chatArchive(conv: string, signal?: AbortSignal): Promise<Result<{ ok: boolean }>> {
+    return this.request<{ ok: boolean }>('POST', '/chat/archive', { conv }, signal);
+  }
+
+  /** V104 — POST /chat/unarchive. Symmetric to chatArchive. */
+  async chatUnarchive(conv: string, signal?: AbortSignal): Promise<Result<{ ok: boolean }>> {
+    return this.request<{ ok: boolean }>('POST', '/chat/unarchive', { conv }, signal);
   }
 
   // py-1.10.0 — Story-run coordinator.

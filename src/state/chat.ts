@@ -565,19 +565,28 @@ function unarchiveConv(conv: string): void {
 }
 
 /**
- * V102 — Hydrate the archive set from the daemon's authoritative
- * `/chat/archives`. Called once on cluster bind so archived convs
- * land in the cockpit's filter EVEN if they were archived from
- * another tab / the CLI / a cleanup script. Before V102 the
- * cockpit's `archivedConvs` was cockpit-local-only: archiving in
- * one tab didn't affect another, and `POST /chat/archive` from a
- * script never reached the rail.
+ * V102 (broken) + V104 (fixed) — Hydrate the archive set from the
+ * daemon's authoritative `/chat/archives`. Called once on cluster
+ * bind so archived convs land in the cockpit's filter EVEN if they
+ * were archived from another tab / the CLI / a cleanup script.
+ *
+ * V102 typed the response as `Record<string, …>` and ran
+ * `Object.keys(map)` on what was actually an ARRAY — the resulting
+ * `archivedConvs` was `{"0": true, "1": true, …}` (array indices,
+ * not conv ids). The rail filter matched zero convs and archived
+ * agents stayed visible. The History panel rendered "0", "1", … as
+ * fake archive entries.
+ *
+ * V104 takes the real wire shape:
+ *   `{ archived: [ { conv, archived_at, by }, ... ] }`
+ * and extracts `.conv` from each entry.
  */
-function hydrateArchives(map: Record<string, unknown>): void {
-  if (!map) return;
+function hydrateArchives(list: Array<{ conv?: string }>): void {
+  if (!Array.isArray(list)) return;
   const out: Record<string, true> = {};
-  for (const k of Object.keys(map)) {
-    if (k && k !== ONBOARDING_CONV_ID) out[k] = true;
+  for (const entry of list) {
+    const c = entry && typeof entry === 'object' ? entry.conv : undefined;
+    if (typeof c === 'string' && c && c !== ONBOARDING_CONV_ID) out[c] = true;
   }
   setState('archivedConvs', out);
 }
