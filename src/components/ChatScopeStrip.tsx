@@ -126,19 +126,23 @@ export default function ChatScopeStrip(props: Props) {
       </Show>
       <Show when={!editing()}>
         <div class="flex items-center gap-1">
-          {/* Rename — pencil glyph matches the rail's edit icon. */}
-          <button type="button" onClick={beginEdit} class={ICON_BTN} title="Rename agent">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-            </svg>
-          </button>
-          {/* Chat view (default) — highlights when history is closed. */}
+          {/* V104 — Order: Chat (default-active) · Pen rename ·
+              History · Role memory · Archive. Operator wanted the
+              chat bubble as the FIRST icon since it's the "home"
+              of the panel and is active by default; the pen comes
+              second because rename is a less-frequent action. */}
           <button type="button" onClick={goChat}
             class={chatActive() ? ICON_BTN_ACTIVE : ICON_BTN}
             title="Chat (current conversation)">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
+            </svg>
+          </button>
+          {/* Rename — pencil glyph matches the rail's edit icon. */}
+          <button type="button" onClick={beginEdit} class={ICON_BTN} title="Rename agent">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
           </button>
           {/* History */}
