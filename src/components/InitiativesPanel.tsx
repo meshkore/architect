@@ -133,9 +133,13 @@ export default function InitiativesPanel() {
     const client = daemonStore.state.client;
     if (!client) return;
     // STOP path — an architect exists (regardless of whether it is
-    // currently streaming). Cancel its in-flight turn (no-op if
-    // already idle) then archive the conv so a fresh Run all spawns
-    // a new architect with no prior context.
+    // currently streaming). V100 — Stop ≠ archive. The conv stays
+    // visible in the rail as a permanent record of what the
+    // architect did/decided; the operator archives it MANUALLY when
+    // they're done reviewing. This matches the operator's spec:
+    // "una vez se ha creado, se queda siempre ahí hasta que el
+    // usuario manualmente lo archive". Run all from this state is
+    // a no-op — the operator must archive the existing one first.
     if (architectExists()) {
       const conv = activeArchConv();
       if (!conv) return;
@@ -145,7 +149,9 @@ export default function InitiativesPanel() {
       } catch (e) {
         log.warn('roadmap-architect cancel threw', e instanceof Error ? e.message : String(e));
       }
-      chatStore.archiveConv(conv);
+      // Surface the conv so the operator reads what happened.
+      chatStore.setActiveConv(conv);
+      uiStore.setActiveZone('architect');
       return;
     }
     // SPAWN path — no architect exists. Build the visible-initiative
