@@ -28,6 +28,7 @@ import { railUiStore } from '~/state/rail-ui';
 import { findClusterPort, liveClusters } from '~/components/projects-rail/discovery';
 import { log } from '~/lib/log';
 import * as kp from '~/lib/known-projects';
+import { openProjectDebugModal } from '~/components/modals/ProjectDebugModal';
 
 export type RailRowData = {
   key: string;
@@ -351,6 +352,31 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                 <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
                 <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+            </button>
+            {/* V103 — Diagnostic snapshot. Opens a centered modal with
+                two tabs (in-memory stores + localStorage) so the
+                operator can paste the cockpit's per-project state
+                into a debug session for review. Read-only; same
+                outline style as the other action buttons. */}
+            <button
+              type="button"
+              class="proj-row-action is-edit"
+              title="Inspect cockpit state for this project"
+              onClick={(e) => {
+                e.stopPropagation();
+                openProjectDebugModal({
+                  port: r().port,
+                  cluster_id: r().cluster_id ?? null,
+                  display: r().display,
+                });
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                {/* Database cylinder — three stacked discs */}
+                <ellipse cx="12" cy="5" rx="8" ry="2.4" />
+                <path d="M4 5v6c0 1.3 3.6 2.4 8 2.4s8-1.1 8-2.4V5" />
+                <path d="M4 11v6c0 1.3 3.6 2.4 8 2.4s8-1.1 8-2.4v-6" />
               </svg>
             </button>
             <button
