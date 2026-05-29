@@ -386,7 +386,54 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
  * first chunk. No caret bar — the user explicitly asked for words,
  * not lines.
  */
-const THINKING_VERBS = ['Thinking', 'Working', 'Researching', 'Planning', 'Generating response', 'Processing'] as const;
+/**
+ * V105 — Wider pool of placeholder verbs. The 6 originals
+ * ("Thinking · Working · Researching · Planning · Generating ·
+ * Processing") rotated every 1.8 s so a 30-second pause cycled
+ * them all three times. The operator: "seamos más originales o
+ * tengamos 30 mensajes diferentes para que se vea que estamos
+ * haciendo cosas". 36 entries now → a full lap takes ~65 s, and
+ * the mix spans cognitive verbs, work verbs, mesh-aware verbs,
+ * and a few quietly playful ones so a long pause looks like
+ * actual progress instead of a 3-state loader. */
+const THINKING_VERBS = [
+  'Thinking',
+  'Working',
+  'Researching',
+  'Planning',
+  'Generating response',
+  'Processing',
+  'Reading the briefing',
+  'Loading context',
+  'Consulting role memory',
+  'Cross-referencing',
+  'Reviewing the roadmap',
+  'Parsing the task',
+  'Checking dependencies',
+  'Inspecting the cluster state',
+  'Reading the code',
+  'Composing reply',
+  'Mapping the modules',
+  'Choosing the right sub-agent',
+  'Drafting a plan',
+  'Coordinating agents',
+  'Calling a tool',
+  'Verifying the result',
+  'Splitting the work',
+  'Identifying the scope',
+  'Recapping progress',
+  'Resolving references',
+  'Cross-checking facts',
+  'Stitching the answer',
+  'Watching the worker',
+  'Asking the daemon',
+  'Polling for changes',
+  'Reviewing the diff',
+  'Picking next step',
+  'Drafting a summary',
+  'Catching its breath',
+  'Almost there',
+] as const;
 
 /**
  * V89.2 — Inline idle hint shown UNDER a streaming bubble that has
@@ -451,16 +498,45 @@ function ThinkingPlaceholder() {
 /**
  * Live streaming preview — clips to the LAST 3 lines of the assistant
  * response. column-reverse + overflow:hidden keeps the bottom of the
- * overflowing content visible. No caret bar — once real text starts
- * landing, the operator follows the words, not a green stripe.
+ * overflowing content visible.
+ *
+ * V105 — Render the streaming text as markdown live instead of raw
+ * plain text. Operator: "cuando la gente ya ha empezado a generar
+ * un output, hay un problema de display, no estamos imprimiendo
+ * bien con los márgenes correctos o respetando los formatos."
+ * Symptoms: bold markers (`**foo**`), inline code (`` `bar` ``),
+ * and list bullets appeared verbatim during streaming — only the
+ * post-final view (CollapsibleText with markdown=true) parsed
+ * them. Now both branches go through `marked.parse`, so bold,
+ * italics, inline code, and incomplete list/table tokens render
+ * elegantly mid-stream. Tokens that haven't closed yet (mid-table,
+ * mid-pre) marked handles gracefully by treating the partial line
+ * as plain — visual flicker is minimal.
+ *
+ * Same .chat-md scoped styling as the final view so the
+ * transition from streaming → final is visually invisible
+ * (just text gains a few more characters).
  */
 function StreamingTail(props: { text: string }) {
+  const [html, setHtml] = createSignal<string>('');
+  createEffect(() => {
+    const t = props.text;
+    void ensureMarked().then((m) => {
+      try {
+        setHtml(m.parse(t, { gfm: true }));
+      } catch {
+        // marked never throws on valid input, but if mid-stream
+        // tokens trip an edge case, fall back to escaped raw.
+        setHtml(t);
+      }
+    }).catch(() => setHtml(t));
+  });
   return (
     <div
       class="overflow-hidden flex flex-col-reverse"
       style={{ 'max-height': `${STREAM_TAIL_HEIGHT_PX}px` }}
     >
-      <div class="whitespace-pre-wrap">{props.text}</div>
+      <div class="chat-md" innerHTML={html() || props.text} />
     </div>
   );
 }
