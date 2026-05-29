@@ -63,6 +63,22 @@ export default function AgentCard(props: AgentCardProps) {
   // when state flips between solid / dashed; idle just uses a duller
   // colour so the eye still distinguishes it from active.
   const cardClasses = (): string => {
+    // V95 — In compact mode the card chrome (border + padding + halo)
+    // is dropped entirely. The chip itself becomes the visual state
+    // indicator: solid amber square when selected, thin emerald
+    // border when idle. This frees the few pixels we need to render
+    // the 4-char id (A001) cleanly at column widths down to ~50 px.
+    if (props.compact) {
+      const base = [
+        'group relative w-full text-left',
+        'transition-colors cursor-grab active:cursor-grabbing',
+        'flex items-center justify-center',
+        'p-0',
+      ];
+      if (props.dragging) base.push('opacity-35');
+      if (props.dragOver) base.push('rounded-md ring-1 ring-cyan-400/70');
+      return base.join(' ');
+    }
     const base = [
       'group relative w-full text-left rounded-md px-2.5 py-2',
       'transition-colors flex flex-col gap-1 cursor-grab active:cursor-grabbing',
@@ -114,6 +130,8 @@ export default function AgentCard(props: AgentCardProps) {
           agentId={props.meta.agentId ?? '?'}
           stripe={props.stripe}
           status={props.status}
+          active={props.active}
+          pendingReview={props.pendingReview}
         />
       }>
         <span class="flex items-center gap-1.5 text-[10px] font-mono">
@@ -180,24 +198,55 @@ export default function AgentCard(props: AgentCardProps) {
  * lose context. Hovering the row surfaces the full title via the
  * parent button's `title` attribute.
  */
-function CompactBody(props: { agentId: string; stripe: string; status: AgentStatusKind }) {
+function CompactBody(props: {
+  agentId: string;
+  stripe: string;
+  status: AgentStatusKind;
+  active: boolean;
+  pendingReview: boolean;
+}) {
+  // V95 — Chip-only layout for the squeezed agents column. The chip
+  // is the WHOLE control: no outer card border, no separate status
+  // dot (no room at 50 px). Three visual modes:
+  //
+  //   selected → solid amber-600 bg + amber-50 text (bold). Matches
+  //              the operator's request for a "yellow square" instead
+  //              of the green halo when the agent is active in the
+  //              chat panel. Read instantly at a glance.
+  //   working  → emerald border + animated pulse on the whole chip,
+  //              so the chip itself signals activity (the legacy
+  //              status dot is gone in compact mode).
+  //   review   → dashed amber-400 border + amber-100 text.
+  //   idle     → thin gray border + emerald-200 text.
+  //
+  // Geometry: width=100% of the (paddingless) compact card → ~42 px
+  // at column=50 px. py-1 + px-1 internal padding leaves ~32 px for
+  // the 4-char monospace id — fits A001 / A010 / A100 cleanly.
+  const cls = (): string => {
+    const base = [
+      'inline-flex items-center justify-center w-full',
+      'rounded font-mono text-[11px] font-bold tracking-tight',
+      'px-1 py-1',
+      'transition-colors select-none',
+    ];
+    if (props.active) {
+      base.push('bg-amber-600 text-amber-50');
+      return base.join(' ');
+    }
+    if (props.pendingReview) {
+      base.push('border border-dashed border-amber-400/70 text-amber-100 bg-amber-400/5');
+      return base.join(' ');
+    }
+    if (props.status === 'working') {
+      base.push('border border-emerald-400/60 text-emerald-100 bg-emerald-500/10 animate-pulse-soft');
+      return base.join(' ');
+    }
+    base.push('border border-gray-700/70 text-emerald-200 bg-gray-950/60 hover:border-emerald-500/40');
+    return base.join(' ');
+  };
   return (
-    <span class="flex items-center justify-between gap-1.5 text-[10px] font-mono min-w-0">
-      <span
-        class="px-1.5 py-0.5 rounded text-gray-200 flex-shrink-0 truncate"
-        style={{ background: 'rgba(17,24,39,0.7)', border: `1px solid ${props.stripe}55` }}
-      >
-        {props.agentId}
-      </span>
-      <span
-        class={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-          props.status === 'working'
-            ? 'bg-emerald-400 animate-pulse-soft'
-            : 'bg-gray-600'
-        }`}
-        aria-label={props.status}
-        title={props.status}
-      />
+    <span class={cls()} aria-label={`${props.agentId} ${props.status}`}>
+      {props.agentId}
     </span>
   );
 }

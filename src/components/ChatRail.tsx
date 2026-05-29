@@ -80,7 +80,7 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
   const compact = () => uiStore.state.chatRailWidth < COMPACT_THRESHOLD_PX;
 
   return (
-    <aside class="chat-rail-stack">
+    <aside class={`chat-rail-stack ${compact() ? 'compact' : ''}`}>
       <div class="chat-rail-header">
         <Show when={!compact()} fallback={
           <span class="chat-rail-header-label" title="Agents" aria-label="Agents">···</span>

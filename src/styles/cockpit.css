@@ -719,6 +719,17 @@
       border-right: 1px solid rgba(75,85,99,0.18);
       min-width: 0;
     }
+    /* V95 — Compact mode: agents column squeezed to ~50 px. Drop the
+       lateral padding so the chip itself can use the full available
+       width to render the 4-char id (A001 / A010 / …). Also tighten
+       gap between cards. The cards themselves render no border in
+       compact mode — the chip provides all the chrome. */
+    .chat-rail-stack.compact {
+      padding: 8px 4px 4px;
+      gap: 3px;
+    }
+    .chat-rail-stack.compact .chat-rail-pinned,
+    .chat-rail-stack.compact .chat-rail-services { gap: 3px; }
     .chat-rail-pinned, .chat-rail-services {
       display: flex; flex-direction: column; gap: 5px;
       overflow-y: auto; overflow-x: hidden;
