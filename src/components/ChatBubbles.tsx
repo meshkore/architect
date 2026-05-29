@@ -126,13 +126,19 @@ function CollapsibleText(props: {
           </div>
         }
       >
-        {/* Rendered markdown lives in a separate node so the prose
-            classes apply only to the assistant's structured output;
-            the inline streaming caret (children) rides outside the
-            markdown root so it doesn't get reflowed. */}
+        {/* V101 — Chat-bubble markdown: `chat-md` is the bubble-scoped
+            stylesheet (cockpit.css) with capped heading sizes (h1
+            1.2× body, never larger), scrollable code blocks (fixes
+            the "tiny vertical column of one letter" bug), scrollable
+            tables on overflow, and the emerald palette. Dropped the
+            Tailwind Typography classes (`prose prose-invert prose-sm
+            max-w-none`) for chat — they were fighting our explicit
+            rules with higher specificity. ContextPanel / DiaryPanel /
+            ProtocolsPanel keep their wider `.md prose` styling
+            because they have more horizontal room. */}
         <div
           ref={(el) => { bodyEl = el; }}
-          class="md prose prose-invert prose-sm max-w-none overflow-hidden transition-[max-height] duration-150"
+          class="chat-md overflow-hidden transition-[max-height] duration-150"
           style={{ 'max-height': collapsedNow() ? `${COLLAPSED_MAX_PX}px` : 'none' }}
           innerHTML={html() ?? ''}
         />

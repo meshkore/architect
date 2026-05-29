@@ -138,6 +138,171 @@
     .md th, .md td { text-align:left; padding:0.4rem 0.6rem; border-bottom:1px solid rgba(75,85,99,0.25); }
     .md th { background:rgba(75,85,99,0.15); font-weight:600; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; }
 
+    /* V101 — Chat-bubble markdown styling.
+       Operator: "respuestas con fuentes muy grandes en títulos, tablas mal
+       proporcionadas, código que se ve como una columna vertical de una
+       letra. Hay que formatear todo manteniendo proporciones del resto del
+       cockpit". The previous `.md prose prose-invert prose-sm` mix had two
+       problems: Tailwind Typography's prose-sm forced its own h1/h2 sizes
+       (way too big for a chat bubble), and the pre/code blocks inherited
+       loose word-break behaviour from flex parents — long single-word
+       code lines collapsed to one character per line under the bubble's
+       max-w-[90%] constraint. `.chat-md` is the bubble-only replacement:
+       caps headings at modest fractions of the body size, forces tables
+       and code to scroll horizontally rather than wrap, and matches the
+       emerald accent colour palette used everywhere else in the cockpit. */
+    .chat-md {
+      color: #d1d5db;
+      font-size: 14px;
+      line-height: 1.65;
+      max-width: 100%;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+    }
+    .chat-md > :first-child { margin-top: 0; }
+    .chat-md > :last-child { margin-bottom: 0; }
+
+    /* Headings — modest, capped so an agent that responds with `# Big
+       Title` doesn't blow up the chat. h1 is just 1.2× body (~17 px),
+       h2 1.1× (~15.4 px), h3 1.05× (~14.7 px), h4-h6 smaller and
+       small-caps. */
+    .chat-md h1 {
+      font-size: 1.20em; font-weight: 700; color: #f3f4f6;
+      margin: 0.85em 0 0.45em; line-height: 1.3; letter-spacing: -0.01em;
+    }
+    .chat-md h2 {
+      font-size: 1.10em; font-weight: 700; color: #f3f4f6;
+      margin: 0.85em 0 0.4em; line-height: 1.3;
+      padding-bottom: 0.25em; border-bottom: 1px solid rgba(75,85,99,0.3);
+    }
+    .chat-md h3 {
+      font-size: 1.05em; font-weight: 600; color: #e5e7eb;
+      margin: 0.75em 0 0.35em; line-height: 1.35;
+    }
+    .chat-md h4, .chat-md h5, .chat-md h6 {
+      font-size: 0.85em; font-weight: 600; color: #d1d5db;
+      margin: 0.7em 0 0.3em; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+
+    /* Paragraphs + lists — compact spacing, decent indentation. */
+    .chat-md p { margin: 0.5em 0; }
+    .chat-md ul, .chat-md ol { margin: 0.5em 0; padding-left: 1.5em; }
+    .chat-md ul { list-style: disc outside; }
+    .chat-md ol { list-style: decimal outside; }
+    .chat-md li { margin: 0.18em 0; }
+    .chat-md li > p { margin: 0.18em 0; }
+    .chat-md li > ul, .chat-md li > ol { margin: 0.2em 0; }
+
+    /* Inline code — emerald-tinted pill matching the wider palette. */
+    .chat-md code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.86em;
+      background: rgba(16,185,129,0.08);
+      color: #6ee7b7;
+      padding: 0.08em 0.35em;
+      border-radius: 3px;
+      border: 1px solid rgba(16,185,129,0.15);
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+
+    /* Code blocks — fix the "tiny vertical column of one letter" bug.
+       Root cause was a flex ancestor squeezing the pre to its content
+       width while pre lacked min-width:0 + a preserved-whitespace mode.
+       This block forces a scroll-on-overflow block with preserved
+       newlines and no per-character wrapping. */
+    .chat-md pre {
+      background: #0b1220;
+      border: 1px solid rgba(75,85,99,0.3);
+      border-radius: 6px;
+      padding: 0.65em 0.85em;
+      margin: 0.7em 0;
+      font-size: 12px;
+      line-height: 1.55;
+      max-width: 100%;
+      min-width: 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
+      tab-size: 2;
+    }
+    .chat-md pre code {
+      background: transparent;
+      border: none;
+      padding: 0;
+      color: #d1d5db;
+      font-size: 12px;
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
+      /* break-word + anywhere shouldn't apply inside a pre. */
+    }
+
+    /* Blockquote — emerald left rail accent. */
+    .chat-md blockquote {
+      border-left: 3px solid rgba(52,211,153,0.4);
+      padding: 0.1em 0.85em;
+      margin: 0.65em 0;
+      color: #9ca3af;
+      font-style: normal;
+    }
+    .chat-md blockquote p { margin: 0.25em 0; }
+
+    /* Tables — scroll horizontally on overflow so a wide table never
+       squeezes the first column down to one character per row. The
+       trick is `display: block` on the <table> itself: that lets the
+       element scroll independently while the cells inside still lay
+       out as a table. The bubble's width is respected; wide tables
+       become horizontal scroll regions. Cells get word-wrap so long
+       words within a cell still break instead of widening the row. */
+    .chat-md table {
+      display: block;
+      max-width: 100%;
+      overflow-x: auto;
+      border-collapse: collapse;
+      margin: 0.7em 0;
+      font-size: 0.9em;
+      border: 1px solid rgba(75,85,99,0.25);
+      border-radius: 6px;
+    }
+    .chat-md thead { background: rgba(75,85,99,0.18); }
+    .chat-md th, .chat-md td {
+      text-align: left;
+      padding: 0.45em 0.7em;
+      border-bottom: 1px solid rgba(75,85,99,0.25);
+      vertical-align: top;
+      word-break: normal;
+      overflow-wrap: break-word;
+    }
+    .chat-md th {
+      font-weight: 600;
+      font-size: 0.78em;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #d1d5db;
+      border-bottom-color: rgba(75,85,99,0.5);
+    }
+    .chat-md tbody tr:last-child td { border-bottom: none; }
+
+    /* Links — emerald with a soft underline that brightens on hover. */
+    .chat-md a {
+      color: #34d399;
+      text-decoration: underline;
+      text-decoration-color: rgba(52,211,153,0.4);
+      text-underline-offset: 0.15em;
+      transition: text-decoration-color 120ms;
+    }
+    .chat-md a:hover { text-decoration-color: rgba(52,211,153,0.85); }
+
+    /* hr + images + strong/em — small polish so the bubble feels
+       designed rather than dumped from a renderer. */
+    .chat-md hr { border: none; border-top: 1px solid rgba(75,85,99,0.3); margin: 1em 0; }
+    .chat-md img { max-width: 100%; height: auto; border-radius: 4px; margin: 0.5em 0; }
+    .chat-md strong { color: #f3f4f6; font-weight: 600; }
+    .chat-md em { color: #d1d5db; font-style: italic; }
+
     /* Hide inactive top-level tabs unconditionally — the inline
        display:flex on #tab-manage was overriding tailwind's .hidden
        and bleeding the Cluster dashboard through the Workspace. */
