@@ -565,6 +565,29 @@ function unarchiveConv(conv: string): void {
 }
 
 /**
+ * V106 — Cross-cockpit selector: is there a Roadmap Architect
+ * conv alive right now? Used by both InitiativesPanel (Run all
+ * button state) and InitiativeCard (per-initiative play button
+ * cross-disable). Returns the most-recent non-archived
+ * architect conv id, or null. Double predicate (type === or
+ * slug startsWith) — same as InitiativesPanel.archCandidates
+ * V99 — so a convMeta entry whose `type` field got corrupted by
+ * a pre-V92 bundle still counts.
+ */
+function findActiveArchitectConv(): string | null {
+  let best: string | null = null;
+  let bestTs = '';
+  for (const [conv, meta] of Object.entries(state.convMeta)) {
+    if (state.archivedConvs[conv]) continue;
+    const looksArch = meta.type === 'roadmap-architect' || conv.startsWith('roadmap-architect-');
+    if (!looksArch) continue;
+    const ts = (state.convMap[conv] ?? []).at(-1)?.ts ?? '';
+    if (ts >= bestTs) { best = conv; bestTs = ts; }
+  }
+  return best;
+}
+
+/**
  * V102 (broken) + V104 (fixed) — Hydrate the archive set from the
  * daemon's authoritative `/chat/archives`. Called once on cluster
  * bind so archived convs land in the cockpit's filter EVEN if they
@@ -950,6 +973,7 @@ export const chatStore = {
   archiveConv,
   unarchiveConv,
   hydrateArchives,
+  findActiveArchitectConv,
   setAgentStatus,
   clearAgentStatus,
   ingestEvent,

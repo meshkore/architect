@@ -22,6 +22,7 @@ import InitiativeCard from '~/components/InitiativeCard';
 import EmptyOnboardingPanel from '~/components/EmptyOnboardingPanel';
 import { viewStore } from '~/state/view';
 import { chatStore } from '~/state/chat';
+import { storyStore } from '~/state/story';
 import { daemonStore } from '~/state/daemon';
 import { uiStore } from '~/state/ui';
 import { log } from '~/lib/log';
@@ -118,6 +119,18 @@ export default function InitiativesPanel() {
    *  was an accident waiting to happen. */
   const architectExists = () => archCandidates().length > 0;
   const activeArchConv = (): string | null => archCandidates()[0] ?? null;
+
+  /** V106 — Any per-initiative story-run currently in flight on
+   *  the cluster. Used to MUTUAL-EXCLUDE Run all: while a single
+   *  initiative is running, spawning the roadmap architect would
+   *  fight over the same files. Operator's spec:
+   *  "si alguna iniciativa se está ejecutando, el botón Run all
+   *   debería estar apagado." */
+  const anyStoryRunLive = createMemo(() =>
+    storyStore.state.runs.some((r) =>
+      (r.status === 'running' || r.status === 'stopping') && r.live,
+    ),
+  );
   /** True only when the architect is mid-turn (streaming OR
    *  awaiting first delta). Used purely as a label hint, not for
    *  enabling/disabling the button. */
@@ -230,13 +243,22 @@ export default function InitiativesPanel() {
             <button
               type="button"
               onClick={() => { void onRunAll(); }}
-              disabled={!architectExists() && filtered().length === 0}
+              disabled={
+                !architectExists() && (
+                  filtered().length === 0 ||
+                  anyStoryRunLive()
+                )
+              }
               title={
                 architectExists()
                   ? (architectStreaming()
                       ? 'Stop the running Roadmap Architect and archive its conv (Run all spawns fresh next time)'
                       : 'An architect conv already exists — click to cancel + archive it so Run all can spawn a fresh one')
-                  : 'Spawn a Roadmap Architect agent to plan + dispatch the visible roadmap'
+                  : anyStoryRunLive()
+                    ? 'Hay otras iniciativas en marcha en este momento. No se puede ejecutar Run all a la vez — paráalas primero desde cada card.'
+                    : filtered().length === 0
+                      ? 'No hay iniciativas elegibles para Run all'
+                      : 'Spawn a Roadmap Architect agent to plan + dispatch the visible roadmap'
               }
               class={`px-3 py-1.5 rounded-md text-[11px] font-mono uppercase tracking-wider transition-colors border disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 ${
                 architectExists()

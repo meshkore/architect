@@ -35,7 +35,11 @@ import CronsPanel from '~/components/zones/CronsPanel';
 import LinksPanel from '~/components/zones/LinksPanel';
 import ProtocolsPanel from '~/components/zones/ProtocolsPanel';
 import DiaryPanel from '~/components/zones/DiaryPanel';
-import StoryBanner from '~/components/story/StoryBanner';
+// V106 — StoryBanner removed. Story-run progress is now visible
+// in: (a) the agent's live state in ChatRail, (b) the
+// StoryProgressPill on the initiative card, (c) the expanded
+// card's Activity tab. A floating sticky banner duplicates that
+// signal and steals attention.
 import Splitter from '~/components/Splitter';
 import { openNewAgentWizard } from '~/components/modals/NewAgentWizard';
 import { daemonStore } from '~/state/daemon';
@@ -84,7 +88,6 @@ export default function Cockpit(props: {
       <Header />
       <CockpitOutdatedBanner />
       <DaemonAheadBanner />
-      <StoryBanner />
       {/* V86k — ProjectsRail (left) + ChatPanel (right) are now PERMANENT
           across every top-bar zone. Only the two middle columns
           (modules tree + roadmap/tasks/context/diagrams content) get

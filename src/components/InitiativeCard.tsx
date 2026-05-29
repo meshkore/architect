@@ -86,6 +86,11 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
     if (!r || !r.live) return false;
     return r.initiativeId !== props.initiative.id;
   };
+  // V106 — when a Roadmap Architect (Run all) is active, per-initiative
+  // play buttons must be disabled. The architect drives the roadmap as
+  // a whole; letting the operator also spawn a per-initiative agent
+  // would race two coordinators on the same task graph.
+  const architectLive = () => chatStore.findActiveArchitectConv() != null;
 
   const startRun = async (): Promise<void> => {
     const taskIds = collectStoryTaskIds(props.initiative.id);
@@ -203,19 +208,22 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
           <button
             type="button"
             onClick={toggleRun}
-            disabled={isOtherLive()}
+            disabled={(isOtherLive() || architectLive()) && !isThisLive()}
             title={
               isThisLive() ? 'Stop the run live on this initiative'
               : isThisPaused() ? 'Resume this run (the previous turn was cut by a reload)'
+              : architectLive() ? 'Run all está en marcha (Roadmap Architect activo). Páralo desde el botón Run all del header para arrancar iniciativas individuales.'
               : isOtherLive() ? 'Another initiative is running — stop it first'
               : 'Run initiative (spawns a fresh agent)'
             }
-            class={`w-7 h-7 rounded-md flex items-center justify-center text-xs flex-shrink-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border ${
+            class={`w-7 h-7 rounded-md flex items-center justify-center text-xs flex-shrink-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:grayscale border ${
               isThisLive()
                 ? 'bg-red-500/15 hover:bg-red-500/30 text-red-300 border-red-500/40'
                 : isThisPaused()
                   ? 'bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
-                  : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
+                  : architectLive()
+                    ? 'bg-gray-700/30 text-gray-500 border-gray-700/50'
+                    : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
             }`}
           >
             {isThisLive() ? '■' : '▶'}
