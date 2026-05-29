@@ -144,27 +144,56 @@ export default function InitiativesPanel() {
 
   const onRunAll = async (): Promise<void> => {
     const client = daemonStore.state.client;
-    if (!client) return;
-    // STOP path — an architect exists (regardless of whether it is
-    // currently streaming). V100 — Stop ≠ archive. The conv stays
-    // visible in the rail as a permanent record of what the
-    // architect did/decided; the operator archives it MANUALLY when
-    // they're done reviewing. This matches the operator's spec:
-    // "una vez se ha creado, se queda siempre ahí hasta que el
-    // usuario manualmente lo archive". Run all from this state is
-    // a no-op — the operator must archive the existing one first.
+    if (!client) {
+      log.warn('[run-all] no daemon client — abort');
+      return;
+    }
+    // V106.1 — STOP path. The original V100 spec said "Stop ≠ archive"
+    // (the conv stays as a permanent record). That created a deadlock:
+    // after the architect finished a turn (status=idle), the conv was
+    // still alive → architectExists() stayed true → per-initiative
+    // plays stayed disabled forever, and clicking "Stop architect"
+    // again did nothing visible (cancel on an idle conv is a no-op).
+    //
+    // V106.1 reverses it: Stop = cancel in-flight stream + archive
+    // the conv (both locally AND daemon-side). Archived convs still
+    // exist and are reachable via the "Archived" history filter, so
+    // we preserve the "permanent record" intent without leaving the
+    // system in a half-locked state.
     if (architectExists()) {
       const conv = activeArchConv();
-      if (!conv) return;
+      if (!conv) {
+        log.warn('[stop-architect] architectExists() true but activeArchConv() is null — state mismatch');
+        return;
+      }
+      log.info('[stop-architect] start', { conv, streaming: architectStreaming() });
+      // 1. Cancel any in-flight chat turn (no-op if already idle).
       try {
         const res = await client.chatCancel(conv);
-        if (!res.ok) log.warn('roadmap-architect cancel non-OK', res.status);
+        log.info('[stop-architect] /chat/cancel', { ok: res.ok, status: res.status });
+        if (!res.ok) log.warn('[stop-architect] cancel non-OK', res.status);
       } catch (e) {
-        log.warn('roadmap-architect cancel threw', e instanceof Error ? e.message : String(e));
+        log.warn('[stop-architect] cancel threw', e instanceof Error ? e.message : String(e));
       }
-      // Surface the conv so the operator reads what happened.
-      chatStore.setActiveConv(conv);
-      uiStore.setActiveZone('architect');
+      // 2. Archive the conv on the daemon (authoritative).
+      try {
+        const res = await client.chatArchive(conv);
+        log.info('[stop-architect] /chat/archive', { ok: res.ok, status: res.status });
+        if (!res.ok) log.warn('[stop-architect] archive non-OK', res.status);
+      } catch (e) {
+        log.warn('[stop-architect] archive threw', e instanceof Error ? e.message : String(e));
+      }
+      // 3. Archive locally so the UI flips immediately (don't wait
+      //    for the WS broadcast to round-trip).
+      chatStore.archiveConv(conv);
+      log.info('[stop-architect] local archiveConv done', { conv, archivedNow: chatStore.state.archivedConvs[conv] === true });
+      // 4. Surface a non-architect conv so the operator isn't left
+      //    staring at the (now archived) architect chat.
+      const remaining = Object.keys(chatStore.state.convMeta).find(
+        (c) => !chatStore.state.archivedConvs[c] && c !== conv,
+      );
+      if (remaining) chatStore.setActiveConv(remaining);
+      log.info('[stop-architect] done — architectExists now?', architectExists());
       return;
     }
     // SPAWN path — no architect exists. Build the visible-initiative
