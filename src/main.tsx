@@ -3,13 +3,19 @@ import { render } from 'solid-js/web';
 import App from '~/App';
 import { log } from '~/lib/log';
 import { installChunkGuard } from '~/lib/chunk-guard';
+import { startCockpitVersionPoll, COCKPIT_COMMIT, COCKPIT_VERSION } from '~/lib/cockpit-version';
 import './index.css';
 
-log.info('script loaded · version=0.2.0-alpha');
+log.info('script loaded', { version: COCKPIT_VERSION, commit: COCKPIT_COMMIT });
 
 // V93 — Reload-once safety net for stale-deploy dynamic-import failures.
 // Installed before App mounts so it covers chunks loaded during boot too.
 installChunkGuard();
+// V99 — Start the cockpit-version self-poll. Fetches /health.json every
+// 5 min and flips `cockpitOutdated` when the server's commit differs
+// from this bundle's. Cockpit.tsx renders the banner. Survives every
+// tab indefinitely — no service worker required.
+startCockpitVersionPoll();
 
 const root = document.getElementById('app');
 if (!root) {

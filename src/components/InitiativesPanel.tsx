@@ -90,8 +90,20 @@ export default function InitiativesPanel() {
   // Stop = cancel + archive that conv; only then does Run all spawn
   // a fresh one.
   const archCandidates = createMemo<string[]>(() => {
+    // V99 — Detect via TWO predicates so we don't miss convs whose
+    // type field is stale from a pre-V92 bundle (the type union
+    // hadn't been extended; ensureConvMeta may have fallen back to
+    // 'custom'). Slug prefix `roadmap-architect-…` is the
+    // unforgeable signal because createConv emits exactly that
+    // shape for this type. Either predicate hitting counts as
+    // "this is an architect conv".
     return Object.entries(chatStore.state.convMeta)
-      .filter(([conv, meta]) => meta.type === 'roadmap-architect' && !chatStore.state.archivedConvs[conv])
+      .filter(([conv, meta]) => {
+        if (chatStore.state.archivedConvs[conv]) return false;
+        if (meta.type === 'roadmap-architect') return true;
+        if (conv.startsWith('roadmap-architect-')) return true;
+        return false;
+      })
       .sort((a, b) => {
         const la = (chatStore.state.convMap[a[0]] ?? []).at(-1)?.ts ?? '';
         const lb = (chatStore.state.convMap[b[0]] ?? []).at(-1)?.ts ?? '';
