@@ -9,7 +9,11 @@ import { AgentRoleHint, EmptyChat } from '~/components/chat/ChatExtras';
 import { isServiceType } from '~/lib/agent-types';
 import { daemonStore } from '~/state/daemon';
 import { openTokenUnlockModal } from '~/components/modals/TokenUnlockModal';
-import { openDaemonOutdatedModal } from '~/components/modals/DaemonOutdatedModal';
+// V97 — `openDaemonOutdatedModal` removed (no more floating modal).
+// When the daemon is outdated, Cockpit replaces the entire main area
+// with <DaemonOutdatedPanel>, so the ChatPanel never renders in that
+// state. The `onDaemonOutdated` ChatComposer prop is dead code; left
+// in place to keep the composer's contract stable for other callers.
 import { buildStream, type StreamItem } from '~/lib/chat-stream';
 
 // V83 — drop the `client` prop. Read the current DaemonClient
@@ -104,7 +108,8 @@ export default function ChatPanel() {
           placeholder={isRunning()
             ? 'Add more instructions — they go above the live work and get merged into the next turn…'
             : 'Reply…'}
-          onDaemonOutdated={openDaemonOutdatedModal}
+          /* V97 — onDaemonOutdated prop is dead code; the outdated
+              state is now caught by Cockpit before ChatPanel renders */
           onTokenRejected={onTokenRejected}
         />
         <Show when={isServiceType(meta()?.type) && msgs().length === 0}>

@@ -7,7 +7,10 @@ import { JSX, Show, Switch, Match, createSignal } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { daemonStore } from '~/state/daemon';
 import { discoverProjects } from '~/components/ProjectsRail';
-import { openDaemonOutdatedModal } from './DaemonOutdatedModal';
+// V97 — DaemonOutdatedModal deleted. When the silent auto-update
+// flow fails we just close the flow modal; the cockpit's inline
+// DaemonOutdatedPanel (in Cockpit.tsx) takes over automatically
+// because state.outdated is still true.
 import { StepView, ResumeView, BusyView, DoneView, ErrorView } from './auto-update/views';
 import { daemonHttpBase } from '~/lib/transport';
 import { log } from '~/lib/log';
@@ -35,7 +38,7 @@ export function openAutoUpdateFlow(): void {
 }
 
 const dismiss = (): void => { cancelled = true; setIsOpen(false); };
-const fallback = (): void => { setIsOpen(false); openDaemonOutdatedModal(); };
+const fallback = (): void => { setIsOpen(false); /* V97: cockpit's inline DaemonOutdatedPanel takes over */ };
 
 async function sleep(ms: number): Promise<void> {
   const start = Date.now();

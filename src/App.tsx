@@ -33,7 +33,9 @@ import { log } from '~/lib/log';
 import { applyStoredLayout } from '~/components/Splitter';
 import { ModalHost } from '~/lib/modal';
 import { TokenUnlockHost } from '~/components/modals/TokenUnlockModal';
-import { DaemonOutdatedHost } from '~/components/modals/DaemonOutdatedModal';
+// V97 — DaemonOutdatedHost removed. The outdated state is now the
+// inline DaemonOutdatedPanel mounted by Cockpit.tsx (mandatory full-
+// area block + auto-poll). No more floating dismissable modal.
 import { AutoUpdateFlowHost } from '~/components/modals/AutoUpdateFlow';
 import { NewAgentWizardHost } from '~/components/modals/NewAgentWizard';
 import { AddProjectWizardHost } from '~/components/modals/AddProjectWizard';
@@ -197,7 +199,8 @@ export default function App() {
       </Switch>
       <ModalHost />
       <TokenUnlockHost />
-      <DaemonOutdatedHost />
+      {/* V97 — DaemonOutdatedHost removed; daemon-outdated is now an
+          inline panel in Cockpit.tsx */}
       <AutoUpdateFlowHost />
       <NewAgentWizardHost />
       <AddProjectWizardHost />

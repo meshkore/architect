@@ -27,6 +27,7 @@ import ChatRail from '~/components/ChatRail';
 import ContextPanel from '~/components/ContextPanel';
 import DiagramsPanel from '~/components/DiagramsPanel';
 import AgentsPanel from '~/components/zones/AgentsPanel';
+import DaemonOutdatedPanel from '~/components/DaemonOutdatedPanel';
 import ConfigPanel from '~/components/zones/ConfigPanel';
 import BookmarksPanel from '~/components/zones/BookmarksPanel';
 import CronsPanel from '~/components/zones/CronsPanel';
@@ -95,7 +96,7 @@ export default function Cockpit(props: {
         <main class="flex-1 min-h-0 relative">
           <Show
             when={!daemonStore.state.outdated}
-            fallback={<DaemonPausedPanel />}
+            fallback={<DaemonOutdatedPanel />}
           >
             <Show
               when={!daemonStore.state.offlineSelection}
@@ -196,18 +197,10 @@ function MigratedZoneHost(props: { zone: Zone }) {
   );
 }
 
-/**
- * Empty placeholder shown in the cockpit's center body when the
- * active daemon is outdated. The DaemonOutdatedModal floats on top
- * and owns the entire conversation about the update — this panel
- * just blanks out the area so stale roadmap / chat from the
- * outgoing daemon doesn't leak through. As soon as the upgraded
- * daemon connects, `state.outdated` flips false and the real
- * columns mount again, populated by the side-effect bus.
- */
-function DaemonPausedPanel() {
-  return <section class="flex-1" />;
-}
+// V97 — `DaemonPausedPanel` (empty placeholder behind a floating
+// modal) replaced by `DaemonOutdatedPanel` (the inline full-area
+// mandatory block with auto-poll). The old DaemonOutdatedHost in
+// App.tsx is also gone — no more floating modal for this state.
 
 /**
  * V94 — Slim "refresh recommended" banner that appears when the

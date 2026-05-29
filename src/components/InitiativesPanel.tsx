@@ -75,57 +75,69 @@ export default function InitiativesPanel() {
     });
   });
 
-  // V92 — RUN ALL is now coordinator-driven. The button spawns a
+  // V92 — RUN ALL is coordinator-driven. The button spawns a
   // `roadmap-architect` agent (a real Claude Code subprocess via the
-  // daemon's chat coordinator) with a comprehensive system prompt
-  // that tells it to read the roadmap, plan, dispatch sub-agents,
-  // and report progress in its own chat. The cockpit no longer
-  // owns the per-initiative queue — the agent does.
+  // daemon's chat coordinator) with a comprehensive system prompt.
   //
-  // "Active" derivation: any convMeta with type='roadmap-architect'
-  // that has been recently used and is not archived. The pickARC()
-  // selector returns the most recent one.
+  // V98 — Hardened against multi-spawn. The previous architectLive()
+  // checked for streaming/pending-reply on the architect's conv, but
+  // an architect that exits its first turn with empty output (silent
+  // failure: bad prompt, classifier block, missing tool) cleared
+  // pendingReplyConvs on `chat.assistant.final` and the button
+  // flipped back to "Run all" — every subsequent click spawned
+  // another architect. Now ANY non-archived roadmap-architect conv
+  // counts as "the roadmap pass owner; don't spawn another".
+  // Stop = cancel + archive that conv; only then does Run all spawn
+  // a fresh one.
   const archCandidates = createMemo<string[]>(() => {
     return Object.entries(chatStore.state.convMeta)
       .filter(([conv, meta]) => meta.type === 'roadmap-architect' && !chatStore.state.archivedConvs[conv])
       .sort((a, b) => {
-        // Most recent activity first — use last message ts.
         const la = (chatStore.state.convMap[a[0]] ?? []).at(-1)?.ts ?? '';
         const lb = (chatStore.state.convMap[b[0]] ?? []).at(-1)?.ts ?? '';
         return lb.localeCompare(la);
       })
       .map(([conv]) => conv);
   });
-  /** True when an architect conv is in flight (streaming OR pending
-   *  reply). When false we draw the play state; click spawns one. */
-  const architectLive = () => {
-    for (const conv of archCandidates()) {
-      const list = chatStore.state.convMap[conv] ?? [];
-      const streaming = list.some((m) => m.kind === 'assistant' && m.streaming);
-      if (streaming) return true;
-      if (chatStore.state.pendingReplyConvs[conv] !== undefined) return true;
-    }
-    return false;
-  };
+  /** True when at least one non-archived roadmap-architect conv
+   *  exists. While true, the button is in "Stop" mode — clicking
+   *  cancels + archives the architect's conv so a fresh one can
+   *  spawn next time. Singleton-by-construction; multi-architect
+   *  was an accident waiting to happen. */
+  const architectExists = () => archCandidates().length > 0;
   const activeArchConv = (): string | null => archCandidates()[0] ?? null;
+  /** True only when the architect is mid-turn (streaming OR
+   *  awaiting first delta). Used purely as a label hint, not for
+   *  enabling/disabling the button. */
+  const architectStreaming = () => {
+    const conv = activeArchConv();
+    if (!conv) return false;
+    const list = chatStore.state.convMap[conv] ?? [];
+    if (list.some((m) => m.kind === 'assistant' && m.streaming)) return true;
+    return chatStore.state.pendingReplyConvs[conv] !== undefined;
+  };
 
   const onRunAll = async (): Promise<void> => {
     const client = daemonStore.state.client;
     if (!client) return;
-    if (architectLive()) {
-      // Cancel the live architect's current turn. The conv survives;
-      // the operator can re-engage from its chat. If they want to
-      // start over fresh, they archive that one + click Run all again.
+    // STOP path — an architect exists (regardless of whether it is
+    // currently streaming). Cancel its in-flight turn (no-op if
+    // already idle) then archive the conv so a fresh Run all spawns
+    // a new architect with no prior context.
+    if (architectExists()) {
       const conv = activeArchConv();
-      if (conv) {
+      if (!conv) return;
+      try {
         const res = await client.chatCancel(conv);
-        if (!res.ok) log.warn('roadmap-architect cancel failed', res.status);
+        if (!res.ok) log.warn('roadmap-architect cancel non-OK', res.status);
+      } catch (e) {
+        log.warn('roadmap-architect cancel threw', e instanceof Error ? e.message : String(e));
       }
+      chatStore.archiveConv(conv);
       return;
     }
-    // Build the visible-initiative summary (just the ids + titles —
-    // the architect will read the files itself). This is purely
-    // operator-context so the operator knows what they kicked off.
+    // SPAWN path — no architect exists. Build the visible-initiative
+    // summary (the architect reads the actual files itself).
     const list = filtered()
       .filter((it) => {
         if (viewStore.isInitiativeArchived(it.id)) return false;
@@ -135,7 +147,6 @@ export default function InitiativesPanel() {
         return tasks.some((t) => t.status !== 'done' && t.status !== 'cancelled');
       });
     if (list.length === 0) return;
-    // Spawn a fresh architect conv.
     const conv = chatStore.createConv({
       type: 'roadmap-architect',
       title: 'Roadmap Architect',
@@ -201,25 +212,30 @@ export default function InitiativesPanel() {
             <button
               type="button"
               onClick={() => { void onRunAll(); }}
-              disabled={!architectLive() && filtered().length === 0}
+              disabled={!architectExists() && filtered().length === 0}
               title={
-                architectLive()
-                  ? 'Stop the Roadmap Architect mid-turn (the conv stays; re-engage from chat)'
+                architectExists()
+                  ? (architectStreaming()
+                      ? 'Stop the running Roadmap Architect and archive its conv (Run all spawns fresh next time)'
+                      : 'An architect conv already exists — click to cancel + archive it so Run all can spawn a fresh one')
                   : 'Spawn a Roadmap Architect agent to plan + dispatch the visible roadmap'
               }
               class={`px-3 py-1.5 rounded-md text-[11px] font-mono uppercase tracking-wider transition-colors border disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 ${
-                architectLive()
+                architectExists()
                   ? 'bg-red-500/15 hover:bg-red-500/30 text-red-300 border-red-500/40'
                   : 'bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border-cyan-500/40'
               }`}
             >
-              <Show when={architectLive()} fallback={
+              <Show when={architectExists()} fallback={
                 <span class="inline-flex items-center gap-1.5">
                   <span aria-hidden="true">🗺️</span>
                   <span>Run all</span>
                 </span>
               }>
-                <span class="inline-block w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" aria-hidden="true" />
+                <span
+                  class={`inline-block w-1.5 h-1.5 rounded-full bg-red-400 ${architectStreaming() ? 'animate-pulse' : ''}`}
+                  aria-hidden="true"
+                />
                 <span>Stop architect</span>
               </Show>
             </button>
