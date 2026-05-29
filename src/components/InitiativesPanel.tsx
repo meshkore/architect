@@ -22,9 +22,10 @@ import { allInitiatives, allTasks, isProjectEmpty, type ServerInitiative, type S
 import InitiativeCard from '~/components/InitiativeCard';
 import EmptyOnboardingPanel from '~/components/EmptyOnboardingPanel';
 import { viewStore } from '~/state/view';
-import { roadmapRunStore } from '~/state/roadmap-run';
-import { startRoadmapRun, stopRoadmapRun } from '~/components/story/RoadmapRunner';
-import { storyStore } from '~/state/story';
+import { chatStore } from '~/state/chat';
+import { daemonStore } from '~/state/daemon';
+import { uiStore } from '~/state/ui';
+import { log } from '~/lib/log';
 
 // V90 — visibility modes replace the old visibility + status-filter
 // duo. `backlog` joins the family so the operator can park ideas
@@ -75,30 +76,57 @@ export default function InitiativesPanel() {
     });
   });
 
-  // V90 — RUN ALL state. Derived from the roadmap-run store so the
-  // button reflects a multi-tab in-flight pass too.
-  const roadmapActive = () => roadmapRunStore.isActive();
-  const roadmapProgress = (): { cursor: number; total: number } | null => {
-    const r = roadmapRunStore.state.run;
-    if (!r || !roadmapActive()) return null;
-    return { cursor: r.cursor, total: r.queue.length };
+  // V92 — RUN ALL is now coordinator-driven. The button spawns a
+  // `roadmap-architect` agent (a real Claude Code subprocess via the
+  // daemon's chat coordinator) with a comprehensive system prompt
+  // that tells it to read the roadmap, plan, dispatch sub-agents,
+  // and report progress in its own chat. The cockpit no longer
+  // owns the per-initiative queue — the agent does.
+  //
+  // "Active" derivation: any convMeta with type='roadmap-architect'
+  // that has been recently used and is not archived. The pickARC()
+  // selector returns the most recent one.
+  const archCandidates = createMemo<string[]>(() => {
+    return Object.entries(chatStore.state.convMeta)
+      .filter(([conv, meta]) => meta.type === 'roadmap-architect' && !chatStore.state.archivedConvs[conv])
+      .sort((a, b) => {
+        // Most recent activity first — use last message ts.
+        const la = (chatStore.state.convMap[a[0]] ?? []).at(-1)?.ts ?? '';
+        const lb = (chatStore.state.convMap[b[0]] ?? []).at(-1)?.ts ?? '';
+        return lb.localeCompare(la);
+      })
+      .map(([conv]) => conv);
+  });
+  /** True when an architect conv is in flight (streaming OR pending
+   *  reply). When false we draw the play state; click spawns one. */
+  const architectLive = () => {
+    for (const conv of archCandidates()) {
+      const list = chatStore.state.convMap[conv] ?? [];
+      const streaming = list.some((m) => m.kind === 'assistant' && m.streaming);
+      if (streaming) return true;
+      if (chatStore.state.pendingReplyConvs[conv] !== undefined) return true;
+    }
+    return false;
   };
-  /** Any other story currently busy on the daemon — disables RUN ALL
-   *  to avoid clobbering manual work. */
-  const otherStoryBusy = () => {
-    const r = storyStore.state.run;
-    if (!r) return false;
-    if (roadmapActive() && roadmapRunStore.currentInitiativeId() === r.initiativeId) return false;
-    return r.status === 'running' && r.live;
-  };
-  const onRunAll = (): void => {
-    if (roadmapActive()) {
-      void stopRoadmapRun();
+  const activeArchConv = (): string | null => archCandidates()[0] ?? null;
+
+  const onRunAll = async (): Promise<void> => {
+    const client = daemonStore.state.client;
+    if (!client) return;
+    if (architectLive()) {
+      // Cancel the live architect's current turn. The conv survives;
+      // the operator can re-engage from its chat. If they want to
+      // start over fresh, they archive that one + click Run all again.
+      const conv = activeArchConv();
+      if (conv) {
+        const res = await client.chatCancel(conv);
+        if (!res.ok) log.warn('roadmap-architect cancel failed', res.status);
+      }
       return;
     }
-    // Build queue from the currently-visible active list, restricted
-    // to initiatives that have at least one open task. Stable order
-    // = the order the operator sees on screen.
+    // Build the visible-initiative summary (just the ids + titles —
+    // the architect will read the files itself). This is purely
+    // operator-context so the operator knows what they kicked off.
     const list = filtered()
       .filter((it) => {
         if (viewStore.isInitiativeArchived(it.id)) return false;
@@ -106,10 +134,37 @@ export default function InitiativesPanel() {
         const tasks = tasksByInitiative().get(it.id) ?? [];
         if (tasks.length === 0) return false;
         return tasks.some((t) => t.status !== 'done' && t.status !== 'cancelled');
-      })
-      .map((it) => it.id);
+      });
     if (list.length === 0) return;
-    startRoadmapRun(list);
+    // Spawn a fresh architect conv.
+    const conv = chatStore.createConv({
+      type: 'roadmap-architect',
+      title: 'Roadmap Architect',
+      model: 'auto',
+    });
+    uiStore.setActiveZone('architect');
+    const bootstrap = [
+      `Run all — kick off a roadmap execution pass.`,
+      ``,
+      `Active scope (${list.length} initiative${list.length === 1 ? '' : 's'}, in order):`,
+      ...list.map((it, i) => `${i + 1}. ${it.id} — ${it.title}`),
+      ``,
+      `Follow your standing operating procedure:`,
+      `1. Read .meshkore/roadmap/initiatives/ + linked tasks.`,
+      `2. Plan parallel-vs-sequential for the first initiative.`,
+      `3. Dispatch sub-agents and report each move in this chat.`,
+      `4. Continue until all initiatives ship OR you hit a blocker; then stop and tell me what you need.`,
+      ``,
+      `Start now. First message should be: which initiative are you taking, what tasks it has, and which sub-agents you're about to launch.`,
+    ].join('\n');
+    const res = await chatStore.dispatchMessage(client, {
+      conv,
+      text: bootstrap,
+      author: 'architect',
+    });
+    if (!res.ok) {
+      log.error('roadmap-architect bootstrap failed', res.status, res.error);
+    }
   };
 
   return (
@@ -146,29 +201,27 @@ export default function InitiativesPanel() {
           <div class="ml-auto flex items-center">
             <button
               type="button"
-              onClick={onRunAll}
-              disabled={!roadmapActive() && (otherStoryBusy() || filtered().length === 0)}
+              onClick={() => { void onRunAll(); }}
+              disabled={!architectLive() && filtered().length === 0}
               title={
-                roadmapActive()
-                  ? 'Cancel the in-flight roadmap pass (the current initiative is also cancelled)'
-                  : otherStoryBusy()
-                    ? 'Another initiative is running — stop it before starting a roadmap pass'
-                    : 'Execute every visible non-backlog initiative, sequentially, on fresh agents'
+                architectLive()
+                  ? 'Stop the Roadmap Architect mid-turn (the conv stays; re-engage from chat)'
+                  : 'Spawn a Roadmap Architect agent to plan + dispatch the visible roadmap'
               }
               class={`px-3 py-1.5 rounded-md text-[11px] font-mono uppercase tracking-wider transition-colors border disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 ${
-                roadmapActive()
+                architectLive()
                   ? 'bg-red-500/15 hover:bg-red-500/30 text-red-300 border-red-500/40'
-                  : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
+                  : 'bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border-cyan-500/40'
               }`}
             >
-              <Show when={roadmapActive()} fallback={<>▶▶  Run all</>}>
+              <Show when={architectLive()} fallback={
+                <span class="inline-flex items-center gap-1.5">
+                  <span aria-hidden="true">🗺️</span>
+                  <span>Run all</span>
+                </span>
+              }>
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" aria-hidden="true" />
-                <span>Stop all</span>
-                <Show when={roadmapProgress()}>
-                  <span class="font-mono text-[10px] opacity-70">
-                    {roadmapProgress()!.cursor + 1}/{roadmapProgress()!.total}
-                  </span>
-                </Show>
+                <span>Stop architect</span>
               </Show>
             </button>
           </div>

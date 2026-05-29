@@ -38,8 +38,6 @@ import { AutoUpdateFlowHost } from '~/components/modals/AutoUpdateFlow';
 import { NewAgentWizardHost } from '~/components/modals/NewAgentWizard';
 import { AddProjectWizardHost } from '~/components/modals/AddProjectWizard';
 import StoryRunner from '~/components/story/StoryRunner';
-import RoadmapRunner from '~/components/story/RoadmapRunner';
-import { roadmapRunStore } from '~/state/roadmap-run';
 import ConnectionGate from '~/components/ConnectionGate';
 import Cockpit from '~/components/Cockpit';
 import { rows } from '~/components/projects-rail/rows';
@@ -100,10 +98,6 @@ export default function App() {
       // mirror so the previous cluster's runs don't bleed in, then
       // hydrate from `/runs?active=1` once attach() resolves.
       storyStore.resetForClusterSwap();
-      // V90 — roadmap-level queue is per-cluster localStorage. Rebind
-      // so the operator's "Run all" pass survives reload + cluster
-      // swap with the right queue restored.
-      roadmapRunStore.bindCluster(health.cluster_id ?? null);
     });
     // V86q — Rehydrate convMap from the snapshot's
     // `timeline.recent_events` (py-1.1.0+ — the daemon has been
@@ -208,7 +202,6 @@ export default function App() {
       <NewAgentWizardHost />
       <AddProjectWizardHost />
       <StoryRunner />
-      <RoadmapRunner />
     </>
   );
 }

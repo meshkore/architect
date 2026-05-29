@@ -104,10 +104,27 @@ export const AGENT_TYPES: Record<AgentType, AgentTypeInfo> = {
       'on correctness, security, complexity, test coverage, naming, ' +
       'missing edge cases. Focus is what would block merge.',
   },
+  'roadmap-architect': {
+    id: 'roadmap-architect',
+    label: 'Roadmap Architect',
+    emoji: '🗺️',
+    color: '#22d3ee', // cyan — distinct from the generalist coordinator's emerald
+    role:
+      'Spawned by Run all. Reads the active roadmap, plans the order, ' +
+      'dispatches sub-agents (coding / deploy / db / testing / docs / ' +
+      'review) via the daemon HTTP API, monitors them, and narrates ' +
+      'progress in its own chat. Does not write code itself — it ' +
+      'coordinates. Sub-agents it spawns appear in the rail tagged with ' +
+      'this architect as their parent so the operator can tell ' +
+      'coordinator-driven work from manual work.',
+  },
 };
 
 /** Ordered list — service types first (deploy → review) then custom last,
- * matching the V80 wizard pill order. */
+ * matching the V80 wizard pill order. The roadmap-architect is spawned
+ * exclusively by the Run all button (not via the new-agent wizard) so
+ * it stays off this list — the wizard would otherwise let the operator
+ * create orphan coordinators that nobody dispatched. */
 export const AGENT_TYPE_ORDER: AgentType[] = [
   'deploy', 'db', 'testing', 'audit', 'docs', 'review', 'custom',
 ];

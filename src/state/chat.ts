@@ -29,7 +29,7 @@ import { log } from '~/lib/log';
 
 export const ONBOARDING_CONV_ID = '_onboarding_v1';
 
-export type AgentType = 'custom' | 'deploy' | 'db' | 'testing' | 'audit' | 'docs' | 'review';
+export type AgentType = 'custom' | 'deploy' | 'db' | 'testing' | 'audit' | 'docs' | 'review' | 'roadmap-architect';
 
 export interface ConvMeta {
   agentId: string;
