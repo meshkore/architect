@@ -15,6 +15,7 @@
  */
 
 import { onMount, onCleanup } from 'solid-js';
+import { uiStore } from '~/state/ui';
 
 const VAR: Record<string, string> = {
   'col-nav': '--col-nav',
@@ -88,6 +89,14 @@ export function applyStoredLayout(): void {
   for (const [k, v] of Object.entries(layout)) {
     document.documentElement.style.setProperty(VAR[k]!, `${v}px`);
   }
+  // V91 — keep uiStore.chatRailWidth in sync with the splitter's
+  // chat-rail slot at boot. ChatRail's `compact` derivation reads
+  // from uiStore (reactive) so AgentCard can switch to the compact
+  // layout once the operator drags below COMPACT_THRESHOLD_PX. Without
+  // this sync the rail stayed in full layout no matter how narrow.
+  if (typeof layout['chat-rail'] === 'number') {
+    uiStore.setChatRailWidth(layout['chat-rail']);
+  }
 }
 
 export default function Splitter(props: { resize: 'col-nav' | 'col-chat' | 'chat-rail'; class?: string; title?: string }) {
@@ -111,6 +120,13 @@ export default function Splitter(props: { resize: 'col-nav' | 'col-chat' | 'chat
         const next = clamp(props.resize, Math.round(startPx + sign * dx));
         layout[props.resize] = next;
         document.documentElement.style.setProperty(VAR[props.resize]!, `${next}px`);
+        // V91 — Mirror the rail width into uiStore so ChatRail's
+        // compact memo (which reads uiStore.chatRailWidth) reacts on
+        // every move. Otherwise the column visually shrinks via CSS
+        // but AgentCard never collapses to its compact body.
+        if (props.resize === 'chat-rail') {
+          uiStore.setChatRailWidth(next);
+        }
       };
       const onUp = (): void => {
         host!.classList.remove('dragging');

@@ -705,7 +705,12 @@
     /* V29 — chat rail subcolumn. Always full cards (3 lines), no compact
        mode. Selected card gets stripe + color tint; others stay flat. */
     .chat-rail-stack {
-      flex: 0 0 var(--chat-rail, 200px);
+      /* V91 — Read --chat-rail-w (the var the Splitter writes). The
+         previous --chat-rail (no -w) was orphan: the splitter never
+         set it, so dragging the agents↔chat handle was a no-op and
+         the column stayed at its fallback 200 px. Operator's bug:
+         "puedo pinchar la rayita pero no se mueve la columna". */
+      flex: 0 0 var(--chat-rail-w, 200px);
       display: flex;
       flex-direction: column;
       gap: 4px;
