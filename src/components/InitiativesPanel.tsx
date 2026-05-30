@@ -288,19 +288,24 @@ export default function InitiativesPanel() {
       model: 'auto',
     });
     uiStore.setActiveZone('architect');
+    // V107.3 — Bootstrap rewritten. The V92 bootstrap said
+    // "Continue until you ship OR hit a blocker; then stop and tell
+    // me what you need" — that user-turn instruction OVERRODE the
+    // daemon's py-1.10.x system SOP (which says: never halt, use
+    // catalog → stub-flag → matrix → consult-A001). Operator observed
+    // the architect literally quoting "stop on the first blocker per
+    // SOP" from this bootstrap. Removed every contradicting line.
+    // The bootstrap now JUST kicks off the daemon's SOP — no
+    // procedure, no stop conditions, just scope + go.
     const bootstrap = [
-      `Run all — kick off a roadmap execution pass.`,
+      `Run all.`,
       ``,
-      `Active scope (${list.length} initiative${list.length === 1 ? '' : 's'}, in order):`,
+      `Active scope (${list.length} initiative${list.length === 1 ? '' : 's'}, lower-id first):`,
       ...list.map((it, i) => `${i + 1}. ${it.id} — ${it.title}`),
       ``,
-      `Follow your standing operating procedure:`,
-      `1. Read .meshkore/roadmap/initiatives/ + linked tasks.`,
-      `2. Plan parallel-vs-sequential for the first initiative.`,
-      `3. Dispatch sub-agents and report each move in this chat.`,
-      `4. Continue until all initiatives ship OR you hit a blocker; then stop and tell me what you need.`,
+      `Follow your SOP exactly. The chain on every blocker: DECISION CATALOG → STUB-AND-FLAG → DECISION MATRIX → CONSULT-A001. Never halt mid-pass. The single voluntary halt is the end-of-pass 4-bucket summary.`,
       ``,
-      `Start now. First message should be: which initiative are you taking, what tasks it has, and which sub-agents you're about to launch.`,
+      `Start now. Your very first line MUST be \`═══ VALIDATION GREEN ═══\` or \`═══ VALIDATION RED ═══\`. Be terse.`,
     ].join('\n');
     const res = await chatStore.dispatchMessage(client, {
       conv,

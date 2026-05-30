@@ -35,6 +35,45 @@ export function isValidationRed(text: string): boolean {
   return first.trim() === VALIDATION_RED_MARKER;
 }
 
+/** True when the text starts with the GREEN marker. V107.3 — operator
+ *  asked for visible feedback that the validation step ran. */
+export function isValidationGreen(text: string): boolean {
+  if (!text) return false;
+  const first = text.trimStart().split('\n', 1)[0] ?? '';
+  return first.trim() === VALIDATION_GREEN_MARKER;
+}
+
+/** V107.3 — Heuristic detector for the "architect halted mid-pass
+ *  with a question" failure mode. The chain (catalog → stub-flag →
+ *  matrix → consult-A001 → defer) makes voluntary halts impossible
+ *  in theory. When the model violates anyway, the cockpit shows a
+ *  red banner so the operator knows it's a bug, not a normal stop. */
+const HALT_VIOLATION_PATTERNS = [
+  /which one\?/i,
+  /which path\?/i,
+  /\bpick one:/i,
+  /two paths:/i,
+  /two options:/i,
+  /three options:/i,
+  /should i .+\bor\b.+\?/i,
+  /stopping per sop/i,
+  /stopping[ —-]+i need from you/i,
+  /halt here until/i,
+  /what i need from you to proceed/i,
+  /i'?ll default to .+ if you don'?t reply/i,
+  /i'?m not going to perform a theatre/i,
+  /is months of work.+stop on the first blocker/i,
+];
+export function isHaltViolation(text: string): boolean {
+  if (!text) return false;
+  // If it's a validation block, the halt is legitimate.
+  if (isValidationRed(text) || isValidationGreen(text)) return false;
+  for (const re of HALT_VIOLATION_PATTERNS) {
+    if (re.test(text)) return true;
+  }
+  return false;
+}
+
 export default function ValidationBlock(props: { conv: string; text: string }) {
   const [answers, setAnswers] = createSignal('');
   const [submitting, setSubmitting] = createSignal(false);
@@ -100,11 +139,14 @@ export default function ValidationBlock(props: { conv: string; text: string }) {
   return (
     <div class="rounded-lg border border-red-500/40 bg-red-500/5 px-4 py-3 my-1 max-w-[90%]">
       <div class="flex items-center gap-2 mb-2">
-        <span class="font-mono text-[10px] uppercase tracking-wider text-red-300 bg-red-500/15 border border-red-500/40 rounded px-2 py-0.5">
-          VALIDATION · RED
-        </span>
-        <span class="text-[11px] font-mono text-red-300/70">spec-level clarification needed</span>
+        <span aria-hidden="true" class="text-base">🔍</span>
+        <h3 class="text-[13px] font-semibold text-red-200 tracking-tight">
+          Roadmap validation — your input is needed before the pass starts
+        </h3>
       </div>
+      <p class="text-[11px] text-red-300/80 font-mono mb-3">
+        Answer below — be brief. Skip = use defaults.
+      </p>
       <pre class="whitespace-pre-wrap text-[13px] text-gray-200 leading-relaxed font-sans mb-3">{body()}</pre>
       <textarea
         value={answers()}

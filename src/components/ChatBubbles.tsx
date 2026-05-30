@@ -17,7 +17,9 @@ import { daemonStore } from '~/state/daemon';
 import { ensureMarked } from '~/lib/cdn-loaders';
 import { log } from '~/lib/log';
 import type { DaemonEvent } from '~/lib/daemon-client';
-import ValidationBlock, { isValidationRed } from '~/components/architect/ValidationBlock';
+import ValidationBlock, { isValidationRed, isValidationGreen, isHaltViolation } from '~/components/architect/ValidationBlock';
+import ValidationGreenBadge, { stripGreenMarker } from '~/components/architect/ValidationGreenBadge';
+import ArchitectViolationBanner from '~/components/architect/ArchitectViolationBanner';
 
 /**
  * V86p — Live streaming window. While the daemon is still writing,
@@ -340,9 +342,34 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
   // V107 — Detect VALIDATION RED block emitted by the architect's
   // first turn (daemon py-1.10.9+) and render a special interactive
   // block with a textarea + submit, instead of the normal markdown.
-  // GREEN doesn't need special UI — it's just inline text.
   const showsValidationRed = (): boolean =>
     !props.msg.streaming && !props.msg.cancelled && isValidationRed(props.msg.text);
+
+  // V107.3 — Detect VALIDATION GREEN at the top of an assistant
+  // message → render a small badge + strip the marker line from the
+  // body so the markdown render below starts at the pre-flight block.
+  const showsValidationGreen = (): boolean =>
+    !props.msg.streaming && !props.msg.cancelled && isValidationGreen(props.msg.text);
+
+  // V107.3 — Detect halt-violation patterns on architect convs.
+  // Renders a red banner above the bubble with a one-click Reset
+  // button so the operator knows it's a bug, not a normal stop.
+  const isArchitectConv = (): boolean => {
+    const conv = chatStore.state.activeConv;
+    if (!conv) return false;
+    if (conv.startsWith('roadmap-architect-')) return true;
+    return chatStore.state.convMeta[conv]?.type === 'roadmap-architect';
+  };
+  const showsHaltViolation = (): boolean =>
+    !props.msg.streaming
+    && !props.msg.cancelled
+    && isArchitectConv()
+    && isHaltViolation(props.msg.text);
+
+  // Body text — strip the GREEN marker line so the markdown render
+  // below doesn't show the literal `═══ ... ═══` line.
+  const bodyText = (): string =>
+    showsValidationGreen() ? stripGreenMarker(props.msg.text) : props.msg.text;
 
   return (
     <div class="flex flex-col gap-1.5 items-start w-full">
@@ -356,34 +383,42 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
         onStop={props.msg.streaming && !props.msg.cancelled ? onStop : undefined}
       />
       <Show when={showsValidationRed()} fallback={
-      <div class={`text-sm leading-relaxed max-w-[90%] pl-2 ${
-        props.msg.cancelled ? 'text-red-300/95' : 'text-gray-200'
-      }`}>
-        <Show
-          when={props.msg.streaming}
-          fallback={
-            <CollapsibleText text={props.msg.text} markdown initialExpanded={props.msg._freshFinal}>
-              <Show when={props.msg.cancelled}>
-                <span class="text-red-400/80 text-[11px]"> · cancelled</span>
-              </Show>
-            </CollapsibleText>
-          }
-        >
-          {/* V86s — Empty-streaming → ThinkingPlaceholder; populated
-              streaming → tail clamp showing the latest 3 lines. */}
-          <Show when={props.msg.text.trim().length > 0} fallback={<ThinkingPlaceholder />}>
-            <StreamingTail text={props.msg.text} />
-          </Show>
-          {/* V89.2 — While streaming AND nothing new has arrived for
-              >1.5 s, append the rotating-verbs idle hint so the
-              operator gets visible motion even if the agent is mid
-              tool-call or pausing to think. Disappears the moment a
-              new delta lands. */}
-          <Show when={props.msg.streaming && props.msg.text.trim().length > 0}>
-            <StreamingIdleHint />
-          </Show>
+      <>
+        <Show when={showsHaltViolation()}>
+          <ArchitectViolationBanner conv={chatStore.state.activeConv ?? ''} />
         </Show>
-      </div>
+        <Show when={showsValidationGreen()}>
+          <ValidationGreenBadge />
+        </Show>
+        <div class={`text-sm leading-relaxed max-w-[90%] pl-2 ${
+          props.msg.cancelled ? 'text-red-300/95' : 'text-gray-200'
+        }`}>
+          <Show
+            when={props.msg.streaming}
+            fallback={
+              <CollapsibleText text={bodyText()} markdown initialExpanded={props.msg._freshFinal}>
+                <Show when={props.msg.cancelled}>
+                  <span class="text-red-400/80 text-[11px]"> · cancelled</span>
+                </Show>
+              </CollapsibleText>
+            }
+          >
+            {/* V86s — Empty-streaming → ThinkingPlaceholder; populated
+                streaming → tail clamp showing the latest 3 lines. */}
+            <Show when={props.msg.text.trim().length > 0} fallback={<ThinkingPlaceholder />}>
+              <StreamingTail text={props.msg.text} />
+            </Show>
+            {/* V89.2 — While streaming AND nothing new has arrived for
+                >1.5 s, append the rotating-verbs idle hint so the
+                operator gets visible motion even if the agent is mid
+                tool-call or pausing to think. Disappears the moment a
+                new delta lands. */}
+            <Show when={props.msg.streaming && props.msg.text.trim().length > 0}>
+              <StreamingIdleHint />
+            </Show>
+          </Show>
+        </div>
+      </>
       }>
         <ValidationBlock conv={chatStore.state.activeConv ?? ''} text={props.msg.text} />
       </Show>
