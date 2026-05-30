@@ -80,8 +80,11 @@ export default function AgentCard(props: AgentCardProps) {
       return base.join(' ');
     }
     const base = [
-      'group relative w-full text-left rounded-md px-2.5 py-2',
-      'transition-colors flex flex-col gap-1 cursor-grab active:cursor-grabbing',
+      // V107.10 — tighter vertical rhythm (py-1.5 + gap-0.5 vs py-2 +
+      // gap-1) since the status row is gone. Each card now occupies
+      // ~50 px instead of ~70 px.
+      'group relative w-full text-left rounded-md px-2.5 py-1.5',
+      'transition-colors flex flex-col gap-0.5 cursor-grab active:cursor-grabbing',
       'border-[1.5px]',
     ];
     if (props.dragging) base.push('opacity-35');
@@ -134,14 +137,31 @@ export default function AgentCard(props: AgentCardProps) {
           pendingReview={props.pendingReview}
         />
       }>
+        {/* V107.10 — 2-row layout. Operator request 2026-05-30: drop
+            the dedicated 3rd row that just said "idle" or "••• working".
+            Now status moves into row 1 as a tiny pulsing-dots indicator
+            (working only — idle = no dots, the card's gray border already
+            signals it). Saves ~18 px per card → ~180 px vertical for a
+            10-agent rail, so the operator fits the whole fleet on one
+            screen without scrolling. */}
         <span class="flex items-center gap-1.5 text-[10px] font-mono">
           <span
             class={`px-1.5 py-0.5 rounded text-gray-200 flex-shrink-0 ${props.status === 'working' ? 'animate-pulse-soft' : ''}`}
-            /* dynamic: border tint derived from props.stripe */
             style={{ background: 'rgba(17,24,39,0.7)', border: `1px solid ${props.stripe}55` }}
           >
             {props.meta.agentId}
           </span>
+          <Show when={props.status === 'working'}>
+            <span
+              class="inline-flex items-center gap-0.5 flex-shrink-0"
+              aria-label="working"
+              title="working"
+            >
+              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft" />
+              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:150ms]" />
+              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:300ms]" />
+            </span>
+          </Show>
           <span
             class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] min-w-0 truncate"
             style={{
@@ -170,19 +190,6 @@ export default function AgentCard(props: AgentCardProps) {
           {title()}
           <Show when={props.meta.model && props.meta.model !== 'auto'}>
             <span class="text-gray-600 font-mono text-[10px]"> · {props.meta.model}</span>
-          </Show>
-        </span>
-        <span class="text-[10px] font-mono text-gray-500 flex items-center gap-1.5">
-          <Show
-            when={props.status === 'working'}
-            fallback={<span class="text-gray-600">idle</span>}
-          >
-            <span class="inline-flex items-center gap-0.5">
-              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft" />
-              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:150ms]" />
-              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:300ms]" />
-            </span>
-            <span class="text-emerald-300">working</span>
           </Show>
         </span>
       </Show>
