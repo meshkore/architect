@@ -17,6 +17,7 @@ import { daemonStore } from '~/state/daemon';
 import { ensureMarked } from '~/lib/cdn-loaders';
 import { log } from '~/lib/log';
 import type { DaemonEvent } from '~/lib/daemon-client';
+import ValidationBlock, { isValidationRed } from '~/components/architect/ValidationBlock';
 
 /**
  * V86p — Live streaming window. While the daemon is still writing,
@@ -336,6 +337,13 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
     if (!conv || !client) return;
     void client.chatCancel(conv);
   };
+  // V107 — Detect VALIDATION RED block emitted by the architect's
+  // first turn (daemon py-1.10.9+) and render a special interactive
+  // block with a textarea + submit, instead of the normal markdown.
+  // GREEN doesn't need special UI — it's just inline text.
+  const showsValidationRed = (): boolean =>
+    !props.msg.streaming && !props.msg.cancelled && isValidationRed(props.msg.text);
+
   return (
     <div class="flex flex-col gap-1.5 items-start w-full">
       <BubbleHeader
@@ -347,6 +355,7 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
         suffix={props.msg.cancelled ? 'cancelled' : undefined}
         onStop={props.msg.streaming && !props.msg.cancelled ? onStop : undefined}
       />
+      <Show when={showsValidationRed()} fallback={
       <div class={`text-sm leading-relaxed max-w-[90%] pl-2 ${
         props.msg.cancelled ? 'text-red-300/95' : 'text-gray-200'
       }`}>
@@ -375,6 +384,9 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
           </Show>
         </Show>
       </div>
+      }>
+        <ValidationBlock conv={chatStore.state.activeConv ?? ''} text={props.msg.text} />
+      </Show>
     </div>
   );
 }
