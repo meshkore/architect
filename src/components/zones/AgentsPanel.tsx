@@ -135,6 +135,29 @@ export default function AgentsPanel() {
     uiStore.setActiveZone('architect');
   };
 
+  // V107.9 — Archive directly from the list. Operator complaint:
+  // having to switch chat then double-click the trash icon to clear
+  // 3 agents was unworkable. Now a small × on each row archives
+  // immediately (one click). Onboarding/Coordinator stays unarchivable
+  // — guarded by chatStore.archiveConv.
+  const archiveConv = async (conv: string): Promise<void> => {
+    log.warn('[agents-panel:archive] start', { conv });
+    chatStore.archiveConv(conv);
+    log.warn('[agents-panel:archive] local archiveConv done', {
+      conv,
+      archivedNow: chatStore.state.archivedConvs[conv] === true,
+    });
+    if (chatStore.state.activeConv === conv) chatStore.setActiveConv(null);
+    const client = daemonStore.state.client;
+    if (!client) {
+      log.warn('[agents-panel:archive] no daemon client — local-only');
+      return;
+    }
+    const res = await client.chatArchive(conv);
+    log.warn('[agents-panel:archive] /chat/archive', { ok: res.ok, status: res.status });
+    if (!res.ok) log.warn('[agents-panel:archive] sync to daemon failed', res.status);
+  };
+
   return (
     <section class="zone-host p-4 overflow-y-auto">
       <header class="mb-4">
@@ -214,7 +237,13 @@ export default function AgentsPanel() {
         >
           <ul class="space-y-1.5">
             <For each={rows()}>
-              {(r) => <AgentRowItem row={r} onOpen={() => goToChat(r.conv)} />}
+              {(r) => (
+                <AgentRowItem
+                  row={r}
+                  onOpen={() => goToChat(r.conv)}
+                  onArchive={() => { void archiveConv(r.conv); }}
+                />
+              )}
             </For>
           </ul>
         </Show>
@@ -223,11 +252,11 @@ export default function AgentsPanel() {
   );
 }
 
-function AgentRowItem(props: { row: AgentRow; onOpen: () => void }) {
+function AgentRowItem(props: { row: AgentRow; onOpen: () => void; onArchive: () => void }) {
   const r = () => props.row;
   return (
     <li
-      class={`rounded-md border px-3 py-2 transition-colors cursor-pointer hover:bg-gray-800/40 ${
+      class={`group rounded-md border px-3 py-2 transition-colors cursor-pointer hover:bg-gray-800/40 ${
         r().runInitiativeId
           ? 'border-emerald-500/30 bg-emerald-500/5'
           : r().status === 'streaming'
@@ -258,6 +287,22 @@ function AgentRowItem(props: { row: AgentRow; onOpen: () => void }) {
           </span>
         </Show>
         <span class="ml-auto text-[10px] font-mono text-gray-600">{fmtRelative(r().lastTs)}</span>
+        {/* V107.9 — Inline archive button. Hidden on the Coordinator
+            (onboarding conv is unarchivable by design). Visible on
+            hover so the resting row stays clean. One click archives —
+            restore via History → Archived filter. */}
+        <Show when={!r().isOnboarding}>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); props.onArchive(); }}
+            title="Archive this agent (restore via History → Archived)"
+            class="opacity-0 group-hover:opacity-100 inline-flex items-center justify-center w-6 h-6 rounded text-gray-500 hover:text-red-300 border border-transparent hover:border-red-500/40 hover:bg-red-500/5 transition-all flex-shrink-0"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </Show>
       </div>
       <Show when={r().runTaskId}>
         <p class="text-[11px] text-gray-400 mt-1 truncate">

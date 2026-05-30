@@ -55,14 +55,17 @@ export default function ChatScopeStrip(props: Props) {
     if (next !== (props.meta?.title ?? '')) props.onRename(next);
   };
 
+  // V107.9 — Two-step confirm dropped. Operator complaint 2026-05-30:
+  // "el botón de archivar agentes no funciona, completamente ignorado".
+  // Root cause: the first click only flipped a faint border color
+  // (border-gray-800 → border-red-500/50), so the visual change was
+  // imperceptible and the second click (needed within 2.4 s) often
+  // never landed. Archive is non-destructive — the conv survives in
+  // History under the Archived filter and Restore brings it back —
+  // so a single-click action is the right contract.
   const armArchive = () => {
-    if (confirmArchive()) {
-      props.onArchive();
-      setConfirmArchive(false);
-    } else {
-      setConfirmArchive(true);
-      setTimeout(() => setConfirmArchive(false), 2400);
-    }
+    setConfirmArchive(false);
+    props.onArchive();
   };
 
   /** Chat view = the default. Currently the only way to "leave" the

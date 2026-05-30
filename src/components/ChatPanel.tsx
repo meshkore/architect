@@ -53,10 +53,19 @@ export default function ChatPanel() {
 
   const archive = async (): Promise<void> => {
     const c = conv();
-    if (!c) return;
+    if (!c) {
+      log.warn('[archive] no active conv — ignored');
+      return;
+    }
+    // V107.9 — promoted to log.warn so the operator sees the trace
+    // in production even without verbose mode. Archive is a
+    // non-destructive action but if it ever fails silently in the
+    // future the warn is the only crumb.
+    log.warn('[archive] start', { conv: c });
     // Optimistic local update so the rail filter takes effect
     // instantly without waiting for the WS broadcast round-trip.
     chatStore.archiveConv(c);
+    log.warn('[archive] local archiveConv done', { conv: c, archivedNow: chatStore.state.archivedConvs[c] === true });
     chatStore.setActiveConv(null);
     // V104 — sync to the daemon so the archive persists across
     // reload AND propagates to every other open tab via the
@@ -64,9 +73,13 @@ export default function ChatPanel() {
     // only updated the per-tab signal, so hard refresh + V102
     // hydrate re-populated the rail with the un-synced convs.
     const cli = client();
-    if (!cli) return;
+    if (!cli) {
+      log.warn('[archive] no daemon client — local-only archive (will not persist past reload)');
+      return;
+    }
     const res = await cli.chatArchive(c);
-    if (!res.ok) log.warn('chat archive sync to daemon failed', res.status);
+    log.warn('[archive] /chat/archive', { ok: res.ok, status: res.status });
+    if (!res.ok) log.warn('[archive] sync to daemon failed', res.status);
   };
 
   const rename = (next: string) => {
