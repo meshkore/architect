@@ -24,7 +24,7 @@ import { batch } from 'solid-js';
 import { createStore } from 'solid-js/store';
 import { DaemonClient, type HealthResponse, setDaemonVersionListener } from '~/lib/daemon-client';
 import { DaemonWS, type DaemonWSState } from '~/lib/ws';
-import { parseDaemonVersion, meetsMinimum, isDaemonAhead, type DaemonVersion } from '~/lib/version';
+import { parseDaemonVersion, meetsMinimum, isDaemonAhead, isFeatureGapped, type DaemonVersion } from '~/lib/version';
 import { attachEventBus } from '~/lib/event-bus';
 import { log } from '~/lib/log';
 // V93 — Static imports for everything the project-switch path needs.
@@ -175,7 +175,11 @@ setDaemonVersionListener((httpBase, version) => {
     if (recorded === version) return; // unchanged — no-op
     const next = parseDaemonVersion(version);
     if (!next) return; // unparseable — ignore (daemon shouldn't ever send this)
-    const nextOutdated = !meetsMinimum(next);
+    // V107.14 — outdated = version too old OR required features missing.
+    // Single trigger feeds the unified DaemonOutdatedPanel; no parallel
+    // inline banner. Feature list lives in lib/version.ts.
+    const featureGap = isFeatureGapped(inst.health.features);
+    const nextOutdated = !meetsMinimum(next) || featureGap;
     const nextAhead = isDaemonAhead(next);
     log.info('daemon version header changed', {
       cluster: key, from: recorded ?? null, to: next.raw, outdated: nextOutdated, ahead: nextAhead,
@@ -293,7 +297,9 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
     wsState: 'idle',
     health,
     version: v,
-    outdated: !meetsMinimum(v),
+    // V107.14 — outdated covers BOTH version-too-old AND missing
+    // required features. See lib/version.ts REQUIRED_DAEMON_FEATURES.
+    outdated: !meetsMinimum(v) || isFeatureGapped(health.features),
     ahead: isDaemonAhead(v),
     supportsSelfUpdate,
   };
@@ -569,7 +575,9 @@ async function recheckHealth(): Promise<boolean> {
   setState('instances', id!, {
     health: r.data,
     version: v,
-    outdated: !meetsMinimum(v),
+    // V107.14 — recheck after operator-triggered update also accounts for
+    // the feature gate (a daemon at-or-above MIN can still lack features).
+    outdated: !meetsMinimum(v) || isFeatureGapped(r.data.features),
     supportsSelfUpdate,
   });
   syncFacade();

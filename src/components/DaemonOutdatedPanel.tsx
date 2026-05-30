@@ -21,10 +21,10 @@
  *  - No close, no dismiss, no Escape handler.
  */
 
-import { JSX, Show, createSignal, onCleanup, onMount, createMemo } from 'solid-js';
+import { JSX, Show, createSignal, onCleanup, onMount, createMemo, For } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { activeProject } from '~/state/projects';
-import { MIN_DAEMON_VERSION } from '~/lib/version';
+import { MIN_DAEMON_VERSION, missingRequiredFeatures } from '~/lib/version';
 import { ChoiceView } from './modals/daemon-outdated/ChoiceView';
 import { AgentView, AGENT_PROMPT } from './modals/daemon-outdated/AgentView';
 import { ManualView, SHELL_CMD } from './modals/daemon-outdated/ManualView';
@@ -82,16 +82,52 @@ export default function DaemonOutdatedPanel(): JSX.Element {
     }
   };
 
+  // V107.14 — Auto-attempt the silent update flow on mount (operator's
+  // ask: "lo primero es podría salir este mismo mensaje pero con un
+  // loader y directamente quiero que lo intentes reiniciar automáticamente").
+  // The AutoUpdateFlow modal opens, runs, and closes itself; if it
+  // succeeds, state.outdated flips false and the panel unmounts. If
+  // it fails, the operator stays on this panel and the choice view
+  // (auto / agent / manual) is right there. We only auto-trigger
+  // ONCE per panel mount — re-trying on every render would loop.
   onMount(() => {
-    // Fire an immediate check on mount so the operator doesn't sit
-    // waiting 5 s for the first poll.
     void poll();
     const intv = setInterval(() => { void poll(); }, POLL_INTERVAL_MS);
     const tick = setInterval(() => setNowMs(Date.now()), 1000);
-    onCleanup(() => { clearInterval(intv); clearInterval(tick); });
+
+    // Kick the silent self-update flow after a small grace so the
+    // panel is fully visible first (avoids the modal feeling like a
+    // spurious popup).
+    const kickoff = setTimeout(() => {
+      log.info('[V107.14] auto-triggering silent self-update from outdated panel');
+      openAutoUpdateFlow();
+    }, 300);
+
+    onCleanup(() => {
+      clearInterval(intv);
+      clearInterval(tick);
+      clearTimeout(kickoff);
+    });
   });
 
   const triggerAutoUpdate = (): void => { openAutoUpdateFlow(); };
+
+  // V107.14 — Surface which capability gap triggered the panel so the
+  // operator (and any debug-stream reader) sees the real cause. When
+  // the version meets MIN but features are missing, the title-line
+  // wording "below MIN" would be a lie.
+  const featureGaps = createMemo<string[]>(() =>
+    missingRequiredFeatures(daemonStore.state.health?.features),
+  );
+  const gapKind = createMemo<'version' | 'features' | 'both'>(() => {
+    // If runningVersion is below MIN, version is at fault. Otherwise
+    // features. The two can also overlap.
+    const v = runningVersion();
+    const versionBelow = v && v !== '—' && v < MIN_DAEMON_VERSION; // string-compare is fine for `py-X.Y.Z` shape
+    if (versionBelow && featureGaps().length > 0) return 'both';
+    if (featureGaps().length > 0) return 'features';
+    return 'version';
+  });
 
   return (
     <section class="flex-1 flex flex-col min-h-0 overflow-y-auto bg-canvas">
@@ -116,9 +152,26 @@ export default function DaemonOutdatedPanel(): JSX.Element {
         </div>
         <p class="text-[12px] text-gray-400 mt-3 leading-relaxed">
           This project is paused while the local daemon is out of date — the cockpit can't talk to it
-          safely. Pick an update path below. <strong class="text-gray-200">Other projects keep working
-          normally</strong>: click any row in the left rail to switch.
+          safely. <strong class="text-gray-200">Auto-updating now</strong> — if it succeeds this panel
+          disappears on its own. If it fails, pick an update path below. <strong class="text-gray-200">Other
+          projects keep working normally</strong>: click any row in the left rail to switch.
         </p>
+
+        {/* V107.14 — surface the feature-gap context. Only renders when
+            features are missing (regardless of version). Lets the
+            operator see WHY without digging in the console. */}
+        <Show when={featureGaps().length > 0}>
+          <div class="mt-3 px-3 py-2 rounded-md border border-amber-500/30 bg-amber-500/5 text-[11px]">
+            <p class="text-amber-200 font-medium mb-1">
+              {gapKind() === 'features' ? 'Required capabilities missing:' : 'Also missing required capabilities:'}
+            </p>
+            <ul class="space-y-0.5 font-mono text-amber-100/80">
+              <For each={featureGaps()}>
+                {(f) => <li>· {f}</li>}
+              </For>
+            </ul>
+          </div>
+        </Show>
 
         {/* Live "watching" indicator — the panel auto-polls every 5 s */}
         <div class="mt-5 mb-6 px-3 py-2.5 rounded-md border border-cyan-500/30 bg-cyan-500/5 flex items-center gap-3 text-[12px]">

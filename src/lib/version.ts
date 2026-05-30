@@ -102,6 +102,38 @@ export function meetsMinimum(actual: string | DaemonVersion | undefined | null):
 }
 
 /**
+ * V107.14 — Feature gate for the daemon's `/health.features` array.
+ *
+ * Some cockpit flows depend on daemon capabilities that landed AFTER
+ * MIN_DAEMON_VERSION (the Run All architect's wake hook + chat-activity
+ * surface, for example). A daemon at or above MIN can still lack these
+ * features if it's an intermediate version (e.g. py-1.10.13 between
+ * MIN=py-1.10.3 and the wake hook in py-1.10.22).
+ *
+ * Treating "missing required feature" as outdated lets us reuse the
+ * single full-area DaemonOutdatedPanel + AutoUpdateFlow contract for
+ * both the version-too-old AND feature-gapped cases. No inline
+ * banners, no special cases — one trigger, one UX, one recovery path.
+ *
+ * To add a new gated feature: list it here AND ensure the daemon
+ * version that ships it is at or above MIN_DAEMON_VERSION (otherwise
+ * the version check already catches it).
+ */
+export const REQUIRED_DAEMON_FEATURES: readonly string[] = [
+  'agents.architect-wake.v1',  // py-1.10.22 — architect resumes after subagent finishes
+  'chat.activity.v1',          // py-1.10.20 — /state.chat_activity for live agent surface
+];
+
+export function missingRequiredFeatures(features: readonly string[] | undefined | null): string[] {
+  const have = new Set(features ?? []);
+  return REQUIRED_DAEMON_FEATURES.filter((f) => !have.has(f));
+}
+
+export function isFeatureGapped(features: readonly string[] | undefined | null): boolean {
+  return missingRequiredFeatures(features).length > 0;
+}
+
+/**
  * Returns true when the daemon is STRICTLY newer than the version
  * this cockpit bundle was built against. Triggers a soft "refresh"
  * nudge (not a hard block) so the operator doesn't keep running

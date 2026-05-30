@@ -45,10 +45,20 @@ export function ManualView(props: ManualViewProps): JSX.Element {
 
 export const SHELL_CMD =
   "pkill -f 'python3 .meshkore/scripts/daemon.py' ; \\\n" +
+  // V107.14 — Refresh TLS bundle too (V107.13 field lessons). Without
+  // it the daemon serves plain HTTP and the HTTPS-only cockpit can't
+  // reach the new install. The bundle was previously rolled into the
+  // self-update codepath — no-op on same-version — so a fresh repo
+  // shipped without it. Unconditional refresh here.
+  'mkdir -p .meshkore/scripts/tls .meshkore/.runtime && \\\n' +
   'curl -fsSL https://meshkore.com/reference/cluster/scripts/daemon.py \\\n' +
   '  -o .meshkore/scripts/daemon.py && \\\n' +
-  'mkdir -p .meshkore/.runtime && \\\n' +
+  'curl -fsSL https://meshkore.com/reference/cluster/scripts/tls/fullchain.pem \\\n' +
+  '  -o .meshkore/scripts/tls/fullchain.pem && \\\n' +
+  'curl -fsSL https://meshkore.com/reference/cluster/scripts/tls/privkey.pem \\\n' +
+  '  -o .meshkore/scripts/tls/privkey.pem && \\\n' +
+  'chmod 600 .meshkore/scripts/tls/privkey.pem && \\\n' +
   'nohup python3 .meshkore/scripts/daemon.py \\\n' +
   '  > .meshkore/.runtime/daemon.log 2>&1 & \\\n' +
   'disown ; sleep 1 ; \\\n' +
-  "echo '✓ MeshKore daemon launched. Open https://architect.meshkore.com and hit \"I'\\''ve updated — recheck\" — it will auto-detect this project. Logs: tail -f .meshkore/.runtime/daemon.log'";
+  "echo '✓ MeshKore daemon launched with fresh TLS bundle. Open https://architect.meshkore.com — it will auto-reconnect. Logs: tail -f .meshkore/.runtime/daemon.log'";

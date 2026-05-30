@@ -230,6 +230,16 @@ export default function InitiativesPanel() {
       (r.status === 'running' || r.status === 'stopping') && r.live,
     ),
   );
+  // V107.14 — The Run All feature-gate moved to the canonical
+  // `daemonStore.state.outdated` signal (extended in lib/version.ts
+  // via REQUIRED_DAEMON_FEATURES). When features are missing, the
+  // cockpit replaces this panel's container with the full-area
+  // DaemonOutdatedPanel, so by the time InitiativesPanel renders the
+  // daemon is guaranteed to satisfy the gate. The old local
+  // REQUIRED_FEATURES + missingFeatures + DaemonOutdatedBanner were
+  // a parallel UX path that confused operators; deleted here in
+  // favour of the single Outdated-Panel + AutoUpdateFlow contract.
+
   /** True only when the architect is mid-turn (streaming OR
    *  awaiting first delta). Used purely as a label hint, not for
    *  enabling/disabling the button. */
@@ -435,6 +445,12 @@ export default function InitiativesPanel() {
           </div>
         </header>
 
+        {/* V107.14 — Inline DaemonOutdatedBanner removed. The canonical
+            full-area DaemonOutdatedPanel (Cockpit.tsx, gated by
+            daemonStore.state.outdated which now covers BOTH version
+            and feature gaps) is the single recovery surface. By the
+            time InitiativesPanel renders, the daemon is guaranteed to
+            satisfy the gate. */}
         <Show when={filtered().length > 0} fallback={<NoMatch totalInitiatives={allInitiatives().length} />}>
           <ul class="space-y-4">
             <For each={filtered()}>
@@ -481,3 +497,8 @@ function NoMatch(props: { totalInitiatives: number }) {
     </div>
   );
 }
+
+// V107.14 — DaemonOutdatedBanner removed. The full-area
+// DaemonOutdatedPanel + AutoUpdateFlow is the single recovery
+// surface. See lib/version.ts REQUIRED_DAEMON_FEATURES + state/daemon.ts
+// outdated computation for the unified trigger.
