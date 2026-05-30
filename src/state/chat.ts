@@ -125,6 +125,34 @@ function metaKey(): string {
   return CONV_META_KEY_PREFIX + (activeClusterId() ?? 'unknown');
 }
 
+/**
+ * V107.8 — Infer agent_type from the conv slug pattern.
+ *
+ * The cockpit's createConv produces slugs like `roadmap-architect-XXXXX`
+ * for typed agents. The slug is the unforgeable signal of intent —
+ * every other channel (meta.type in localStorage, body.agent_type in
+ * the dispatch, daemon's conv_meta sidecar) can drift out of sync.
+ *
+ * When the slug carries the type, treat it as the source of truth.
+ * Sister of the daemon's _agent_type_from_conv_slug (py-1.10.12).
+ */
+const SLUG_TYPE_PREFIXES: Array<[string, AgentType]> = [
+  ['roadmap-architect-', 'roadmap-architect'],
+  ['deploy-', 'deploy'],
+  ['db-', 'db'],
+  ['testing-', 'testing'],
+  ['audit-', 'audit'],
+  ['docs-', 'docs'],
+  ['review-', 'review'],
+];
+function agentTypeFromSlug(conv: string): AgentType | null {
+  if (!conv) return null;
+  for (const [prefix, implied] of SLUG_TYPE_PREFIXES) {
+    if (conv.startsWith(prefix)) return implied;
+  }
+  return null;
+}
+
 function loadConvMeta(): void {
   try {
     const raw = localStorage.getItem(metaKey());
@@ -135,10 +163,25 @@ function loadConvMeta(): void {
     const parsed: unknown = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const out: Record<string, ConvMeta> = {};
+      let migrated = 0;
       for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-        if (isConvMeta(v)) out[k] = v;
+        if (!isConvMeta(v)) continue;
+        // V107.8 — heal stale slug/type mismatches on load.
+        const slugImplied = agentTypeFromSlug(k);
+        if (slugImplied && v.type !== slugImplied) {
+          out[k] = { ...v, type: slugImplied };
+          migrated += 1;
+        } else {
+          out[k] = v;
+        }
       }
       setState('convMeta', out);
+      if (migrated > 0) {
+        log.info('convMeta migrated stale agent_type entries', { count: migrated });
+        // Persist the healed entries back to localStorage so subsequent
+        // sessions don't repeat the migration work.
+        saveConvMeta();
+      }
     }
   } catch (e) {
     log.warn('convMeta load failed', e instanceof Error ? e.message : String(e));
@@ -818,7 +861,19 @@ async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promis
   const meta = state.convMeta[conv];
   const body: DispatchBody = { conv, text };
   if (author) body.author = author;
-  if (meta?.type) body.agent_type = meta.type;
+  // V107.8 — Slug-implied agent_type wins. The conv slug pattern
+  // `roadmap-architect-XXXXX` is unforgeable — if it carries the
+  // type, the dispatch body MUST carry it too. Heals two failure
+  // modes observed in production:
+  //   1. Stale localStorage convMeta from a pre-AgentType-union build
+  //      that has `type: 'custom'` on an architect slug.
+  //   2. A race where dispatchMessage fires before ensureConvMeta has
+  //      finished writing to the store (shouldn't happen with Solid's
+  //      sync setState, but the safety net is cheap).
+  // Sister of the daemon's _agent_type_from_conv_slug (py-1.10.12).
+  const slugImplied = agentTypeFromSlug(conv);
+  const finalType = slugImplied ?? meta?.type;
+  if (finalType) body.agent_type = finalType;
   if (meta?.agentId) body.agent_id = meta.agentId;
   if (scope.module) body.module_id = scope.module;
   if (scope.taskId) body.task_id = scope.taskId;
