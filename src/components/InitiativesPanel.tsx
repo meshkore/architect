@@ -318,12 +318,12 @@ export default function InitiativesPanel() {
   };
 
   return (
-    <section class="min-w-0 p-4">
+    <section class="initiatives-section min-w-0 p-4">
       <Show when={!isProjectEmpty()} fallback={<EmptyOnboardingPanel />}>
-        <header class="flex flex-wrap items-center gap-2 mb-4">
-          <h2 class="text-sm font-mono uppercase tracking-wider text-gray-500">Initiatives</h2>
+        <header class="initiatives-header flex flex-nowrap items-center gap-2 mb-4 min-w-0">
+          <h2 class="initiatives-title text-sm font-mono uppercase tracking-wider text-gray-500 flex-shrink-0">Initiatives</h2>
           {/* V90 — visibility modes (active · archived · all · backlog) */}
-          <div class="flex items-center gap-1">
+          <div class="initiatives-filters flex items-center gap-1 flex-shrink-0">
             <For each={VISIBILITY_FILTERS}>
               {(f) => (
                 <button
@@ -346,9 +346,9 @@ export default function InitiativesPanel() {
             placeholder="Filter…"
             value={query()}
             onInput={(e) => setQuery((e.currentTarget as HTMLInputElement).value)}
-            class="bg-gray-900/60 border border-gray-800 rounded-md px-3 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-500/50 w-44"
+            class="initiatives-filter-input bg-gray-900/60 border border-gray-800 rounded-md px-3 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-500/50 w-44 min-w-0"
           />
-          <div class="ml-auto flex items-center">
+          <div class="ml-auto flex items-center flex-shrink-0">
             <button
               type="button"
               onClick={() => { void onRunAll(); }}
@@ -378,14 +378,16 @@ export default function InitiativesPanel() {
               <Show when={architectExists()} fallback={
                 <span class="inline-flex items-center gap-1.5">
                   <span aria-hidden="true">🗺️</span>
-                  <span>Run all</span>
+                  <span class="runall-label-full">Run all</span>
+                  <span class="runall-label-short" aria-hidden="true">Run</span>
                 </span>
               }>
                 <span
                   class={`inline-block w-1.5 h-1.5 rounded-full bg-red-400 ${architectStreaming() ? 'animate-pulse' : ''}`}
                   aria-hidden="true"
                 />
-                <span>Stop architect</span>
+                <span class="runall-label-full">Stop architect</span>
+                <span class="runall-label-short" aria-hidden="true">Stop</span>
               </Show>
             </button>
           </div>

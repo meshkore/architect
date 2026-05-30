@@ -2581,3 +2581,24 @@
 
     /* Mermaid container */
     .mermaid-host svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+
+    /* V107.6 — Responsive header for InitiativesPanel. The header has
+       title + filter chips + search input + Run-all/Stop button. When
+       the architect column gets narrow (operator widens the rail or
+       chat panel) items used to wrap to a second line. Container
+       queries hide non-essential pieces at two thresholds:
+         · <600px → hide the filter <input> (chips still cover most cases).
+         · <460px → swap "Stop architect" / "Run all" labels to "Stop" / "Run".
+       Both labels live in the DOM; CSS picks which one is visible. */
+    .initiatives-section { container-type: inline-size; }
+    .initiatives-header .runall-label-short { display: none; }
+    @container (max-width: 600px) {
+      .initiatives-header .initiatives-filter-input { display: none; }
+    }
+    @container (max-width: 460px) {
+      .initiatives-header .runall-label-full { display: none; }
+      .initiatives-header .runall-label-short { display: inline; }
+    }
+    @container (max-width: 360px) {
+      .initiatives-header .initiatives-title { display: none; }
+    }
