@@ -1,28 +1,24 @@
 /**
- * ValidationBlock — V107.
+ * ValidationBlock — V107.5.
  *
- * Renders the architect's first-turn VALIDATION GATE output.
+ * Renders the architect's first-turn VALIDATION GATE output when the
+ * marker is `═══ VALIDATION RED ═══`. Informational only — the
+ * operator answers in the normal cockpit chat input (no embedded
+ * textarea, no submit buttons). The architect re-validates on the
+ * next turn.
  *
- * Detects the marker:
- *   ═══ VALIDATION RED ═══
- * inside an assistant message on a roadmap-architect conv, and
- * replaces the default markdown render with a highlighted block:
- * lead text + questions list + a single textarea + submit button.
+ * V107.5 removed the embedded textarea + Submit/Skip buttons. They
+ * duplicated the cockpit's main chat input and confused the model
+ * (the operator already has a chat input below). The block now is
+ * pure presentation: header + question list + footer hint with the
+ * 3 response shortcuts the daemon understands:
  *
- * On submit, dispatches a new turn to the SAME conv with the
- * prefix `[validation-answers] <operator text>` so the architect's
- * next turn re-evaluates and either emits VALIDATION GREEN
- * (and starts the pass) or RED again (rare — max 2 iterations
- * by daemon contract).
+ *   - free-form answers to the questions
+ *   - `proceed` — run a best-effort pass with defaults
+ *   - `rework`  — stop, rework the roadmap with A001 first
  *
- * The GREEN marker doesn't need special UI — the architect just
- * proceeds inline. We only intercept RED.
+ * GREEN doesn't render here — see ValidationGreenBadge.
  */
-
-import { Show, createSignal } from 'solid-js';
-import { chatStore } from '~/state/chat';
-import { daemonStore } from '~/state/daemon';
-import { log } from '~/lib/log';
 
 export const VALIDATION_RED_MARKER = '═══ VALIDATION RED ═══';
 export const VALIDATION_GREEN_MARKER = '═══ VALIDATION GREEN ═══';
@@ -35,19 +31,18 @@ export function isValidationRed(text: string): boolean {
   return first.trim() === VALIDATION_RED_MARKER;
 }
 
-/** True when the text starts with the GREEN marker. V107.3 — operator
- *  asked for visible feedback that the validation step ran. */
+/** True when the text starts with the GREEN marker. */
 export function isValidationGreen(text: string): boolean {
   if (!text) return false;
   const first = text.trimStart().split('\n', 1)[0] ?? '';
   return first.trim() === VALIDATION_GREEN_MARKER;
 }
 
-/** V107.3 — Heuristic detector for the "architect halted mid-pass
- *  with a question" failure mode. The chain (catalog → stub-flag →
- *  matrix → consult-A001 → defer) makes voluntary halts impossible
- *  in theory. When the model violates anyway, the cockpit shows a
- *  red banner so the operator knows it's a bug, not a normal stop. */
+/** Heuristic detector for the "architect halted mid-pass with a
+ *  question" failure mode. The chain (catalog → stub-flag → matrix →
+ *  consult-A001 → defer) makes voluntary halts impossible in theory.
+ *  When the model violates anyway, the cockpit shows a red banner so
+ *  the operator knows it's a bug, not a normal stop. */
 const HALT_VIOLATION_PATTERNS = [
   /which one\?/i,
   /which path\?/i,
@@ -66,7 +61,6 @@ const HALT_VIOLATION_PATTERNS = [
 ];
 export function isHaltViolation(text: string): boolean {
   if (!text) return false;
-  // If it's a validation block, the halt is legitimate.
   if (isValidationRed(text) || isValidationGreen(text)) return false;
   for (const re of HALT_VIOLATION_PATTERNS) {
     if (re.test(text)) return true;
@@ -75,20 +69,13 @@ export function isHaltViolation(text: string): boolean {
 }
 
 export default function ValidationBlock(props: { conv: string; text: string }) {
-  const [answers, setAnswers] = createSignal('');
-  const [submitting, setSubmitting] = createSignal(false);
-  const [submitError, setSubmitError] = createSignal<string | null>(null);
-
   // Strip the opening + closing fences from the body so we render
-  // just the content. The architect contract: "═══ VALIDATION RED ═══"
-  // on the first line, then a blank line, then lead text + questions,
-  // then a closing "═══" line.
+  // just the architect's content. Contract: "═══ VALIDATION RED ═══"
+  // on the first line, then body, then optional closing "═══" line.
   const body = (): string => {
     const t = props.text.trimStart();
     const lines = t.split('\n');
-    // drop the opening fence
     if (lines[0]?.trim() === VALIDATION_RED_MARKER) lines.shift();
-    // drop the closing fence (last `═══`-only line)
     for (let i = lines.length - 1; i >= 0; i--) {
       const ln = lines[i]?.trim() ?? '';
       if (ln === '═══' || ln.startsWith('═══')) {
@@ -100,83 +87,31 @@ export default function ValidationBlock(props: { conv: string; text: string }) {
     return lines.join('\n').trim();
   };
 
-  const onSubmit = async (): Promise<void> => {
-    const raw = answers().trim();
-    const client = daemonStore.state.client;
-    if (!client) {
-      setSubmitError('No daemon client');
-      return;
-    }
-    setSubmitting(true);
-    setSubmitError(null);
-    const text = raw.length > 0
-      ? `[validation-answers] ${raw}`
-      : '[validation-answers] proceed';
-    log.info('[validation] submitting answers', { conv: props.conv, length: raw.length });
-    try {
-      const res = await chatStore.dispatchMessage(client, {
-        conv: props.conv,
-        text,
-        author: 'operator',
-      });
-      if (!res.ok) {
-        log.warn('[validation] dispatch failed', res.status, res.error);
-        setSubmitError(res.error ?? `HTTP ${res.status}`);
-      }
-    } catch (e) {
-      log.warn('[validation] dispatch threw', e instanceof Error ? e.message : String(e));
-      setSubmitError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const onSkip = (): void => {
-    setAnswers('');
-    void onSubmit();
-  };
-
   return (
     <div class="rounded-lg border border-red-500/40 bg-red-500/5 px-4 py-3 my-1 max-w-[90%]">
       <div class="flex items-center gap-2 mb-2">
         <span aria-hidden="true" class="text-base">🔍</span>
         <h3 class="text-[13px] font-semibold text-red-200 tracking-tight">
-          Roadmap validation — your input is needed before the pass starts
+          Roadmap validation — needs your input before the pass starts
         </h3>
       </div>
-      <p class="text-[11px] text-red-300/80 font-mono mb-3">
-        Answer below — be brief. Skip = use defaults.
-      </p>
-      <pre class="whitespace-pre-wrap text-[13px] text-gray-200 leading-relaxed font-sans mb-3">{body()}</pre>
-      <textarea
-        value={answers()}
-        onInput={(e) => setAnswers(e.currentTarget.value)}
-        rows={4}
-        disabled={submitting()}
-        placeholder="Q1: <your answer>. Q2: <your answer>. ... (or leave empty + Skip to use defaults)"
-        class="w-full bg-gray-900/80 border border-gray-700 rounded-md px-3 py-2 text-[13px] text-gray-100 placeholder-gray-600 font-mono focus:outline-none focus:border-red-500/60 resize-y"
-      />
-      <div class="flex items-center gap-2 mt-2">
-        <button
-          type="button"
-          onClick={() => { void onSubmit(); }}
-          disabled={submitting()}
-          class="px-3 py-1.5 rounded-md text-[11px] font-mono uppercase tracking-wider bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {submitting() ? 'Submitting…' : 'Submit answers'}
-        </button>
-        <button
-          type="button"
-          onClick={onSkip}
-          disabled={submitting()}
-          class="px-3 py-1.5 rounded-md text-[11px] font-mono uppercase tracking-wider bg-gray-700/40 hover:bg-gray-700/60 text-gray-300 border border-gray-700/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Use all defaults — the architect will pick the bracketed [default: X] for every question."
-        >
-          Skip (use defaults)
-        </button>
-        <Show when={submitError()}>
-          <span class="text-[11px] text-red-400 font-mono ml-auto">{submitError()}</span>
-        </Show>
+      <pre class="whitespace-pre-wrap text-[13px] text-gray-200 leading-relaxed font-sans mb-4">{body()}</pre>
+      <div class="border-t border-red-500/20 pt-3 text-[12px] text-red-200/90 leading-relaxed">
+        <p class="mb-1.5"><span aria-hidden="true">↓</span> Answer below in the chat. Three options:</p>
+        <ul class="space-y-1 pl-4 list-none">
+          <li>
+            <span class="font-mono text-emerald-300/90">free-form</span>
+            <span class="text-red-200/70"> — reply with answers to the questions above and I&rsquo;ll re-validate.</span>
+          </li>
+          <li>
+            <span class="font-mono text-emerald-300/90">proceed</span>
+            <span class="text-red-200/70"> — skip the questions, run a best-effort pass with defaults.</span>
+          </li>
+          <li>
+            <span class="font-mono text-emerald-300/90">rework</span>
+            <span class="text-red-200/70"> — stop the pass. The coordinator (A001) and I will improve the roadmap with you first.</span>
+          </li>
+        </ul>
       </div>
     </div>
   );
