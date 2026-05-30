@@ -18,6 +18,8 @@ import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
 import { isProjectEmpty } from '~/state/server';
 import { onboardingBootstrapBrief } from '~/lib/onboarding-brief';
+import { isValidationRed } from '~/components/architect/ValidationBlock';
+import { debugEmit } from '~/lib/debug-transport';
 
 const ACCEPT = 'image/*,.md,.txt,.pdf,.json,.yaml,.yml,.csv,.log';
 const MAX_IMAGES = 6;
@@ -76,6 +78,24 @@ export default function ChatComposer(props: {
       !chatStore.onboardingHasUserMessages()
     ) {
       contextDocs.unshift({ filename: 'meshkore_coordinator_bootstrap.md', content: onboardingBootstrapBrief() });
+    }
+    // V50 — debug-stream marker. If the last assistant message is a
+    // VALIDATION RED block, classify what the operator just submitted
+    // (proceed / rework / free-form) so /debug/tail shows how the
+    // validation gate was answered.
+    const msgsForConv = chatStore.state.convMap[props.conv] ?? [];
+    for (let i = msgsForConv.length - 1; i >= 0; i--) {
+      const m = msgsForConv[i];
+      if (!m || m.kind !== 'assistant') continue;
+      if (isValidationRed(m.text ?? '')) {
+        const lower = text.toLowerCase();
+        const action = lower === 'proceed' ? 'proceed' : lower === 'rework' ? 'rework' : 'free-form';
+        debugEmit('ux.validation', `Validation RED answered: ${action}`, {
+          conv: props.conv,
+          data: { action, chars: text.length },
+        });
+      }
+      break;
     }
     setDraft(''); setImgs([]); setDocs([]); grow();
     const res = await chatStore.dispatchMessage(cli, {

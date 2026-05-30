@@ -9,6 +9,7 @@
 import type { DaemonClient } from '~/lib/daemon-client';
 import { store } from './store';
 import { log } from '~/lib/log';
+import { debugEmit } from '~/lib/debug-transport';
 
 const BACKOFF_MIN = 750;   // ms
 const BACKOFF_MAX = 15000;
@@ -33,10 +34,22 @@ export function stopLive(): void {
   socket = null;
 }
 
+function portFromWsBase(wsBase: string): number | undefined {
+  const m = wsBase.match(/:(\d+)/);
+  return m && m[1] ? Number(m[1]) : undefined;
+}
+
 function open(client: DaemonClient): void {
   if (stopped) return;
   store.setWsState('connecting');
   log.info('ws connecting', { url: `${client.transport.wsBase}/events`, attempt });
+  // V50 — only emit on reconnects (attempt > 0); the very first open
+  // would just spam the stream during normal boot.
+  if (attempt > 0) {
+    debugEmit('transport.reconnect', `WS reconnect attempt ${attempt}`, {
+      data: { port: portFromWsBase(client.transport.wsBase), attempt },
+    });
+  }
 
   socket = client.openEvents(
     (ev) => {

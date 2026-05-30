@@ -17,6 +17,7 @@
 import { Show, createSignal } from 'solid-js';
 import type { ConvMeta } from '~/state/chat';
 import { agentTypeInfo } from '~/lib/agent-types';
+import { debugDropCount } from '~/lib/debug-transport';
 
 interface Props {
   conv: string;
@@ -126,6 +127,19 @@ export default function ChatScopeStrip(props: Props) {
         <span class="flex-1 text-sm font-semibold text-gray-100 truncate">
           {title()}
         </span>
+        {/* V50 — debug-stream overflow badge. Shows when the cockpit's
+            in-memory buffer for `/debug/log` has dropped events
+            (daemon unreachable or rejecting). Clears the moment the
+            buffer fully drains again. Operator-visible signal that the
+            interleaved daemon+cockpit tail is incomplete. */}
+        <Show when={debugDropCount() > 0}>
+          <span
+            class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono text-amber-200 bg-amber-500/10 border border-amber-500/30 flex-shrink-0"
+            title={`Debug stream: ${debugDropCount()} event(s) dropped (buffer overflow). The daemon is unreachable or rejecting — /debug/tail will have gaps until the buffer drains.`}
+          >
+            ⚠ debug-drops {debugDropCount()}
+          </span>
+        </Show>
       </Show>
       <Show when={!editing()}>
         <div class="flex items-center gap-1">

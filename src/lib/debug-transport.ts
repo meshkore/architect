@@ -8,7 +8,8 @@
  *
  *  1. Best-effort. The cockpit must keep working when the daemon is
  *     unreachable. Buffer caps at MAX_BUFFER and drops oldest on
- *     overflow.
+ *     overflow. Drops are surfaced via `debugDropCount()` so the chat
+ *     header can render a badge.
  *  2. Feature-gated. Older daemons don't expose `/debug/log` —
  *     `health.features.includes('debug.stream.v1')` is the gate.
  *     Without it we drop entries silently.
@@ -18,7 +19,11 @@
  *     `localStorage['mc-debug-stream'] = 'on'`.
  *  4. Zero imports of state.client at module-eval time — we read it
  *     lazily on each flush so the boot order stays loose.
+ *  5. V50 — distinguish 4xx (drop the batch, daemon rejected) from
+ *     5xx / network error (re-buffer for next flush, transient). The
+ *     re-buffered entries still respect MAX_BUFFER (drop oldest).
  */
+import { createSignal } from 'solid-js';
 import { setLogSink, type LogSinkEntry } from '~/lib/log';
 import { daemonClient, daemonHealth } from '~/state/daemon';
 
@@ -33,13 +38,43 @@ interface CockpitEvent {
 }
 
 const FLUSH_MS = 1_000;
-const MAX_BUFFER = 200;
+const MAX_BUFFER = 500;       // V50 — bumped from 200 → 500.
 const MAX_PER_FLUSH = 50;
 const FEATURE_FLAG = 'debug.stream.v1';
 
 const buffer: CockpitEvent[] = [];
 let flushTimer: number | null = null;
 let installed = false;
+
+// V50 — drop counter. Increments every time we drop the oldest entry to
+// make room. ChatScopeStrip reads this to render a small badge so the
+// operator knows the debug stream is overflowing. Cleared whenever the
+// buffer fully drains (debug stream caught up).
+const [dropCount, setDropCount] = createSignal(0);
+export const debugDropCount = dropCount;
+
+function pushBounded(ev: CockpitEvent): void {
+  if (buffer.length >= MAX_BUFFER) {
+    buffer.shift();
+    setDropCount((n) => n + 1);
+  }
+  buffer.push(ev);
+}
+
+function unshiftBoundedMany(events: CockpitEvent[]): void {
+  // Re-buffer a failed batch at the front (oldest-first order
+  // preserved). If that puts us over MAX_BUFFER, drop from the front
+  // (still oldest) — same drop-oldest policy as pushBounded.
+  buffer.unshift(...events);
+  while (buffer.length > MAX_BUFFER) {
+    buffer.shift();
+    setDropCount((n) => n + 1);
+  }
+}
+
+function maybeClearDrops(): void {
+  if (buffer.length === 0 && dropCount() > 0) setDropCount(0);
+}
 
 function shouldStream(): boolean {
   // DEV: explicit opt-in only.
@@ -61,12 +96,13 @@ function daemonSupports(): boolean {
 }
 
 async function flushOnce(): Promise<void> {
-  if (buffer.length === 0) return;
+  if (buffer.length === 0) { maybeClearDrops(); return; }
   const client = daemonClient();
   if (!client) return;
   if (!daemonSupports()) {
     // Daemon too old. Drain so we don't accumulate forever.
     buffer.length = 0;
+    maybeClearDrops();
     return;
   }
   const batch = buffer.splice(0, MAX_PER_FLUSH);
@@ -79,14 +115,20 @@ async function flushOnce(): Promise<void> {
       },
       body: JSON.stringify({ events: batch }),
     });
-    if (!r.ok) {
-      // 4xx/5xx: drop the batch to keep the buffer bounded. Logging
-      // the failure here would recurse through the same sink.
+    if (r.ok) {
+      maybeClearDrops();
       return;
     }
+    if (r.status >= 400 && r.status < 500) {
+      // Daemon rejected (auth, bad shape, feature off). Don't retry —
+      // logging the failure here would recurse through the same sink.
+      return;
+    }
+    // 5xx — daemon up but unhappy. Re-buffer for next flush.
+    unshiftBoundedMany(batch);
   } catch {
-    // Network down. Drop the batch (we don't re-buffer to avoid
-    // infinite growth during long outages — this stream is best-effort).
+    // Network down / TLS reset / aborted. Re-buffer for next flush.
+    unshiftBoundedMany(batch);
   }
 }
 
@@ -132,8 +174,7 @@ export function installDebugTransport(): void {
   installed = true;
   setLogSink((entry) => {
     if (!shouldStream()) return;
-    if (buffer.length >= MAX_BUFFER) buffer.shift(); // drop oldest
-    buffer.push(entryToEvent(entry));
+    pushBounded(entryToEvent(entry));
     scheduleFlush();
   });
 }
@@ -152,7 +193,6 @@ export function debugEmit(tag: string, msg: string, extra?: Omit<CockpitEvent, '
     ...(extra?.agent_id ? { agent_id: extra.agent_id } : {}),
     ...(extra?.data ? { data: extra.data } : {}),
   };
-  if (buffer.length >= MAX_BUFFER) buffer.shift();
-  buffer.push(ev);
+  pushBounded(ev);
   scheduleFlush();
 }

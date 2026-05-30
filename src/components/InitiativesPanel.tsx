@@ -66,14 +66,22 @@ export default function InitiativesPanel() {
     const vis = visibility();
     const tbi = tasksByInitiative();
     const exitingSet = exiting();
-    return allInitiatives().filter((it) => {
-      const arch = viewStore.isInitiativeArchived(it.id);
+    // py-1.10.15 — When `vis === 'archived'`, the source of truth for
+    // "this initiative is closed" is now the daemon (`status: done`
+    // + `completed_at` written by the auto-archive reconcile pass —
+    // initiative `roadmap-ordering-archive`, task D-RM-ARCHIVE-02).
+    // We keep `viewStore.isInitiativeArchived` as a back-compat
+    // shadow for operator-driven manual archives.
+    const list = allInitiatives().filter((it) => {
+      const isDone = it.status === 'done';
+      const isArchManual = viewStore.isInitiativeArchived(it.id);
+      const isArchived = isDone || isArchManual;
       const tasks = tbi.get(it.id) ?? [];
       const complete = tasks.length > 0 && tasks.every((t) => t.status === 'done');
       const isBacklog = it.status === 'backlog';
       // V90 — visibility modes:
       //   active:   not archived, not complete, not backlog
-      //   archived: only the manually-archived
+      //   archived: only the manually-archived OR `status: done`
       //   backlog:  only `status === 'backlog'`, not archived
       //   all:      everything (mixed)
       // V106.3 — During the exit animation, keep the card visible
@@ -82,16 +90,32 @@ export default function InitiativesPanel() {
       if (vis === 'active') {
         if (exitingSet.has(it.id)) {
           // Still animating out — leave it visible.
-        } else if (arch || complete || isBacklog) {
+        } else if (isArchived || complete || isBacklog) {
           return false;
         }
       }
-      if (vis === 'archived' && !arch) return false;
-      if (vis === 'backlog' && (arch || !isBacklog)) return false;
+      if (vis === 'archived' && !isArchived) return false;
+      if (vis === 'backlog' && (isArchManual || !isBacklog)) return false;
       if (!q) return true;
       const hay = `${it.title} ${it.id} ${it.oneliner ?? ''}`.toLowerCase();
       return hay.includes(q);
     });
+
+    // py-1.10.15 — Archived view sorts chronologically (newest first)
+    // by `completed_at`. The daemon already orders the active view
+    // via the linked-list walk; archived gets its own dimension.
+    if (vis === 'archived') {
+      return list.slice().sort((a, b) => {
+        const ca = String(a.completed_at ?? '');
+        const cb = String(b.completed_at ?? '');
+        // Missing completed_at → sink to bottom (older manual archives).
+        if (!ca && !cb) return 0;
+        if (!ca) return 1;
+        if (!cb) return -1;
+        return cb.localeCompare(ca);
+      });
+    }
+    return list;
   });
 
   // V106.3 — Auto-archive freshly-completed initiatives. When the
@@ -242,6 +266,15 @@ export default function InitiativesPanel() {
         return;
       }
       log.info('[stop-architect] start', { conv, streaming: architectStreaming() });
+      // V50 — emit lifecycle marker into the debug stream so
+      // `GET /debug/tail` shows the operator's Stop click interleaved
+      // with the daemon's cancel/archive trace.
+      void import('~/lib/debug-transport').then(({ debugEmit }) => {
+        debugEmit('ux.stop-architect', 'Stop Architect clicked', {
+          conv,
+          data: { streaming: architectStreaming() },
+        });
+      });
       // 1. Cancel any in-flight chat turn (no-op if already idle).
       try {
         const res = await client.chatCancel(conv);
@@ -286,6 +319,15 @@ export default function InitiativesPanel() {
       type: 'roadmap-architect',
       title: 'Roadmap Architect',
       model: 'auto',
+    });
+    // py-1.10.17 — Emit a lifecycle marker into the debug stream so
+    // `GET /debug/tail` shows "operator clicked Run All, scope = N"
+    // before the architect's first turn appears.
+    void import('~/lib/debug-transport').then(({ debugEmit }) => {
+      debugEmit('ux.run-all', `Run All clicked (${list.length} initiative(s))`, {
+        conv,
+        data: { scope_size: list.length, initiative_ids: list.map((it) => it.id) },
+      });
     });
     uiStore.setActiveZone('architect');
     // V107.3 — Bootstrap rewritten. The V92 bootstrap said
