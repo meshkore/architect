@@ -181,10 +181,18 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
   const tab = () => viewStore.initiativeTab(props.initiative.id);
   const setTab = (t: 'tasks' | 'activity') => viewStore.setInitiativeTab(props.initiative.id, t);
 
+  // V107.7 — Brighter border when the card is expanded so the
+  // operator can see where the card starts and ends. Archived
+  // initiatives keep their amber accent; expanded gets emerald
+  // accent + a soft inner ring; collapsed stays subtle.
+  const articleCls = (): string => {
+    const base = 'bg-gray-900/40 border rounded-lg overflow-hidden transition-colors';
+    if (isArchived()) return `${base} border-amber-500/25 opacity-70`;
+    if (expanded()) return `${base} border-emerald-500/35 shadow-[inset_0_0_0_1px_rgba(52,211,153,0.10)]`;
+    return `${base} border-gray-700/60 hover:border-gray-600/70`;
+  };
   return (
-    <article class={`bg-gray-900/40 border rounded-lg overflow-hidden ${
-      isArchived() ? 'border-amber-500/25 opacity-70' : 'border-gray-800/70'
-    }`}>
+    <article class={articleCls()}>
       <header class="flex items-center gap-3 px-4 py-3">
         <Show
           when={!isComplete()}
@@ -319,6 +327,19 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
   );
 }
 
+/**
+ * Description — V107.7.
+ *
+ * Renders the initiative's slug + oneliner + body. Collapsed view
+ * shows the oneliner (operator-authored 1-sentence hook) + the first
+ * ~3 lines of body (so the operator gets context without expanding).
+ * "+ show more" reveals the full body; "— show less" at the bottom
+ * collapses it back. Empty body or absent fields render gracefully.
+ *
+ * Polished: clearer hierarchy, subtle left accent bar, larger body
+ * text (13px) with 1.55 line-height for readability, no surrounding
+ * box (the slug chip + accent bar are visual anchors enough).
+ */
 function Description(props: {
   oneliner: string;
   body: string;
@@ -327,41 +348,48 @@ function Description(props: {
   onToggle: () => void;
   slug: string;
 }) {
-  // Pick what shows in the collapsed preview:
-  //   - oneliner if present (one-sentence hook the author wrote)
-  //   - else the first DESCRIPTION_PREVIEW_CHARS of body
-  const preview = (): string => {
-    if (props.oneliner) return props.oneliner;
-    if (props.body.length <= DESCRIPTION_PREVIEW_CHARS) return props.body;
-    return props.body.slice(0, DESCRIPTION_PREVIEW_CHARS).trimEnd() + '…';
+  const PREVIEW_LINES = 3;
+  const bodyLines = (): string[] => props.body.split('\n');
+  const isLong = (): boolean => {
+    if (props.body.length > DESCRIPTION_PREVIEW_CHARS) return true;
+    return bodyLines().length > PREVIEW_LINES;
   };
+  const bodyPreview = (): string => {
+    const truncatedByLines = bodyLines().slice(0, PREVIEW_LINES).join('\n');
+    if (truncatedByLines.length <= DESCRIPTION_PREVIEW_CHARS) return truncatedByLines;
+    return truncatedByLines.slice(0, DESCRIPTION_PREVIEW_CHARS).trimEnd() + '…';
+  };
+  const hasOneliner = (): boolean => props.oneliner.trim().length > 0;
+  const hasBody = (): boolean => props.body.trim().length > 0;
+
   return (
-    <div class="rounded-md bg-gray-900/40 border border-gray-800/50 px-3 py-2.5">
-      <div class="flex items-center gap-2 mb-1.5">
+    <div class="relative pl-3 border-l-2 border-emerald-500/30">
+      <div class="flex items-center gap-2 mb-2">
         <span
-          class="font-mono text-[9px] text-emerald-300/80 bg-emerald-500/10 border border-emerald-500/20 rounded px-1.5 py-0.5 uppercase tracking-wider"
+          class="font-mono text-[9px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded px-1.5 py-0.5 uppercase tracking-wider"
           title="Initiative ID — reference this in chat"
         >
           {props.slug}
         </span>
-        <span class="text-[10px] font-mono uppercase tracking-wider text-gray-600">description</span>
       </div>
-      <Show
-        when={props.expanded && props.body}
-        fallback={
-          <p class="text-[13px] text-gray-300 leading-relaxed whitespace-pre-wrap">{preview()}</p>
-        }
-      >
-        <p class="text-[13px] text-gray-300 leading-relaxed whitespace-pre-wrap">{props.body}</p>
+      <Show when={hasOneliner()}>
+        <p class="text-[13.5px] text-gray-100 font-medium leading-snug mb-2">
+          {props.oneliner}
+        </p>
       </Show>
-      <Show when={props.toggleable}>
-        <button
-          type="button"
-          onClick={props.onToggle}
-          class="mt-1.5 text-[10px] font-mono uppercase tracking-wider text-emerald-300/70 hover:text-emerald-300 transition-colors"
-        >
-          {props.expanded ? '— less' : '+ more'}
-        </button>
+      <Show when={hasBody()}>
+        <p class="text-[12.5px] text-gray-400 leading-[1.55] whitespace-pre-wrap break-words">
+          {props.expanded ? props.body : bodyPreview()}
+        </p>
+        <Show when={isLong()}>
+          <button
+            type="button"
+            onClick={props.onToggle}
+            class="mt-2 text-[10px] font-mono uppercase tracking-wider text-emerald-300/70 hover:text-emerald-300 transition-colors"
+          >
+            {props.expanded ? '— show less' : '+ show more'}
+          </button>
+        </Show>
       </Show>
     </div>
   );

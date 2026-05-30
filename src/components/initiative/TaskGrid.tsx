@@ -1,53 +1,30 @@
-import { For, Show } from 'solid-js';
+import { For } from 'solid-js';
 import type { ServerTask } from '~/state/server';
 import TaskCard from '~/components/TaskCard';
-import { viewStore } from '~/state/view';
 
+/**
+ * TaskGrid — V107.7.
+ *
+ * Vertical list, one task per line. Replaces the V86h responsive
+ * grid (1 / 2 / 3 cols depending on viewport) which forced operators
+ * to read titles truncated mid-sentence on narrow columns. With a
+ * single column the full title always fits and descriptions expand
+ * naturally below.
+ *
+ * Divider lines between tasks read as visual structure without the
+ * boxes that wrapped each task in V86h.
+ */
 export function TaskGrid(props: { tasks: ServerTask[] }) {
   return (
-    <ul class="grid gap-x-6 gap-y-3 grid-cols-1 min-[720px]:grid-cols-2 min-[1280px]:grid-cols-3">
+    <ul class="flex flex-col divide-y divide-gray-800/40">
       <For each={props.tasks}>
-        {(t, i) => {
-          // V86h — the reading-order arrow only makes sense between
-          // collapsed siblings in the grid. When a task expands to
-          // span the full row it visually breaks the left-to-right
-          // reading chain anyway, so hide the arrow for that row.
-          // We also lift `col-span-full` onto the <li> (grid item)
-          // — putting it on TaskCard didn't take because the <li> is
-          // what the grid lays out.
-          const expanded = () => viewStore.isTaskExpanded(t.id);
-          return (
-            <li
-              class="relative"
-              classList={{ 'min-[720px]:col-span-full': expanded() }}
-            >
-              <TaskCard task={t} />
-              <Show when={i() < props.tasks.length - 1 && !expanded()}>
-                <ReadingOrderArrow />
-              </Show>
-            </li>
-          );
-        }}
+        {(t) => (
+          <li class="min-w-0">
+            <TaskCard task={t} />
+          </li>
+        )}
       </For>
     </ul>
-  );
-}
-
-function ReadingOrderArrow() {
-  return (
-    <span
-      aria-hidden="true"
-      class="
-        pointer-events-none absolute text-gray-700 text-xs select-none
-        right-[-18px] top-1/2 -translate-y-1/2
-        max-[719px]:left-1/2 max-[719px]:-translate-x-1/2 max-[719px]:right-auto
-        max-[719px]:top-auto max-[719px]:bottom-[-14px] max-[719px]:translate-y-0
-        max-[719px]:rotate-90
-        border-dashed
-      "
-    >
-      →
-    </span>
   );
 }
 

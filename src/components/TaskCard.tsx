@@ -1,98 +1,105 @@
 /**
- * TaskCard — V86h.
+ * TaskCard — V107.7.
  *
- * Click the card to expand it inline: title + status stay on top, the
- * task body opens below in a readable column. Click again to collapse.
- * Expansion state is persisted per-task in viewStore (survives reload
- * and project hot-swap, scoped to the active cluster's local storage).
+ * Borderless inline row. No boxed card, no status dot — the status
+ * lives on the code chip ("DEMO3") which carries the colour. Title
+ * to the right of the chip; description below (preview of the first
+ * ~3 lines, with "+ more" / "— less" to toggle the full body).
  *
- * When expanded, the card uses `grid-column: 1 / -1` to span the full
- * row width of the TaskGrid — neighbours stay at their compact height,
- * the expanded card grows downward. Lets the operator read an entire
- * initiative without leaving the Roadmap tab.
+ * Status colour on the chip:
+ *   - done                 → solid emerald
+ *   - active / in_progress → amber, pulsing (real-time signal that
+ *                             work is happening RIGHT NOW)
+ *   - next                 → amber dim
+ *   - blocked              → red
+ *   - pending-operator     → orange
+ *   - default (planned)    → slate gray
+ *
+ * V107.7 replaces the V86h click-to-expand boxed card. Operator wanted
+ * one task per line, no surrounding rectangle, code-chip-as-status
+ * indicator, and the description naturally below the title.
  */
 
-import { Show } from 'solid-js';
+import { Show, createMemo, createSignal } from 'solid-js';
 import type { ServerTask } from '~/state/server';
-import { viewStore } from '~/state/view';
 
-const MAX_TITLE = 60;
+const PREVIEW_LINES = 3;
+const PREVIEW_CHARS = 220;
 
-function truncate(s: string, n: number): string {
-  if (s.length <= n) return s;
-  return s.slice(0, n - 1).trimEnd() + '…';
-}
-
-function dotClass(status: string): string {
+function codeChipClass(status: string): string {
   switch (status) {
-    case 'active': return 'bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.7)]';
-    case 'next': return 'bg-amber-400';
-    case 'done': return 'bg-emerald-500';
-    case 'blocked': return 'bg-red-500';
-    default: return 'bg-gray-600';
+    case 'done':
+      return 'bg-emerald-500/25 text-emerald-100 border-emerald-500/50';
+    case 'active':
+    case 'in_progress':
+      return 'bg-amber-500/30 text-amber-100 border-amber-400/70 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.35)]';
+    case 'next':
+      return 'bg-amber-500/12 text-amber-300 border-amber-500/35';
+    case 'blocked':
+      return 'bg-red-500/20 text-red-200 border-red-500/55';
+    case 'pending-operator':
+    case 'pending_operator':
+      return 'bg-orange-500/20 text-orange-300 border-orange-500/55';
+    case 'cancelled':
+      return 'bg-gray-800/60 text-gray-500 border-gray-700/60 line-through decoration-gray-600';
+    default:
+      return 'bg-gray-800/60 text-gray-400 border-gray-700/70';
   }
 }
 
 export default function TaskCard(props: { task: ServerTask }) {
-  const expanded = () => viewStore.isTaskExpanded(props.task.id);
-  const toggle = (e: MouseEvent): void => {
-    // Don't trigger expand when clicking the inline links the body
-    // markup might render (a normal anchor inside the body). Cheap
-    // check: anchor or button inside the card.
-    const t = e.target as HTMLElement | null;
-    if (t && t.closest('a, button')) return;
-    viewStore.toggleTask(props.task.id);
-  };
-  const hasBody = (): boolean => {
-    const b = props.task.body;
-    return typeof b === 'string' && b.trim().length > 0;
-  };
+  const [expanded, setExpanded] = createSignal(false);
+  const body = createMemo((): string => (props.task.body ?? '').trim());
+  const hasBody = (): boolean => body().length > 0;
+  const isLong = createMemo((): boolean => {
+    const b = body();
+    if (b.length > PREVIEW_CHARS) return true;
+    const lines = (b.match(/\n/g) ?? []).length + 1;
+    return lines > PREVIEW_LINES;
+  });
+  const preview = createMemo((): string => {
+    const b = body();
+    if (!isLong()) return b;
+    const byLines = b.split('\n').slice(0, PREVIEW_LINES).join('\n');
+    if (byLines.length <= PREVIEW_CHARS) return byLines;
+    return byLines.slice(0, PREVIEW_CHARS - 1).trimEnd() + '…';
+  });
 
   return (
     <div
       data-task-id={props.task.id}
       data-status={props.task.status}
-      data-expanded={expanded() ? 'true' : 'false'}
-      onClick={toggle}
-      class={
-        'task-card flex flex-col gap-2 rounded-md bg-gray-900/60 border border-gray-800/70 ' +
-        'hover:border-gray-700 cursor-pointer transition-colors min-w-0 ' +
-        (expanded() ? 'px-4 py-3 border-emerald-600/40 bg-gray-900/80' : 'px-3 py-2')
-      }
+      class="py-2.5 min-w-0"
     >
-      <div class="flex items-center gap-2.5 min-w-0">
+      <div class="flex items-baseline gap-3 min-w-0">
         <span
-          aria-label={props.task.status}
+          aria-label={`status ${props.task.status}`}
           title={props.task.status}
-          class={`w-2 h-2 rounded-full flex-shrink-0 ${dotClass(props.task.status)} ${
-            props.task.status === 'done' ? '' : 'ring-1 ring-inset ring-black/30'
-          }`}
-        />
-        <span class="font-mono text-[10px] text-emerald-300/90 flex-shrink-0">{props.task.id}</span>
-        <span
-          class={`text-xs text-gray-200 min-w-0 ${expanded() ? '' : 'truncate'}`}
-          title={props.task.title}
+          class={`flex-shrink-0 inline-block min-w-[3.5rem] text-center font-mono text-[10px] uppercase tracking-wider px-1.5 py-1 rounded border leading-none ${codeChipClass(props.task.status)}`}
         >
-          {expanded() ? props.task.title : truncate(props.task.title, MAX_TITLE)}
+          {props.task.id}
         </span>
+        <h4 class="text-[13px] font-medium text-gray-100 leading-snug break-words min-w-0">
+          {props.task.title}
+        </h4>
         <Show when={props.task.priority === 'high'}>
-          <span class="ml-auto font-mono text-[9px] text-amber-400/80 flex-shrink-0 uppercase">!</span>
+          <span class="ml-auto font-mono text-[9px] text-amber-400/80 flex-shrink-0 uppercase" title="High priority">!</span>
         </Show>
       </div>
 
-      <Show when={expanded()}>
-        <div class="pt-2 border-t border-gray-800/60">
-          <Show
-            when={hasBody()}
-            fallback={
-              <p class="text-[11px] italic text-gray-600">
-                No description yet — open the task in the Tasks tab to add one.
-              </p>
-            }
-          >
-            <p class="text-[12px] text-gray-300 leading-relaxed whitespace-pre-wrap">
-              {String(props.task.body ?? '').trim()}
-            </p>
+      <Show when={hasBody()}>
+        <div class="mt-2 pl-[4.25rem] pr-1">
+          <p class="text-[12px] text-gray-400 leading-relaxed whitespace-pre-wrap break-words">
+            {expanded() || !isLong() ? body() : preview()}
+          </p>
+          <Show when={isLong()}>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setExpanded(!expanded()); }}
+              class="mt-1 text-[10px] font-mono uppercase tracking-wider text-emerald-300/70 hover:text-emerald-300 transition-colors"
+            >
+              {expanded() ? '— less' : '+ more'}
+            </button>
           </Show>
         </div>
       </Show>
