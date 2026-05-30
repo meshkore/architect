@@ -102,6 +102,15 @@ export default function InitiativesPanel() {
   // operator is on the `active` filter — on `all`/`archived` the
   // card stays put.
   const pendingTimers = new Map<string, number>();
+  /** Re-check completion at timer fire-time — guards against the
+   *  brief race where an operator (or a sub-agent) flips a task
+   *  status back during the 30ms scheduling delay. */
+  const isStillCompleteAndUnarchived = (id: string): boolean => {
+    if (viewStore.isInitiativeArchived(id)) return false;
+    const tasks = tasksByInitiative().get(id) ?? [];
+    if (tasks.length === 0) return false;
+    return tasks.every((t) => t.status === 'done');
+  };
   createEffect(() => {
     const tbi = tasksByInitiative();
     const exitingSet = exiting();
@@ -117,9 +126,18 @@ export default function InitiativesPanel() {
       // already laid out with full height before max-height -> 0.
       const id = it.id;
       const t = window.setTimeout(() => {
+        // Race guard: a task could have flipped back to in-progress
+        // (operator edit, sub-agent rollback) during the 30ms delay.
+        if (!isStillCompleteAndUnarchived(id)) {
+          pendingTimers.delete(id);
+          return;
+        }
         setExiting((s) => { const n = new Set(s); n.add(id); return n; });
         const t2 = window.setTimeout(() => {
-          viewStore.setInitiativeArchived(id, true);
+          // Last guard before we flip the archived bit — same reason.
+          if (isStillCompleteAndUnarchived(id)) {
+            viewStore.setInitiativeArchived(id, true);
+          }
           setExiting((s) => { const n = new Set(s); n.delete(id); return n; });
           pendingTimers.delete(id);
         }, EXIT_ANIM_MS);

@@ -22,7 +22,7 @@
  *
  * Backwards compatibility: the `storyStore` export keeps a singleton
  * "current run" selector (`state.run`) so existing components
- * (StoryProgressPill, StoryBanner, AgentsPanel) don't need a sweeping
+ * (StoryProgressPill, AgentsPanel) don't need a sweeping
  * refactor. Multi-run native UI lands in the agent-run-coordinator
  * initiative's later phases.
  */

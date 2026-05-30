@@ -180,7 +180,15 @@ export function collectStoryTaskIds(initiativeId: string): string[] {
   const tasks = allTasks().filter((t) => t.initiative === initiativeId);
   const bucket = { active: [] as string[], next: [] as string[], planned: [] as string[] };
   for (const t of tasks) {
+    // V106.4 — pending-operator tasks are intentionally NOT dispatched.
+    // The architect (py-1.10.7) marks them when code-side prep is done
+    // and only an operator action remains (fund wallet, paste creds,
+    // run wrangler deploy). Re-dispatching them would just produce the
+    // same blocked turn. The operator clears them by doing the action
+    // and flipping the status manually (or the next pass picks them up
+    // once the missing piece lands).
     if (t.status === 'done' || t.status === 'cancelled') continue;
+    if (t.status === 'pending-operator' || t.status === 'pending_operator') continue;
     if (t.status === 'active' || t.status === 'in_progress') bucket.active.push(t.id);
     else if (t.status === 'next') bucket.next.push(t.id);
     else bucket.planned.push(t.id);

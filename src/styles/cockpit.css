@@ -2494,53 +2494,6 @@
       padding-top: 12px;
       border-top: 1px dashed rgba(75,85,99,0.35);
     }
-    /* Story-run banner — pinned strip above #chat-msgs while a story is
-       running for the active conv. Unifies the cockpit's loaders: when
-       this banner is mounted, the chat live-loader + agent-status pin
-       are already on (driven by the underlying chat turn). Pressing
-       Stop POSTs /chat/cancel which tears the runner down → all other
-       loaders idle by themselves. No orphan state. */
-    #story-banner {
-      display: none;
-      align-items: center;
-      gap: 10px;
-      padding: 7px 12px;
-      border-bottom: 1px solid rgba(251,191,36,0.25);
-      background: linear-gradient(180deg, rgba(251,191,36,0.08) 0%, rgba(251,191,36,0.02) 100%);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      color: #fbbf24;
-      flex-shrink: 0;
-    }
-    #story-banner.is-active { display: flex; }
-    #story-banner.is-paused { background: linear-gradient(180deg, rgba(75,85,99,0.18) 0%, rgba(75,85,99,0.05) 100%); border-color: rgba(75,85,99,0.4); color: #9ca3af; }
-    .story-banner-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: #fbbf24;
-      box-shadow: 0 0 8px rgba(251,191,36,0.6);
-      animation: pulse-slow 1.4s ease-in-out infinite;
-      flex-shrink: 0;
-    }
-    #story-banner.is-paused .story-banner-dot { animation: none; background: #6b7280; box-shadow: none; }
-    .story-banner-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f3f4f6; }
-    .story-banner-counter { color: #fbbf24; flex-shrink: 0; }
-    #story-banner.is-paused .story-banner-counter { color: #9ca3af; }
-    .story-banner-action {
-      border: 1px solid rgba(75,85,99,0.5);
-      background: rgba(11,18,32,0.6);
-      color: #d1d5db;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
-      padding: 3px 9px;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: color 120ms, border-color 120ms, background 120ms;
-      flex-shrink: 0;
-    }
-    .story-banner-action:hover { color: #f3f4f6; border-color: rgba(75,85,99,0.8); background: rgba(31,41,55,0.6); }
-    .story-banner-action.is-stop { color: #f87171; border-color: rgba(248,113,113,0.35); }
-    .story-banner-action.is-stop:hover { color: #fca5a5; border-color: rgba(248,113,113,0.6); background: rgba(127,29,29,0.18); }
-
     /* Sub-timeline: child tasks ordered by `order` field. Same `order`
        value renders as parallel chips on a single horizontal tier. */
     .sub-tl { position: relative; padding: 4px 0 4px 22px; margin-top: 8px; }

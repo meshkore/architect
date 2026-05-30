@@ -58,12 +58,27 @@ export function StatusBadge(props: { status: string }) {
       case 'next': return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
       case 'blocked': return 'bg-red-500/15 text-red-300 border-red-500/30';
       case 'done': return 'bg-emerald-500/30 text-emerald-200 border-emerald-500/40';
+      // V106.4 — daemon py-1.10.7 introduces `pending-operator` for
+      // tasks the architect prepared code-side but that need an
+      // operator hands-on-keyboard action (paste creds, fund wallet,
+      // run wrangler deploy). Visually amber-orange — distinct from
+      // `blocked` (red) which means "something broke", and from
+      // `next` (plain amber) which means "queued for an agent".
+      case 'pending-operator':
+      case 'pending_operator':
+        return 'bg-orange-500/15 text-orange-300 border-orange-500/40';
       default: return 'bg-gray-800/60 text-gray-400 border-gray-700';
     }
   };
+  const label = () => {
+    if (props.status === 'pending-operator' || props.status === 'pending_operator') {
+      return 'pending op';
+    }
+    return props.status;
+  };
   return (
     <span class={`px-2 py-0.5 rounded-md border text-[10px] font-mono uppercase tracking-wider flex-shrink-0 ${cls()}`}>
-      {props.status}
+      {label()}
     </span>
   );
 }

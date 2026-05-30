@@ -90,7 +90,7 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
   // play buttons must be disabled. The architect drives the roadmap as
   // a whole; letting the operator also spawn a per-initiative agent
   // would race two coordinators on the same task graph.
-  const architectLive = () => chatStore.findActiveArchitectConv() != null;
+  const architectLive = () => chatStore.findActiveArchitectConv() !== null;
 
   const startRun = async (): Promise<void> => {
     const taskIds = collectStoryTaskIds(props.initiative.id);
