@@ -323,7 +323,7 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
   const agentName = () => {
     const title = meta()?.title?.trim();
     if (title) return title;
-    if (isOnboarding()) return 'coordinator';
+    if (isOnboarding()) return 'Architect Agent';
     const aid = agentId();
     if (aid) return aid;
     const author = props.msg.author?.trim();
@@ -621,7 +621,7 @@ export function PreparingBubble(_props: { dispatchedAt: number }) {
   const primary = () => {
     const title = meta()?.title?.trim();
     if (title) return title;
-    if (isOnboarding()) return 'coordinator';
+    if (isOnboarding()) return 'Architect Agent';
     const aid = meta()?.agentId;
     return aid || 'agent';
   };

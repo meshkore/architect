@@ -15,7 +15,7 @@
  */
 
 import { Show, createSignal } from 'solid-js';
-import type { ConvMeta } from '~/state/chat';
+import { ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
 import { agentTypeInfo } from '~/lib/agent-types';
 import { debugDropCount } from '~/lib/debug-transport';
 
@@ -183,18 +183,26 @@ export default function ChatScopeStrip(props: Props) {
               </svg>
             </button>
           </Show>
-          {/* Archive — two-step confirm. */}
-          <button type="button" onClick={armArchive}
-            class={confirmArchive()
-              ? 'inline-flex items-center justify-center w-7 h-7 rounded-md border border-red-500/50 text-red-300 bg-red-500/10'
-              : 'inline-flex items-center justify-center w-7 h-7 rounded-md border border-gray-800 text-gray-500 hover:text-red-300 hover:border-red-500/40 transition-colors'}
-            title={confirmArchive() ? 'Click again to confirm archive' : 'Archive conversation'}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="4" width="18" height="4" rx="1" />
-              <path d="M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8" />
-              <path d="M10 12h4" />
-            </svg>
-          </button>
+          {/* Archive — single-click (V107.9). Hidden entirely on the
+              Architect Agent (onboarding conv) per V107.12: the master
+              that owns the project must never be archivable. The
+              hardcoded guard chain is defense-in-depth:
+                1. button hidden here so the operator can't trigger it.
+                2. chatStore.archiveConv() returns early for ONBOARDING.
+                3. ChatPanel.archive() guards before calling /chat/archive. */}
+          <Show when={props.conv !== ONBOARDING_CONV_ID}>
+            <button type="button" onClick={armArchive}
+              class={confirmArchive()
+                ? 'inline-flex items-center justify-center w-7 h-7 rounded-md border border-red-500/50 text-red-300 bg-red-500/10'
+                : 'inline-flex items-center justify-center w-7 h-7 rounded-md border border-gray-800 text-gray-500 hover:text-red-300 hover:border-red-500/40 transition-colors'}
+              title={confirmArchive() ? 'Click again to confirm archive' : 'Archive conversation'}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="4" rx="1" />
+                <path d="M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8" />
+                <path d="M10 12h4" />
+              </svg>
+            </button>
+          </Show>
         </div>
       </Show>
     </div>

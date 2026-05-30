@@ -270,7 +270,7 @@ function AgentRowItem(props: { row: AgentRow; onOpen: () => void; onArchive: () 
           {r().meta.agentId}
         </span>
         <span class="text-[12px] text-gray-100 font-medium truncate" title={r().meta.title || r().conv}>
-          {r().meta.title || (r().isOnboarding ? 'Coordinator' : r().conv)}
+          {r().meta.title || (r().isOnboarding ? 'Architect Agent' : r().conv)}
         </span>
         <span class="font-mono text-[9px] text-gray-500 bg-gray-800/60 border border-gray-700/60 rounded px-1.5 py-0.5 uppercase tracking-wider">
           {typeBadge(r().meta.type)}

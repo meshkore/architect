@@ -125,6 +125,47 @@ function metaKey(): string {
   return CONV_META_KEY_PREFIX + (activeClusterId() ?? 'unknown');
 }
 
+// ── archivedConvs persistence (V107.12) ──────────────────────────────
+//
+// Before V107.12, archivedConvs lived only in memory. On a hard refresh
+// the cockpit re-rendered the rail from convMap BEFORE the async
+// `chatArchives()` fetch resolved → archived convs flashed visible for
+// ~100-300 ms and then snapped out as the filter caught up. The
+// operator saw the whole archived fleet "appear and vanish" on every
+// reload. Now we persist the set per-cluster to localStorage so the
+// filter is correct from frame 1; the daemon fetch is still authoritative
+// (it can prune entries that were unarchived from another tab / CLI).
+const ARCHIVED_CONVS_KEY_PREFIX = 'mc-archived-convs-v1::';
+function archivedKey(): string {
+  return ARCHIVED_CONVS_KEY_PREFIX + (activeClusterId() ?? 'unknown');
+}
+function loadArchivedConvs(): void {
+  try {
+    const raw = localStorage.getItem(archivedKey());
+    if (!raw) {
+      setState('archivedConvs', {});
+      return;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const out: Record<string, true> = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (v === true && k && k !== ONBOARDING_CONV_ID) out[k] = true;
+      }
+      setState('archivedConvs', out);
+    }
+  } catch (e) {
+    log.warn('archivedConvs load failed', e instanceof Error ? e.message : String(e));
+  }
+}
+function saveArchivedConvs(): void {
+  try {
+    localStorage.setItem(archivedKey(), JSON.stringify(state.archivedConvs));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 /**
  * V107.8 — Infer agent_type from the conv slug pattern.
  *
@@ -166,14 +207,24 @@ function loadConvMeta(): void {
       let migrated = 0;
       for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
         if (!isConvMeta(v)) continue;
+        let healed = { ...v };
+        let touched = false;
         // V107.8 — heal stale slug/type mismatches on load.
         const slugImplied = agentTypeFromSlug(k);
-        if (slugImplied && v.type !== slugImplied) {
-          out[k] = { ...v, type: slugImplied };
-          migrated += 1;
-        } else {
-          out[k] = v;
+        if (slugImplied && healed.type !== slugImplied) {
+          healed = { ...healed, type: slugImplied };
+          touched = true;
         }
+        // V107.12 — rename the onboarding master from the legacy
+        // 'Coordinator' label to 'Architect Agent'. Only flips the
+        // default — if the operator renamed it themselves, their
+        // custom title is preserved.
+        if (k === ONBOARDING_CONV_ID && healed.title === 'Coordinator') {
+          healed = { ...healed, title: 'Architect Agent' };
+          touched = true;
+        }
+        if (touched) migrated += 1;
+        out[k] = healed;
       }
       setState('convMeta', out);
       if (migrated > 0) {
@@ -303,6 +354,11 @@ function bindCluster(clusterId: string | null): void {
     convTitleOverrides: {},
   });
   loadConvMeta();
+  // V107.12 — Load archived set BEFORE first render so the rail filter
+  // is correct from frame 1. The daemon's chatArchives() fetch in App.tsx
+  // still runs and is authoritative (can prune entries that were
+  // unarchived from another tab).
+  loadArchivedConvs();
 }
 
 /** MP5 — bump a cluster's activity counters from event-bus dispatch. */
@@ -507,7 +563,13 @@ function seedOnboardingConv(): void {
   // dispatch (see ChatComposer + onboardingBootstrapBrief).
   setState('convMap', ONBOARDING_CONV_ID, []);
   ensureConvMeta(ONBOARDING_CONV_ID, {
-    title: 'Coordinator',
+    // V107.12 — Renamed from 'Coordinator' to 'Architect Agent' per
+    // operator request 2026-05-30: the new label is distinctive from
+    // the transient roadmap-architect (which is spawned per Run All
+    // pass) and reinforces that THIS is the always-on master that
+    // owns the project. The conv id (_onboarding_v1) is unchanged
+    // — only the operator-visible name changes.
+    title: 'Architect Agent',
     type: 'custom',
     location: { type: 'local', host: 'this machine' },
   });
@@ -598,6 +660,7 @@ function archiveConv(conv: string): void {
   // operator without a default chat.
   if (conv === ONBOARDING_CONV_ID) return;
   setState('archivedConvs', conv, true);
+  saveArchivedConvs();
 }
 
 function unarchiveConv(conv: string): void {
@@ -605,6 +668,7 @@ function unarchiveConv(conv: string): void {
     const { [conv]: _drop, ...rest } = xs;
     return rest;
   });
+  saveArchivedConvs();
 }
 
 /**
@@ -655,6 +719,7 @@ function hydrateArchives(list: Array<{ conv?: string }>): void {
     if (typeof c === 'string' && c && c !== ONBOARDING_CONV_ID) out[c] = true;
   }
   setState('archivedConvs', out);
+  saveArchivedConvs();
 }
 
 function setAgentStatus(agentId: string, status: AgentStatus): void {
@@ -812,6 +877,7 @@ function ingestEvent(ev: DaemonEvent): void {
   if (ev.type === 'chat.archived') {
     if (conv && conv !== ONBOARDING_CONV_ID) {
       setState('archivedConvs', conv, true);
+      saveArchivedConvs();
     }
   } else if (ev.type === 'chat.unarchived') {
     if (conv) {
@@ -819,6 +885,7 @@ function ingestEvent(ev: DaemonEvent): void {
         const { [conv]: _drop, ...rest } = xs;
         return rest;
       });
+      saveArchivedConvs();
     }
   }
 }
