@@ -83,6 +83,14 @@ export const rows = createMemo<RailRowData[]>(() => {
     const activity = chatStore.state.clusterActivity[rowKey];
     const working = !!(activity && activity.workingConvs.length > 0);
     const hasUnread = !!(activity && !isSelected && activity.lastEventAt > activity.lastReadAt);
+    // V107.4 — `architectActive` reflects "Run All in progress on this
+    // cluster" — a non-archived roadmap-architect conv exists, even
+    // between turns. Drives a soft pulse on the working bar so the
+    // operator can see "I'm running" from the rail without opening
+    // the chat. Only computable for the active cluster (chatStore
+    // exposes the active slice's convMeta); inactive clusters always
+    // read false here. Reuses `isActiveBinding` from above.
+    const architectActive = !!(isActiveBinding && chatStore.findActiveArchitectConv());
     result.push({
       key: rowKey,
       port, base: liveProbe?.base ?? k.base,
@@ -92,6 +100,7 @@ export const rows = createMemo<RailRowData[]>(() => {
       live: isLive,
       working,
       hasUnread,
+      architectActive,
       isNew: newIds.has(rowKey),
     });
   }

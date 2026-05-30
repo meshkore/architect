@@ -45,6 +45,11 @@ export type RailRowData = {
    *  operator last viewed it. Drives the small amber dot on the row. */
   hasUnread?: boolean;
   pendingReview?: boolean;
+  /** V107.4 — true when a non-archived roadmap-architect conv exists on
+   *  this cluster. Drives a soft emerald pulse on the working bar so
+   *  the operator can see "Run All in progress" from the rail between
+   *  turns, not just while streaming (which is what `working` covers). */
+  architectActive?: boolean;
 };
 
 // Row mode + draft now live in `railUiStore` (state/rail-ui.ts) so the
@@ -222,6 +227,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
     const cls = ['proj-row'];
     if (isActive()) cls.push('active');
     if (r().working) cls.push('is-working');
+    if (r().architectActive) cls.push('is-architect-active');
     if (r().pendingReview) cls.push('is-pending-review');
     return cls.join(' ');
   };

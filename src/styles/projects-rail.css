@@ -108,20 +108,20 @@ body.col-reordering .projects-rail-resize {
 .proj-row-wrap::before {
   /* Vertical accent bar — full height of the card. Wrap-level so it
      spans across the name row AND the action row when active.
-     V86b — tri-state semantics:
-       · live (default)        → blue (project reachable, ready to pick)
+     V107.4 — tri-state semantics, brightened so connected reads as
+     clearly different from stopped at a glance:
+       · live (default)        → blue 0.75 (project reachable + WS connected)
        · stopped (.is-stopped) → muted gray (no daemon answering)
-       · active (.active)      → green (operator's current pick)
-     Active wins because its rule comes later in source order. */
+       · active (.active)      → green (operator's current pick) */
   content: '';
   position: absolute;
   left: 0; top: 4px; bottom: 4px;
   width: 2px;
-  background: rgba(96, 165, 250, 0.55);
+  background: rgba(96, 165, 250, 0.75);
   transition: width 140ms, background 140ms, top 140ms, bottom 140ms;
   pointer-events: none;
 }
-.proj-row-wrap:hover::before { background: rgba(96, 165, 250, 0.85); }
+.proj-row-wrap:hover::before { background: rgba(96, 165, 250, 1); }
 .proj-row-wrap.is-stopped::before { background: rgba(148, 163, 184, 0.40); }
 .proj-row-wrap.is-stopped:hover::before { background: rgba(148, 163, 184, 0.70); }
 /* Active card — wrap owns the bg and the green full-height bar. */
@@ -186,6 +186,28 @@ body.col-reordering .projects-rail-resize {
   50%      { top: calc(100% - 5px); }
 }
 
+/* V107.4 — "Roadmap Architect active on this cluster" indicator.
+   Different from is-working (which fires on every assistant delta).
+   is-architect-active stays on for as long as a non-archived
+   roadmap-architect conv exists, even between turns, so the operator
+   can SEE "Run All in progress" from the rail without watching the
+   chat. Visual: a soft emerald pulse on the bar. When the architect
+   IS streaming, is-working also lights up and its full bounce takes
+   precedence (more source-order specific). */
+.proj-row.is-architect-active:not(.is-working) .proj-working-bar {
+  border-left: none;
+  background: rgba(52, 211, 153, 0.12);
+  border-radius: 1px;
+  animation: proj-bar-arch-pulse 2.2s ease-in-out infinite;
+}
+.proj-row.is-architect-active.active:not(.is-working) .proj-working-bar {
+  background: rgba(52, 211, 153, 0.22);
+}
+@keyframes proj-bar-arch-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
 /* ── Stopped row ─────────────────────────────────────────────────── */
 .proj-row-wrap.is-stopped .proj-row {
   background: transparent;
@@ -220,8 +242,12 @@ body.col-reordering .projects-rail-resize {
   letter-spacing: 0.02em;
 }
 .projects-rail[data-mode="short"] .proj-row {
-  padding: 8px 4px;
-  gap: 0;
+  /* V107.4 — give the working bar 4 px breathing room from the
+     initials. Previous gap:0 made the dashed bar visually sit on
+     top of the letters. The extra 4 px is paid by tightening the
+     right padding to 2 px, so the column width is unchanged. */
+  padding: 8px 2px 8px 4px;
+  gap: 4px;
   justify-content: center;
   min-height: 36px;
 }
