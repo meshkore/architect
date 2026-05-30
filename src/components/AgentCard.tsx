@@ -137,23 +137,32 @@ export default function AgentCard(props: AgentCardProps) {
           pendingReview={props.pendingReview}
         />
       }>
-        {/* V107.10 — 2-row layout. Operator request 2026-05-30: drop
-            the dedicated 3rd row that just said "idle" or "••• working".
-            Now status moves into row 1 as a tiny pulsing-dots indicator
-            (working only — idle = no dots, the card's gray border already
-            signals it). Saves ~18 px per card → ~180 px vertical for a
-            10-agent rail, so the operator fits the whole fleet on one
-            screen without scrolling. */}
-        <span class="flex items-center gap-1.5 text-[10px] font-mono">
+        {/* V107.11 — Operator-driven rewrite. Title was visually
+            misaligned with the chip row because the chips had inner
+            padding and the title didn't. Now the layout puts the
+            primary info (id + title) on row 1 with the working-status
+            pegged right, and the secondary metadata (type + location)
+            on row 2. Type label shortened (shortLabel: 'Coder', 'DB',
+            'Tests', 'Architect') so it fits with the location pill. */}
+        <span class="flex items-baseline gap-2 min-w-0">
           <span
-            class={`px-1.5 py-0.5 rounded text-gray-200 flex-shrink-0 ${props.status === 'working' ? 'animate-pulse-soft' : ''}`}
+            class={`flex-shrink-0 self-center px-1.5 py-0.5 rounded text-[10px] font-mono text-gray-200 ${props.status === 'working' ? 'animate-pulse-soft' : ''}`}
             style={{ background: 'rgba(17,24,39,0.7)', border: `1px solid ${props.stripe}55` }}
           >
             {props.meta.agentId}
           </span>
-          <Show when={props.status === 'working'}>
+          <span class={`flex-1 min-w-0 text-[12px] leading-tight truncate ${props.active ? 'text-gray-100' : 'text-gray-300'}`}>
+            {title()}
+            <Show when={props.meta.model && props.meta.model !== 'auto'}>
+              <span class="text-gray-600 font-mono text-[10px]"> · {props.meta.model}</span>
+            </Show>
+          </span>
+          <Show
+            when={props.status === 'working'}
+            fallback={<span class="text-[9px] font-mono text-gray-600 flex-shrink-0">idle</span>}
+          >
             <span
-              class="inline-flex items-center gap-0.5 flex-shrink-0"
+              class="inline-flex items-center gap-0.5 flex-shrink-0 self-center"
               aria-label="working"
               title="working"
             >
@@ -162,8 +171,10 @@ export default function AgentCard(props: AgentCardProps) {
               <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:300ms]" />
             </span>
           </Show>
+        </span>
+        <span class="flex items-center gap-1.5 text-[9px] font-mono">
           <span
-            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] min-w-0 truncate"
+            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded min-w-0 truncate"
             style={{
               color: typeInfo().color,
               'border': `1px solid ${typeInfo().color}44`,
@@ -172,11 +183,11 @@ export default function AgentCard(props: AgentCardProps) {
             title={`Agent type: ${typeInfo().label}`}
           >
             <span aria-hidden="true">{typeInfo().emoji}</span>
-            <span class="truncate">{typeInfo().label}</span>
+            <span class="truncate">{typeInfo().shortLabel ?? typeInfo().label}</span>
           </span>
           <span
             class={[
-              'ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] flex-shrink-0',
+              'inline-flex items-center gap-1 px-1.5 py-0.5 rounded border flex-shrink-0',
               isRemote()
                 ? 'text-blue-300 border-blue-300/35'
                 : 'text-gray-400 border-gray-500/30',
@@ -185,12 +196,6 @@ export default function AgentCard(props: AgentCardProps) {
             <span class="w-1 h-1 rounded-full bg-current" />
             {isRemote() ? 'remote' : 'local'}
           </span>
-        </span>
-        <span class={`text-[12px] leading-tight truncate ${props.active ? 'text-gray-100' : 'text-gray-300'}`}>
-          {title()}
-          <Show when={props.meta.model && props.meta.model !== 'auto'}>
-            <span class="text-gray-600 font-mono text-[10px]"> · {props.meta.model}</span>
-          </Show>
         </span>
       </Show>
     </button>

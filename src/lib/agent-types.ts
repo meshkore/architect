@@ -19,6 +19,9 @@ import type { AgentType } from '~/state/chat';
 export interface AgentTypeInfo {
   id: AgentType;
   label: string;
+  /** V107.11 — Compact label used in tight chips (AgentCard, etc).
+   *  Falls back to label if unset. Keep ≤ 8 chars. */
+  shortLabel?: string;
   emoji: string;
   color: string;
   /** One-paragraph "what your agent does" hint. Shown below the composer
@@ -30,6 +33,7 @@ export const AGENT_TYPES: Record<AgentType, AgentTypeInfo> = {
   custom: {
     id: 'custom',
     label: 'General coder',
+    shortLabel: 'Coder',
     emoji: '🧠',
     color: '#34d399',
     role:
@@ -52,6 +56,7 @@ export const AGENT_TYPES: Record<AgentType, AgentTypeInfo> = {
   db: {
     id: 'db',
     label: 'Database',
+    shortLabel: 'DB',
     emoji: '🗄️',
     color: '#a78bfa',
     role:
@@ -63,6 +68,7 @@ export const AGENT_TYPES: Record<AgentType, AgentTypeInfo> = {
   testing: {
     id: 'testing',
     label: 'Testing',
+    shortLabel: 'Tests',
     emoji: '🧪',
     color: '#fbbf24',
     role:
@@ -107,6 +113,7 @@ export const AGENT_TYPES: Record<AgentType, AgentTypeInfo> = {
   'roadmap-architect': {
     id: 'roadmap-architect',
     label: 'Roadmap Architect',
+    shortLabel: 'Architect',
     emoji: '🗺️',
     color: '#22d3ee', // cyan — distinct from the generalist coordinator's emerald
     role:
