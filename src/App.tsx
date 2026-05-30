@@ -127,6 +127,12 @@ export default function App() {
         chatStore.hydrateActiveConvs(activeConvs);
         log.info('active convs hydrated from health', { count: activeConvs.length, convs: activeConvs });
       }
+      // py-1.10.24-hotfix — Bulk-archive finished work-* subagent
+      // convs from the rail. Pass the live set so any conv the
+      // daemon still has in flight is left alone — bug from the
+      // first iteration that archived live mid-turn agents.
+      const liveSet = new Set<string>(activeConvs);
+      chatStore.bulkArchiveFinishedSubagents(liveSet);
       // V102 + V104 — fetch the daemon's archived-conv list and seed
       // the cockpit's filter. V104 fixes the wire shape: the daemon
       // returns an ARRAY of {conv, archived_at, by}, not a Record.
@@ -155,6 +161,45 @@ export default function App() {
     if (chatStore.state.activeConv) return;
     const next = pickDefaultConv();
     if (next) chatStore.setActiveConv(next);
+  });
+
+  // V107.15 — Defensive re-upsert. The operator saw their MeshKore
+  // project disappear from the rail after a failed auto-update (2026-05-31
+  // field report). Root cause: kp.upsert's port-collision sweep
+  // (known-projects.ts:175-186) can drop an entry when a transient
+  // discovery probe lands on the same port with a different cluster_id
+  // — a state that can occur during self-update when the daemon
+  // briefly moves ports. The instance stays live in daemonStore but
+  // its kp.list() entry vanishes, so the rail rows memo skips it.
+  //
+  // This effect ensures the ACTIVE cluster is always represented in
+  // kp.list(). On every reactive tick where state.activeId points at
+  // a live instance, we check kp.list() and re-upsert if the entry
+  // is missing. Idempotent; the upsert path returns the existing
+  // record unchanged when it's already there.
+  createEffect(() => {
+    const id = daemonStore.state.activeId;
+    if (!id) return;
+    const inst = daemonStore.state.instances[id];
+    if (!inst) return;
+    const list = projectsStore.state.list;
+    const cid = inst.health.cluster_id;
+    const present =
+      (cid && list.some((p) => p.cluster_id === cid)) ||
+      (!cid && list.some((p) => p.port === inst.health.port));
+    if (present) return;
+    log.warn('[V107.15] active cluster missing from kp.list — re-upserting', {
+      activeId: id,
+      cluster_id: cid,
+      port: inst.health.port,
+    });
+    projectsStore.upsert({
+      port: inst.health.port,
+      base: inst.client.transport.httpBase,
+      cluster_id: cid ?? undefined,
+      cluster_name: inst.health.cluster_name ?? undefined,
+      status: 'live',
+    });
   });
 
   // V86c — Auto-select the lone remaining project. When the operator

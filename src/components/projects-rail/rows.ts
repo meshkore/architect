@@ -104,6 +104,37 @@ export const rows = createMemo<RailRowData[]>(() => {
       isNew: newIds.has(rowKey),
     });
   }
+  // V107.15 — Defensive synthesis. If state.activeId points at an
+  // instance whose kp.list() entry got pruned (rare race during
+  // self-update; primary defence is the re-upsert effect in App.tsx
+  // but this is the belt-and-braces fallback so the row NEVER
+  // disappears while it's the active one), synthesize a row from
+  // the live instance so the operator can still see + click their
+  // current project.
+  if (activeId) {
+    const alreadyEmitted = result.some((r) => r.key === activeId || (r.cluster_id && r.cluster_id === activeClusterId));
+    if (!alreadyEmitted && activeInst) {
+      const cid = activeInst.health.cluster_id ?? null;
+      const port = activeInst.health.port;
+      const display = cid || activeInst.health.cluster_name || `:${port}`;
+      const synthKey = cid ?? `port:${port}`;
+      result.push({
+        key: synthKey,
+        port,
+        base: activeInst.client.transport.httpBase,
+        cluster_id: cid,
+        cluster_name: activeInst.health.cluster_name ?? null,
+        display,
+        initials: initialsFor(display),
+        live: true,
+        working: false,
+        hasUnread: false,
+        architectActive: !!chatStore.findActiveArchitectConv(),
+        isNew: false,
+      });
+    }
+  }
+
   result.sort((a, b) => a.port - b.port);
   return result;
 });
