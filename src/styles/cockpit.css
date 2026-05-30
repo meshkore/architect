@@ -14,8 +14,8 @@
          desk is clearly brighter than the objects sitting on it: cards
          and panels read as distinct shapes. Panels also nudged up a
          hair so their borders catch light without becoming flat. */
-      --bg-canvas:      #161d29;          /* the desk — clearly brighter than panels/cards */
-      --bg-page:        #161d29;          /* alias */
+      --bg-canvas:      #1f2a3d;          /* V107.1 lifted — gaps between columns now clearly brighter than panels */
+      --bg-page:        #1f2a3d;          /* alias */
       --bg-panel:       #0a0f17;          /* column panels — dark, sits below the canvas */
       --bg-panel-alt:   #0a0f17;          /* chat column */
       --bg-bar:         #060a12;          /* header — deepest layer */

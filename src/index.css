@@ -27,8 +27,12 @@
    legacy markup migrated from the V80 monolith stays legible. */
 :root {
   /* Backgrounds */
-  --bg-canvas:      #161d29;
-  --bg-page:        #161d29;
+  /* V107.1 — canvas lifted from #161d29 → #1f2a3d so the gaps
+     between columns read as clearly brighter than the panels
+     (#0a0f17). Operator: "no se ve mucho la separación entre
+     columnas porque el fondo es demasiado oscuro." */
+  --bg-canvas:      #1f2a3d;
+  --bg-page:        #1f2a3d;
   --bg-panel:       #0a0f17;
   --bg-panel-alt:   #0a0f17;
   --bg-bar:         #060a12;
