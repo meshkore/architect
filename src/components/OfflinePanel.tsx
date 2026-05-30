@@ -109,7 +109,17 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }) {
             log.warn('[OfflinePanel] daemon answers HTTP but not HTTPS — TLS bundle missing', { port });
             setDiagnose('tls-missing');
           }
-        } catch { /* both fail — daemon really is dead */ }
+        } catch (e) {
+          // V107.13 — log the HTTP-probe failure so the operator can
+          // see in the browser console whether it's "daemon is dead"
+          // vs "browser blocked mixed-content / LNA preflight". The
+          // tls-missing diagnose flips only on r2.ok; any throw here
+          // means we can't confirm the TLS hypothesis from this side.
+          log.warn('[OfflinePanel] HTTP fallback probe threw — cannot confirm TLS-missing diagnose', {
+            port,
+            err: e instanceof Error ? e.message : String(e),
+          });
+        }
       }
       if (!cancelled) {
         probeTimer = setTimeout(() => { void probe(); }, WATCH_INTERVAL_MS);
@@ -202,12 +212,19 @@ https://daemon.meshkore.com:${port}/health.`
         `Once /health responds over HTTPS the cockpit reconnects automatically.`
       );
     }
+    // V107.13 — Lead with the most common cause (missing TLS bundle).
+    // Field reports from the cavioca bootstrap (2026-05-30) showed
+    // operators interpret the previous "either/or" wording as a
+    // generic "daemon is dead" message and don't think to check
+    // .meshkore/scripts/tls/. Now we name the suspect first.
     return (
       `Can't reach the daemon at https://daemon.meshkore.com:${props.sel.port}. ` +
-      `Either it's not running, OR it's running but missing the TLS bundle ` +
-      `(plain HTTP daemons can't talk to the HTTPS cockpit). The browser ` +
-      `can't tell the two apart, so the prompt below covers both paths — the ` +
-      `code agent in step 4 picks the right one after a quick check.`
+      `MOST LIKELY cause: the TLS bundle (.meshkore/scripts/tls/fullchain.pem + ` +
+      `privkey.pem) is missing from this project — without it the daemon falls ` +
+      `back to plain HTTP, which the HTTPS-only cockpit can't reach. ` +
+      `(Second possibility: the daemon process simply isn't running.) ` +
+      `Steps below cover both — step 3 fixes the TLS case, step 2 the ` +
+      `"not running" case.`
     );
   };
 
