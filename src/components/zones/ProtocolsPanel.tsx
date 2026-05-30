@@ -15,7 +15,7 @@
  * without opening the body.
  */
 
-import { For, Show, createMemo, createResource, createSignal } from 'solid-js';
+import { For, Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
 import { createStore } from 'solid-js/store';
 import { daemonStore } from '~/state/daemon';
 import { ensureMarked } from '~/lib/cdn-loaders';
@@ -48,6 +48,18 @@ export default function ProtocolsPanel() {
   const [scopeFilter, setScopeFilter] = createSignal<'all' | 'cluster' | 'project'>('all');
   const [expanded, setExpanded] = createSignal<string | null>(null);
   const [bodies, setBodies] = createStore<Record<string, BodyState>>({});
+
+  // V107.2 — On project swap, the protocol IDs may collide across
+  // clusters (every cluster can have its own P4/P1/etc). Reset the
+  // body cache + expanded selection when the client changes so the
+  // panel can't accidentally render the previous cluster's content.
+  // `search` and `scopeFilter` are user UI preferences — preserved
+  // across swap on purpose.
+  createEffect(() => {
+    void daemonStore.state.client; // track for reactivity
+    setBodies({});
+    setExpanded(null);
+  });
 
   const visible = createMemo<ProtocolSummary[]>(() => {
     const q = search().toLowerCase().trim();

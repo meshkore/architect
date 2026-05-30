@@ -1,4 +1,4 @@
-import { createSignal, onMount, onCleanup, Show, createEffect } from 'solid-js';
+import { createSignal, onCleanup, Show, createEffect } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { mcAlert } from '~/lib/modal';
 import { log } from '~/lib/log';
@@ -31,7 +31,18 @@ export default function CronsPanel() {
     if (!selected() && r.data.jobs.length > 0) setSelected(r.data.jobs[0]?.id ?? null);
   }
 
-  onMount(() => { void refresh(); });
+  // V107.2 — Rebind on project swap. `client` is the swap signal
+  // (changes via syncFacade when activeId flips). Reset local state
+  // and refetch every time client changes, including the first mount.
+  createEffect(() => {
+    const c = client();
+    setData(null);
+    setSelected(null);
+    setError(null);
+    setLoading(true);
+    if (!c) return;
+    void refresh();
+  });
 
   createEffect(() => {
     const ws = daemonStore.state.ws;

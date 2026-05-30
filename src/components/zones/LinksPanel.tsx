@@ -17,7 +17,7 @@
  * (operator typing, code agent writing) show up without refresh.
  */
 
-import { For, Show, createMemo, createResource, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { uiStore } from '~/state/ui';
 import { log } from '~/lib/log';
@@ -41,7 +41,10 @@ export default function LinksPanel() {
   // V86t — subscribe to `links.updated` so edits to links.yaml propagate
   // without a refresh. The daemon's LinksRegistry broadcasts on every
   // file mtime tick; we just bump our reload-key signal.
-  onMount(() => {
+  // V107.2 — use createEffect (not onMount) so the subscription re-binds
+  // to the NEW ws after a project swap. With onMount the panel was
+  // listening to the dead WS of the previously-active cluster.
+  createEffect(() => {
     const ws = daemonStore.state.ws;
     if (!ws) return;
     const off = ws.on('links.updated', () => {

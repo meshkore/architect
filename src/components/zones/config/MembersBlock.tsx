@@ -1,4 +1,4 @@
-import { createSignal, For, Show, onMount } from 'solid-js';
+import { createEffect, createSignal, For, Show } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { mcAlert } from '~/lib/modal';
 import { log } from '~/lib/log';
@@ -34,7 +34,17 @@ export function MembersBlock() {
     void refresh();
   }
 
-  onMount(refresh);
+  // V107.2 — Reactive refresh on project swap. `daemonStore.state.client`
+  // is the canonical swap signal. Reset local state + refetch every time
+  // it changes (including first mount). Previously used onMount which
+  // froze the panel on the first cluster's admission list.
+  createEffect(() => {
+    const c = daemonStore.state.client;
+    setPending([]);
+    setStub(null);
+    if (!c) return;
+    void refresh();
+  });
 
   return (
     <Block title="Members & admission" subtitle="Approve / reject device join requests.">

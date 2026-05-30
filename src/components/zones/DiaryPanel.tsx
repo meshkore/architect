@@ -26,7 +26,7 @@
  *     command the cockpit already knows how to run.
  */
 
-import { For, Show, createMemo, createResource, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup, onMount } from 'solid-js';
 import { createStore } from 'solid-js/store';
 import { daemonStore } from '~/state/daemon';
 import { ensureMarked } from '~/lib/cdn-loaders';
@@ -65,6 +65,18 @@ export default function DiaryPanel() {
   const [bodies, setBodies] = createStore<Record<string, BodyState>>({});
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
   const [batchHead, setBatchHead] = createSignal(BATCH_SIZE);
+
+  // V107.2 — On project swap, the daily-log entries collide by name
+  // across clusters (every cluster has its own `.meshkore/log/<date>.md`
+  // with different content). Reset the body cache + expanded set +
+  // batchHead so the new cluster's diary can't accidentally render
+  // the previous cluster's body.
+  createEffect(() => {
+    void daemonStore.state.client; // track for reactivity
+    setBodies({});
+    setExpanded(new Set<string>());
+    setBatchHead(BATCH_SIZE);
+  });
 
   // Auto-expand the first N entries when the index lands.
   const seedExpansion = (list: LogEntry[]): void => {
