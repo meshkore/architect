@@ -59,11 +59,24 @@ export interface HealthResponse {
     auto_update?: boolean;
     auto_update_source?: string;
   };
-  /** py-1.10.2 — convs with a live ChatRunner right now. Cockpit
-   *  consumes this at boot to mark agents working + show the
-   *  preparing bubble without waiting for the next WS delta. */
-  chat_active_convs?: string[];
   ts?: string;
+}
+
+// py-1.11.3 — Credentials CRUD wire shapes. Listing returns names +
+// metadata only (never values). credentialRead returns the value with
+// `protected: true` for daemon-managed entries (portal-token).
+export interface CredentialListEntry {
+  name: string;
+  size: number | null;
+  is_symlink: boolean;
+  protected: boolean;
+}
+export type CredentialsListResponse = CredentialListEntry[];
+
+export interface CredentialReadResponse {
+  name: string;
+  value: string;
+  protected: boolean;
 }
 
 export interface InfoResponse {
@@ -250,6 +263,66 @@ export interface ProtocolDetail {
   file?: string;
 }
 
+// ─── py-1.11.0: chat-state-rearchitecture (initiative
+//     `chat-state-rearchitecture`). Canonical conv list + paginated
+//     message reads + consolidated boot snapshot. Cockpit uses these
+//     when `chat.snapshot.v1` is in `health.features`; older daemons
+//     keep the legacy /state + /chat/archives path. ────────────────
+
+export interface ChatConvSummary {
+  conv: string;
+  agent_type: string | null;
+  agent_id: string | null;
+  parent_conv: string | null;
+  initiative_id: string | null;
+  task_id: string | null;
+  archived: boolean;
+  archived_at: string | null;
+  archived_by: string | null;
+  live: boolean;
+  coordinating: boolean;
+  waiting_on: string[];
+  created_at: string;
+  last_activity_at: string;
+  msg_count: number;
+}
+
+export interface ChatSnapshotResponse {
+  convs: ChatConvSummary[];
+  paused_agent_types: Record<string, unknown>;
+  quota: Record<string, unknown>;
+  debug: { enabled: boolean };
+  version: string;
+  generated_at: string;
+}
+
+export interface ChatConvsResponse {
+  convs: ChatConvSummary[];
+  generated_at: string;
+}
+
+export interface ChatConvMetaResponse {
+  conv: string;
+  agent_type: string | null;
+  agent_id: string | null;
+  parent_conv: string | null;
+  initiative_id: string | null;
+  task_id: string | null;
+  archived: boolean;
+  live: boolean;
+  created_at: string;
+  last_activity_at: string;
+  msg_count: number;
+}
+
+export interface ChatConvMessagesResponse {
+  conv: string;
+  messages: DaemonEvent[];
+  count: number;
+  has_more: boolean;
+  oldest_ts: string;
+}
+
 export interface DispatchBody {
   conv?: string;
   author?: string;
@@ -316,8 +389,41 @@ export class DaemonClient {
     return this.request<InfoResponse>('GET', '/info', undefined, signal);
   }
 
-  async credentials(signal?: AbortSignal): Promise<Result<unknown[]>> {
-    return this.request<unknown[]>('GET', '/credentials', undefined, signal);
+  async credentials(signal?: AbortSignal): Promise<Result<CredentialsListResponse>> {
+    return this.request<CredentialsListResponse>('GET', '/credentials', undefined, signal);
+  }
+
+  /** py-1.11.3 — Read a single credential's value. Auth-required.
+   *  Cockpit only calls this when the operator clicks "reveal" so the
+   *  value never moves over the wire until explicitly requested. */
+  async credentialRead(name: string, signal?: AbortSignal): Promise<Result<CredentialReadResponse>> {
+    return this.request<CredentialReadResponse>(
+      'GET',
+      `/credentials/${encodeURIComponent(name)}`,
+      undefined,
+      signal,
+    );
+  }
+
+  /** py-1.11.3 — Create or overwrite a credential. Protected names
+   *  (portal-token) return 403 — managed by the daemon itself. */
+  async credentialWrite(name: string, value: string, signal?: AbortSignal): Promise<Result<{ name: string; size: number }>> {
+    return this.request<{ name: string; size: number }>(
+      'PUT',
+      `/credentials/${encodeURIComponent(name)}`,
+      { value },
+      signal,
+    );
+  }
+
+  /** py-1.11.3 — Delete a credential file. Protected names → 403. */
+  async credentialDelete(name: string, signal?: AbortSignal): Promise<Result<{ deleted: boolean; name: string }>> {
+    return this.request<{ deleted: boolean; name: string }>(
+      'DELETE',
+      `/credentials/${encodeURIComponent(name)}`,
+      undefined,
+      signal,
+    );
   }
 
   async agents(signal?: AbortSignal): Promise<Result<unknown[]>> {
@@ -396,20 +502,6 @@ export class DaemonClient {
     return this.request<unknown>('POST', '/chat/cancel', { conv }, signal);
   }
 
-  /** V102 + V104 — Fetch the daemon's archived-conv list. Real wire
-   *  shape (verified live against py-1.10.5):
-   *    `{ archived: [ { conv, archived_at, by }, ... ] }`
-   *  V102 mis-typed this as a Record-of-conv-to-meta and stuffed
-   *  array indices ("0","1",…) into `chatStore.archivedConvs` —
-   *  the rail filter then matched none of the real conv ids and
-   *  archived convs stayed visible. V104 fixes the type AND the
-   *  consumer in `state/chat.ts:hydrateArchives`. */
-  async chatArchives(signal?: AbortSignal): Promise<Result<{ archived: Array<{ conv: string; archived_at?: string; by?: string }> }>> {
-    return this.request<{ archived: Array<{ conv: string; archived_at?: string; by?: string }> }>(
-      'GET', '/chat/archives', undefined, signal, /*requireAuth*/ false,
-    );
-  }
-
   /** V104 — POST /chat/archive. The cockpit's local archive button
    *  used to ONLY update the per-tab `archivedConvs` signal, never
    *  syncing to the daemon. Hard refresh + V102 hydrate then re-
@@ -423,6 +515,51 @@ export class DaemonClient {
   /** V104 — POST /chat/unarchive. Symmetric to chatArchive. */
   async chatUnarchive(conv: string, signal?: AbortSignal): Promise<Result<{ ok: boolean }>> {
     return this.request<{ ok: boolean }>('POST', '/chat/unarchive', { conv }, signal);
+  }
+
+  // ── py-1.11.0: chat-state-rearchitecture (initiative
+  //   `chat-state-rearchitecture`). Replaces the implicit
+  //   /state.timeline.recent_events replay path with a canonical
+  //   daemon-authoritative conv API. Cockpit only calls these when
+  //   `chat.snapshot.v1` is advertised in /health.features. ──────
+
+  /** Boot consolidated payload — convs + archives + paused + quota +
+   *  debug in one round-trip. Replaces the legacy chain of /state +
+   *  /chat/archives + /health.chat_active_convs hydration. Anonymous
+   *  read (matches /chat/archives). */
+  async chatSnapshot(signal?: AbortSignal): Promise<Result<ChatSnapshotResponse>> {
+    return this.request<ChatSnapshotResponse>('GET', '/chat/snapshot', undefined, signal, /*requireAuth*/ false);
+  }
+
+  /** Canonical conv list. Cockpit reads this on WS `state.rebuilt` or
+   *  any conv.* event when the snapshot.v1 path is active and we
+   *  need to resync. */
+  async chatConvs(signal?: AbortSignal): Promise<Result<ChatConvsResponse>> {
+    return this.request<ChatConvsResponse>('GET', '/chat/convs', undefined, signal, /*requireAuth*/ false);
+  }
+
+  /** One conv's normalised metadata. Deep-link / resync helper. */
+  async chatConvMeta(conv: string, signal?: AbortSignal): Promise<Result<ChatConvMetaResponse>> {
+    return this.request<ChatConvMetaResponse>(
+      'GET', `/chat/conv/${encodeURIComponent(conv)}/meta`, undefined, signal, /*requireAuth*/ false,
+    );
+  }
+
+  /** Paginated message reader. `before` is the ISO ts of the oldest
+   *  event from the previous page (omit to fetch the newest page).
+   *  Returns events in chronological order (oldest → newest); the
+   *  cockpit's reducer expects that ordering. */
+  async chatConvMessages(
+    conv: string,
+    opts?: { before?: string; limit?: number },
+    signal?: AbortSignal,
+  ): Promise<Result<ChatConvMessagesResponse>> {
+    const params = new URLSearchParams();
+    if (opts?.before) params.set('before', opts.before);
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    const qs = params.toString();
+    const path = `/chat/conv/${encodeURIComponent(conv)}/messages${qs ? '?' + qs : ''}`;
+    return this.request<ChatConvMessagesResponse>('GET', path, undefined, signal, /*requireAuth*/ false);
   }
 
   // py-1.10.0 — Story-run coordinator.
@@ -525,7 +662,7 @@ export class DaemonClient {
   // ── Internals ─────────────────────────────────────────────────────
 
   private async request<T>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     body: unknown,
     signal: AbortSignal | undefined,
@@ -533,7 +670,8 @@ export class DaemonClient {
   ): Promise<Result<T>> {
     const url = `${this.transport.httpBase}${path}`;
     const headers: Record<string, string> = {};
-    if (method === 'POST') headers['content-type'] = 'application/json';
+    const sendsBody = method === 'POST' || method === 'PUT';
+    if (sendsBody) headers['content-type'] = 'application/json';
     if (requireAuth && this.transport.token) {
       headers['authorization'] = `Bearer ${this.transport.token}`;
     }
@@ -542,7 +680,7 @@ export class DaemonClient {
       res = await fetch(url, {
         method,
         headers,
-        body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
+        body: sendsBody ? JSON.stringify(body ?? {}) : undefined,
         signal,
       });
     } catch (e) {

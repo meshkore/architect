@@ -24,7 +24,13 @@
 
 import { createStore } from 'solid-js/store';
 import { createSignal } from 'solid-js';
-import type { DaemonClient, DaemonEvent, DispatchBody } from '~/lib/daemon-client';
+import type {
+  DaemonClient,
+  DaemonEvent,
+  DispatchBody,
+  ChatConvSummary,
+  ChatSnapshotResponse,
+} from '~/lib/daemon-client';
 import { log } from '~/lib/log';
 
 export const ONBOARDING_CONV_ID = '_onboarding_v1';
@@ -39,14 +45,11 @@ export interface ConvMeta {
   location: { type: 'local' | 'remote'; host?: string; provider?: string };
 }
 
+/** py-1.11.0 — Status kind used by the rail's `AgentCard` prop. Was
+ *  the surface of the (now-deleted) `agentStatus` map; kept as a
+ *  string union so AgentCard's prop type doesn't have to change.
+ *  Computed by `ChatRail.statusOf` from `chatStore.state.convs`. */
 export type AgentStatusKind = 'idle' | 'thinking' | 'working';
-
-export interface AgentStatus {
-  state: AgentStatusKind;
-  conv?: string;
-  runId?: string;
-  lastText?: string;
-}
 
 export interface ChatMsg {
   kind: 'user' | 'assistant';
@@ -84,7 +87,6 @@ export interface ClusterActivity {
 export interface ChatStoreState {
   convMap: Record<string, ChatMsg[]>;
   activeConv: string | null;
-  agentStatus: Record<string, AgentStatus>;
   archivedConvs: Record<string, true>;
   convMeta: Record<string, ConvMeta>;
   convTitleOverrides: Record<string, string>;
@@ -101,18 +103,30 @@ export interface ChatStoreState {
    *  should swap the streaming-tail view for a rotating "Working…
    *  Planning… Researching…" placeholder. Cleared on final/cancelled. */
   lastDeltaTsByConv: Record<string, number>;
+  /** py-1.11.0 — chat-state-rearchitecture. Daemon-authoritative conv
+   *  summaries from `GET /chat/snapshot` + WS conv.* events. When
+   *  populated, this is the single source of truth for the rail list
+   *  AND for "is this conv live / coordinating / waiting on who".
+   *  Empty `{}` when the daemon lacks `chat.snapshot.v1` — cockpit
+   *  falls back to convMap+convMeta union + chat_activity. */
+  convs: Record<string, ChatConvSummary>;
+  /** ISO ts of the last full snapshot hydration. Cockpit uses this to
+   *  decide whether to trust `convs` (recent enough) or refetch.
+   *  Null on cold start or after a cluster swap. */
+  convsHydratedAt: string | null;
 }
 
 const initial: ChatStoreState = {
   convMap: {},
   activeConv: null,
-  agentStatus: {},
   archivedConvs: {},
   convMeta: {},
   convTitleOverrides: {},
   clusterActivity: {},
   pendingReplyConvs: {},
   lastDeltaTsByConv: {},
+  convs: {},
+  convsHydratedAt: null,
 };
 
 const [state, setState] = createStore<ChatStoreState>(initial);
@@ -125,46 +139,15 @@ function metaKey(): string {
   return CONV_META_KEY_PREFIX + (activeClusterId() ?? 'unknown');
 }
 
-// ── archivedConvs persistence (V107.12) ──────────────────────────────
-//
-// Before V107.12, archivedConvs lived only in memory. On a hard refresh
-// the cockpit re-rendered the rail from convMap BEFORE the async
-// `chatArchives()` fetch resolved → archived convs flashed visible for
-// ~100-300 ms and then snapped out as the filter caught up. The
-// operator saw the whole archived fleet "appear and vanish" on every
-// reload. Now we persist the set per-cluster to localStorage so the
-// filter is correct from frame 1; the daemon fetch is still authoritative
-// (it can prune entries that were unarchived from another tab / CLI).
-const ARCHIVED_CONVS_KEY_PREFIX = 'mc-archived-convs-v1::';
-function archivedKey(): string {
-  return ARCHIVED_CONVS_KEY_PREFIX + (activeClusterId() ?? 'unknown');
-}
-function loadArchivedConvs(): void {
-  try {
-    const raw = localStorage.getItem(archivedKey());
-    if (!raw) {
-      setState('archivedConvs', {});
-      return;
-    }
-    const parsed: unknown = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const out: Record<string, true> = {};
-      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-        if (v === true && k && k !== ONBOARDING_CONV_ID) out[k] = true;
-      }
-      setState('archivedConvs', out);
-    }
-  } catch (e) {
-    log.warn('archivedConvs load failed', e instanceof Error ? e.message : String(e));
-  }
-}
-function saveArchivedConvs(): void {
-  try {
-    localStorage.setItem(archivedKey(), JSON.stringify(state.archivedConvs));
-  } catch {
-    /* quota / private mode */
-  }
-}
+// py-1.11.0 Phase 2 — `archivedConvs` localStorage cache removed.
+// The set is now authored server-side and arrives via:
+//   1. `GET /chat/snapshot` on boot (seeded by hydrateFromSnapshot)
+//   2. `conv.archived` / `conv.unarchived` WS events (handled by
+//      ingestConvEvent)
+// The pre-Phase-2 mc-archived-convs-v1::* key is intentionally NOT
+// cleaned up here — leftover entries are harmless and will be garbage-
+// collected by the browser's normal localStorage churn.
+const saveArchivedConvs = (): void => { /* no-op; daemon is the source */ };
 
 /**
  * V107.8 — Infer agent_type from the conv slug pattern.
@@ -277,7 +260,6 @@ function saveConvMeta(): void {
 interface ClusterChatSlice {
   convMap: Record<string, ChatMsg[]>;
   activeConv: string | null;
-  agentStatus: Record<string, AgentStatus>;
   archivedConvs: Record<string, true>;
   convMeta: Record<string, ConvMeta>;
   convTitleOverrides: Record<string, string>;
@@ -289,7 +271,6 @@ function snapshotCurrent(): ClusterChatSlice {
   return {
     convMap: { ...state.convMap },
     activeConv: state.activeConv,
-    agentStatus: { ...state.agentStatus },
     archivedConvs: { ...state.archivedConvs },
     convMeta: { ...state.convMeta },
     convTitleOverrides: { ...state.convTitleOverrides },
@@ -300,7 +281,6 @@ function restoreSlice(slice: ClusterChatSlice): void {
   setState({
     convMap: slice.convMap,
     activeConv: slice.activeConv,
-    agentStatus: slice.agentStatus,
     archivedConvs: slice.archivedConvs,
     convMeta: slice.convMeta,
     convTitleOverrides: slice.convTitleOverrides,
@@ -337,28 +317,35 @@ function bindCluster(clusterId: string | null): void {
       workingConvs: prev?.workingConvs ?? [],
     }));
   }
+  // py-1.11.2-cockpit — Always reset the daemon-authoritative state
+  // (`convs` + `convsHydratedAt`) on swap, BEFORE the cached-slice
+  // restore. ClusterChatSlice only caches the chat-wall slice
+  // (messages, title overrides, archived set, convMeta) — it never
+  // captured `convs`, so a cached restore would leave the rail showing
+  // the prior cluster's daemon-authoritative entries. Fixes the bug
+  // where switching from project A to project B (both visited this
+  // session) made B's rail render A's convs until the snapshot fetch
+  // resolved.
+  setState({ convs: {}, convsHydratedAt: null });
   // Restore the new cluster's slice if we've seen it this session.
   const cached = clusterId ? clusterSnapshots.get(clusterId) : null;
   if (cached) {
     restoreSlice(cached);
     return;
   }
-  // First time visiting this cluster this session — reset visible
-  // state and load convMeta from localStorage.
+  // First time visiting this cluster this session — reset everything
+  // else too. Hydration comes from `chatStore.hydrateFromSnapshot`
+  // (App.tsx boot path) populating both `convs` and `convMeta` from
+  // the daemon payload. `loadConvMeta` is the optimistic cache for
+  // frame 1 (rail renders something before the snapshot fetch resolves).
   setState({
     convMap: {},
     activeConv: null,
-    agentStatus: {},
     archivedConvs: {},
     convMeta: {},
     convTitleOverrides: {},
   });
   loadConvMeta();
-  // V107.12 — Load archived set BEFORE first render so the rail filter
-  // is correct from frame 1. The daemon's chatArchives() fetch in App.tsx
-  // still runs and is authoritative (can prune entries that were
-  // unarchived from another tab).
-  loadArchivedConvs();
 }
 
 /** MP5 — bump a cluster's activity counters from event-bus dispatch. */
@@ -391,10 +378,11 @@ function clearClusterChat(clusterId: string): void {
     setState({
       convMap: {},
       activeConv: null,
-      agentStatus: {},
       archivedConvs: {},
       convMeta: {},
       convTitleOverrides: {},
+      convs: {},
+      convsHydratedAt: null,
     });
   }
 }
@@ -426,7 +414,6 @@ function ingestEventForCluster(clusterKey: string, ev: DaemonEvent): void {
     slice = {
       convMap: {},
       activeConv: null,
-      agentStatus: {},
       archivedConvs: {},
       convMeta: {},
       convTitleOverrides: {},
@@ -671,6 +658,12 @@ function unarchiveConv(conv: string): void {
   saveArchivedConvs();
 }
 
+// py-1.11.2 — `scheduleSubagentAutoArchive` / `cancelSubagentAutoArchive`
+// removed. The daemon now archives finished `work-*` subagent convs
+// server-side in the runner's final handler and broadcasts
+// `conv.archived` so every cockpit drops them from the active list in
+// one tick. The cockpit no longer needs a 6 s timer for this.
+
 /**
  * V106 — Cross-cockpit selector: is there a Roadmap Architect
  * conv alive right now? Used by both InitiativesPanel (Run all
@@ -694,45 +687,6 @@ function findActiveArchitectConv(): string | null {
   return best;
 }
 
-/**
- * V102 (broken) + V104 (fixed) — Hydrate the archive set from the
- * daemon's authoritative `/chat/archives`. Called once on cluster
- * bind so archived convs land in the cockpit's filter EVEN if they
- * were archived from another tab / the CLI / a cleanup script.
- *
- * V102 typed the response as `Record<string, …>` and ran
- * `Object.keys(map)` on what was actually an ARRAY — the resulting
- * `archivedConvs` was `{"0": true, "1": true, …}` (array indices,
- * not conv ids). The rail filter matched zero convs and archived
- * agents stayed visible. The History panel rendered "0", "1", … as
- * fake archive entries.
- *
- * V104 takes the real wire shape:
- *   `{ archived: [ { conv, archived_at, by }, ... ] }`
- * and extracts `.conv` from each entry.
- */
-function hydrateArchives(list: Array<{ conv?: string }>): void {
-  if (!Array.isArray(list)) return;
-  const out: Record<string, true> = {};
-  for (const entry of list) {
-    const c = entry && typeof entry === 'object' ? entry.conv : undefined;
-    if (typeof c === 'string' && c && c !== ONBOARDING_CONV_ID) out[c] = true;
-  }
-  setState('archivedConvs', out);
-  saveArchivedConvs();
-}
-
-function setAgentStatus(agentId: string, status: AgentStatus): void {
-  setState('agentStatus', agentId, status);
-}
-
-function clearAgentStatus(agentId: string): void {
-  setState('agentStatus', (xs) => {
-    const { [agentId]: _drop, ...rest } = xs;
-    return rest;
-  });
-}
-
 function stripRememberLines(text: string): string {
   if (!text) return text;
   return text
@@ -742,11 +696,10 @@ function stripRememberLines(text: string): string {
     .trimEnd();
 }
 
-// V89.2 — Set while replaying timeline events on cockpit boot. Read by
-// ingestEvent's chat.assistant.final branch to skip the auto-expand
-// "_freshFinal" flag — otherwise every rehydrated assistant message
-// would expand on reload, defeating the design ("only the LIVE summary
-// auto-expands; persisted bubbles default to collapsed").
+// py-1.11.0 — Set while pre-seeding convMap from a `chatConvMessages`
+// pagination fetch. Suppresses the `_freshFinal` auto-expand flag on
+// historical messages (only LIVE finals should auto-expand). Set by
+// `loadConvMessagesPage` around the seed loop.
 let hydrating = false;
 
 /**
@@ -756,6 +709,19 @@ let hydrating = false;
 function ingestEvent(ev: DaemonEvent): void {
   const conv = typeof ev.conv === 'string' ? ev.conv : null;
   if (!conv) return;
+  // py-1.11.0 — Safety net: if a previously-archived work-* conv
+  // starts talking again (rare — the daemon would normally emit
+  // `conv.unarchived` first), un-archive locally. Cheap insurance.
+  if (
+    !hydrating &&
+    state.archivedConvs[conv] &&
+    conv.startsWith('work-') &&
+    (ev.type === 'chat.user' ||
+      ev.type === 'chat.assistant.delta' ||
+      ev.type === 'chat.assistant.final')
+  ) {
+    unarchiveConv(conv);
+  }
   const arr = state.convMap[conv] ?? [];
   if (ev.type === 'chat.user') {
     const text = typeof ev.text === 'string' ? ev.text : '';
@@ -849,11 +815,10 @@ function ingestEvent(ev: DaemonEvent): void {
         return rest;
       });
     }
-    // V89.4 — clear server-derived agentStatus (set by
-    // hydrateActiveConvs on boot). Without this, the rail card stays
-    // on "working" forever after a final because statusOf checks
-    // agentStatus BEFORE the streaming derivation.
-    clearAgentStatusFor(conv);
+    // py-1.11.2 — Auto-archive moved server-side. The daemon archives
+    // finished work-* subagent convs in its runner's final handler and
+    // broadcasts conv.archived; the cockpit just reacts via
+    // ingestConvEvent.
     return;
   }
   if (ev.type === 'chat.cancelled') {
@@ -868,34 +833,11 @@ function ingestEvent(ev: DaemonEvent): void {
         return rest;
       });
     }
-    clearAgentStatusFor(conv);
   }
-  // V102 — daemon-driven archive sync. The daemon broadcasts
-  // `chat.archived` / `chat.unarchived` whenever `/chat/archive`
-  // is hit (from any tab, the CLI, a cleanup script). Before V102
-  // these were ignored — the rail filter stayed cockpit-local.
-  if (ev.type === 'chat.archived') {
-    if (conv && conv !== ONBOARDING_CONV_ID) {
-      setState('archivedConvs', conv, true);
-      saveArchivedConvs();
-    }
-  } else if (ev.type === 'chat.unarchived') {
-    if (conv) {
-      setState('archivedConvs', (xs) => {
-        const { [conv]: _drop, ...rest } = xs;
-        return rest;
-      });
-      saveArchivedConvs();
-    }
-  }
-}
-
-/** V89.4 — derive the agentId for a conv and clear its status. Used
- *  by ingestEvent on terminal turn events so the rail card flips
- *  back to "idle" once the daemon's chat session is gone. */
-function clearAgentStatusFor(conv: string): void {
-  const meta = state.convMeta[conv];
-  if (meta?.agentId) clearAgentStatus(meta.agentId);
+  // py-1.11.0 Phase 2 — legacy `chat.archived` / `chat.unarchived`
+  // events were deleted from the daemon's broadcast set. The
+  // snapshot.v1 path now uses `conv.archived` / `conv.unarchived`
+  // (routed via ingestConvEvent in event-bus.ts).
 }
 
 export interface DispatchOpts {
@@ -993,91 +935,175 @@ function clearPendingReply(conv: string): void {
   });
 }
 
-/**
- * V86q — Rehydrate convMap from the daemon's `/state.timeline.recent_events`
- * payload (py-1.1.0+ — pre-existing channel, no new endpoint needed).
- * Called by App.tsx after `serverStore.refreshNow` lands so a browser
- * refresh doesn't wipe the visible chat. Replays the events through
- * the SAME `ingestEvent` reducer that handles live WS events — no
- * duplicate parsing logic, the assistant-bubble dedup/streaming
- * machinery stays in ONE place.
- *
- * Why a wipe first: ingestEvent is append/upsert by nature, so
- * re-running it on top of an existing convMap would either double up
- * (if user placeholders re-collide) or look fine but quietly leave
- * stale entries. Wiping and rebuilding mirrors the vanilla V80
- * indexEvents() path the daemon's `_recent_timeline_events` was
- * designed for.
- *
- * Skips touching convMeta — that's operator-defined (agent name,
- * id) and persists via its own localStorage slot.
- */
-function hydrateFromTimeline(events: DaemonEvent[]): void {
-  // Reset the chat-relevant slice first so a re-hydrate after project
-  // hot-swap doesn't merge two clusters' bubbles.
-  setState('convMap', {});
+// ── py-1.11.0: chat-state-rearchitecture (initiative
+//   `chat-state-rearchitecture`). Daemon-authoritative conv list +
+//   WS conv.* event ingestion. Cockpit boot flips between this path
+//   and the legacy timeline-replay path based on the
+//   `chat.snapshot.v1` feature flag on /health.
+// ─────────────────────────────────────────────────────────────────
+
+/** Replace the per-conv summary map with the daemon's snapshot. Also
+ *  seeds the archived set + convMeta from the same payload so the
+ *  rest of the cockpit (which still reads convMeta for titles /
+ *  agent type, and archivedConvs for filtering) doesn't need to
+ *  fork by code path. */
+function hydrateFromSnapshot(snap: ChatSnapshotResponse): void {
+  const nextConvs: Record<string, ChatConvSummary> = {};
+  const nextArchived: Record<string, true> = {};
+  for (const c of snap.convs) {
+    nextConvs[c.conv] = c;
+    if (c.archived) nextArchived[c.conv] = true;
+    // Seed convMeta for any conv we don't already know about so the
+    // legacy code paths (AgentCard title, dispatch body, …) keep
+    // rendering correctly. Daemon is source of truth for type/id.
+    if (!state.convMeta[c.conv]) {
+      const inferredType = (c.agent_type ?? 'custom') as ConvMeta['type'];
+      const agentId = c.agent_id ?? '';
+      setState('convMeta', c.conv, {
+        agentId,
+        model: 'auto',
+        type: inferredType,
+        title: agentId || c.conv,
+        location: { type: 'local' },
+      });
+    } else if (c.agent_id && !state.convMeta[c.conv]?.agentId) {
+      // Heal a stale local entry with the daemon-side agent_id.
+      setState('convMeta', c.conv, 'agentId', c.agent_id);
+    }
+  }
+  setState('convs', nextConvs);
+  setState('archivedConvs', nextArchived);
+  setState('convsHydratedAt', snap.generated_at ?? new Date().toISOString());
+  saveConvMeta();
+  log.debug('chat.snapshot.v1 hydrated', {
+    convs: snap.convs.length,
+    live: snap.convs.filter((c) => c.live).length,
+    archived: Object.keys(nextArchived).length,
+  });
+}
+
+/** Lazy-load a page of messages for `conv` and seed `convMap[conv]`.
+ *  The `setActiveConv` action calls this for the conv the operator
+ *  just focused; subsequent "Load earlier" UI fetches older pages with
+ *  `opts.before = oldestMsg.ts`. The reducer (`ingestEvent`) is reused
+ *  via `hydrating=true` so the same upsert/dedup logic that powers WS
+ *  live streaming also seeds the history. */
+async function loadConvMessagesPage(
+  client: DaemonClient,
+  conv: string,
+  opts: { before?: string; limit?: number } = {},
+): Promise<{ has_more: boolean; oldest_ts: string }> {
+  const res = await client.chatConvMessages(conv, opts);
+  if (!res.ok) {
+    log.warn('loadConvMessagesPage failed', { conv, status: res.status, body: res.body.slice(0, 200) });
+    return { has_more: false, oldest_ts: '' };
+  }
+  // If we're loading the FIRST page (no `before`), reset convMap so a
+  // stale entry from a prior session doesn't double up.
+  if (!opts.before) setState('convMap', conv, []);
   hydrating = true;
   try {
-    for (const ev of events) {
-      const t = typeof ev.type === 'string' ? ev.type : '';
+    for (const ev of res.data.messages) {
+      const t = typeof (ev as DaemonEvent).type === 'string' ? (ev as DaemonEvent).type : '';
       if (
         t === 'chat.user' ||
-        t === 'chat.assistant.delta' ||
+        t === 'chat.assistant' ||
         t === 'chat.assistant.final' ||
         t === 'chat.cancelled'
       ) {
-        ingestEvent(ev);
+        // Older snapshots emit `chat.assistant` for finalised text; map
+        // it to `chat.assistant.final` so the reducer treats it as a
+        // closed turn (it expects `final` for the historical case).
+        const mapped: DaemonEvent = t === 'chat.assistant'
+          ? { ...(ev as DaemonEvent), type: 'chat.assistant.final' }
+          : (ev as DaemonEvent);
+        ingestEvent(mapped);
       }
     }
   } finally {
     hydrating = false;
   }
-  // The daemon emits the timeline oldest→newest already; ingestEvent
-  // handles the streaming/final/cancelled lifecycle in that order.
-  // ensureConvMeta for any conv we just learned about so the rail
-  // shows them.
-  for (const conv of Object.keys(state.convMap)) {
-    if (!state.convMeta[conv]) ensureConvMeta(conv);
-  }
+  return { has_more: res.data.has_more, oldest_ts: res.data.oldest_ts };
 }
 
-/**
- * V89.4 — Seed agent-rail "working" + chat preparing-bubble state
- * from the daemon's /health.chat_active_convs at boot/reconnect.
- *
- * Operator bug: after F5, the cockpit replayed timeline.recent_events
- * (which gave finalised history) and waited for the next WS delta to
- * realise that A001 was still mid-turn. That gap could be ~20 s if
- * the runner was deep in a tool call. py-1.10.2 surfaces the live
- * conv list on /health so the cockpit can paint "working" the
- * instant attach() resolves — zero wait.
- *
- * For each conv in the list:
- *   - Map conv → agentId via convMeta. If no agentId yet, skip (the
- *     rail entry will appear later via ensureConvMeta).
- *   - Mark agentStatus[agentId] = {state: 'working', conv} so
- *     ChatRail.statusOf returns 'working' immediately.
- *   - If no streaming assistant bubble exists in the conv yet,
- *     stamp pendingReplyConvs[conv] so the chat panel shows the
- *     PreparingBubble (rotating verbs). Cleared automatically by
- *     the next delta/final/cancelled.
- *
- * Idempotent — calling it twice with overlapping lists is safe.
- */
-function hydrateActiveConvs(convs: string[]): void {
-  if (!convs || convs.length === 0) return;
-  const now = Date.now();
-  for (const conv of convs) {
-    if (!conv) continue;
-    const meta = state.convMeta[conv];
-    if (meta?.agentId) {
-      setAgentStatus(meta.agentId, { state: 'working', conv });
-    }
-    const list = state.convMap[conv] ?? [];
-    const hasStream = list.some((m) => m.kind === 'assistant' && m.streaming);
-    if (!hasStream && state.pendingReplyConvs[conv] === undefined) {
-      setState('pendingReplyConvs', conv, now);
-    }
+/** Apply a WS `conv.*` event to the local convs map. Idempotent —
+ *  the daemon may emit the same event twice (e.g. one runner finishing
+ *  triggers both its own activity flip AND the parent's). */
+function ingestConvEvent(ev: DaemonEvent): void {
+  const type = ev.type;
+  const conv = typeof ev.conv === 'string' ? ev.conv : '';
+  if (!conv) return;
+  // Only act when snapshot.v1 has hydrated at least once — otherwise
+  // we'd be building convs on top of an empty map and racing the boot
+  // fetch. The legacy path handles the pre-hydrate window.
+  if (!state.convsHydratedAt) return;
+  const cur = state.convs[conv];
+  if (type === 'conv.created' || type === 'conv.meta_updated') {
+    const merged: ChatConvSummary = {
+      conv,
+      agent_type: typeof ev.agent_type === 'string' ? ev.agent_type : (cur?.agent_type ?? null),
+      agent_id: typeof ev.agent_id === 'string' ? ev.agent_id : (cur?.agent_id ?? null),
+      parent_conv: typeof ev.parent_conv === 'string' ? ev.parent_conv : (cur?.parent_conv ?? null),
+      initiative_id: typeof ev.initiative_id === 'string' ? ev.initiative_id : (cur?.initiative_id ?? null),
+      task_id: typeof ev.task_id === 'string' ? ev.task_id : (cur?.task_id ?? null),
+      archived: cur?.archived ?? false,
+      archived_at: cur?.archived_at ?? null,
+      archived_by: cur?.archived_by ?? null,
+      live: cur?.live ?? false,
+      coordinating: cur?.coordinating ?? false,
+      waiting_on: cur?.waiting_on ?? [],
+      created_at: cur?.created_at ?? (typeof ev.ts === 'string' ? ev.ts : ''),
+      last_activity_at: typeof ev.ts === 'string' ? ev.ts : (cur?.last_activity_at ?? ''),
+      msg_count: cur?.msg_count ?? 0,
+    };
+    setState('convs', conv, merged);
+    return;
+  }
+  if (type === 'conv.archived') {
+    setState('convs', conv, (prev) => ({
+      ...(prev ?? ({} as ChatConvSummary)),
+      archived: true,
+      archived_at: typeof ev.archived_at === 'string' ? ev.archived_at : (typeof ev.ts === 'string' ? ev.ts : null),
+      archived_by: typeof ev.by === 'string' ? ev.by : null,
+    }));
+    setState('archivedConvs', conv, true);
+    saveArchivedConvs();
+    return;
+  }
+  if (type === 'conv.unarchived') {
+    setState('convs', conv, (prev) => ({
+      ...(prev ?? ({} as ChatConvSummary)),
+      archived: false,
+      archived_at: null,
+      archived_by: null,
+    }));
+    setState('archivedConvs', (prev) => {
+      const next = { ...prev };
+      delete next[conv];
+      return next;
+    });
+    saveArchivedConvs();
+    return;
+  }
+  if (type === 'conv.activity') {
+    setState('convs', conv, (prev) => ({
+      ...(prev ?? ({} as ChatConvSummary)),
+      conv,
+      agent_type: typeof ev.agent_type === 'string' ? ev.agent_type : (prev?.agent_type ?? null),
+      agent_id: typeof ev.agent_id === 'string' ? ev.agent_id : (prev?.agent_id ?? null),
+      parent_conv: typeof ev.parent_conv === 'string' ? ev.parent_conv : (prev?.parent_conv ?? null),
+      initiative_id: typeof ev.initiative_id === 'string' ? ev.initiative_id : (prev?.initiative_id ?? null),
+      task_id: typeof ev.task_id === 'string' ? ev.task_id : (prev?.task_id ?? null),
+      live: ev.live === true,
+      coordinating: ev.coordinating === true,
+      waiting_on: Array.isArray(ev.waiting_on) ? (ev.waiting_on as string[]) : [],
+      last_activity_at: typeof ev.ts === 'string' ? ev.ts : (prev?.last_activity_at ?? ''),
+      archived: prev?.archived ?? false,
+      archived_at: prev?.archived_at ?? null,
+      archived_by: prev?.archived_by ?? null,
+      created_at: prev?.created_at ?? (typeof ev.ts === 'string' ? ev.ts : ''),
+      msg_count: prev?.msg_count ?? 0,
+    }));
   }
 }
 
@@ -1094,15 +1120,14 @@ export const chatStore = {
   setConvTitle,
   archiveConv,
   unarchiveConv,
-  hydrateArchives,
   findActiveArchitectConv,
-  setAgentStatus,
-  clearAgentStatus,
   ingestEvent,
   ingestEventForCluster,
   dispatchMessage,
-  hydrateFromTimeline,
-  hydrateActiveConvs,
+  // py-1.11.0 — chat-state-rearchitecture (daemon-authoritative path).
+  hydrateFromSnapshot,
+  ingestConvEvent,
+  loadConvMessagesPage,
 };
 
 log.debug('state/chat loaded');

@@ -111,7 +111,7 @@ export default function Cockpit(props: {
               when={daemonStore.state.activeId}
               fallback={<RailEmptyPanel />}
             >
-              <section class="tab-panel three-col">
+              <section class={`tab-panel three-col${uiStore.state.modulesCollapsed ? ' nav-collapsed' : ''}`}>
                 {/* Middle two columns: architect zone keeps its own
                     nav-col + splitter + left-col; migrated top-tab
                     zones (Bookmarks, Crons, Links, Protocols, Diary,
@@ -121,8 +121,24 @@ export default function Cockpit(props: {
                   when={zone() === 'architect'}
                   fallback={<MigratedZoneHost zone={zone()} />}
                 >
-                  <aside class="nav-col col">
-                    <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
+                  <aside class={`nav-col col${uiStore.state.modulesCollapsed ? ' collapsed' : ''}`}>
+                    <Show
+                      when={!uiStore.state.modulesCollapsed}
+                      fallback={
+                        <button
+                          type="button"
+                          class="nav-rail"
+                          onClick={() => uiStore.toggleModulesCollapsed()}
+                          title="Expand modules"
+                          aria-label="Expand modules column"
+                          style={{ display: 'flex', background: 'transparent', border: 'none' }}
+                        >
+                          Modules
+                        </button>
+                      }
+                    >
+                      <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
+                    </Show>
                   </aside>
 
                   <Splitter resize="col-nav" />

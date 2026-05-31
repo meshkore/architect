@@ -27,18 +27,48 @@ const [phase, setPhase] = createSignal<Phase>({ kind: 'step', idx: 0 });
 let cancelled = false;
 let runToken = 0;
 
+// py-1.11.1-cockpit — outcome ledger so the DaemonOutdatedPanel can:
+//   • hide its ChoiceView while the flow is `running` (replace by a
+//     "Updating now…" loader so the operator doesn't see both the
+//     full-step modal AND the choice buttons at the same time);
+//   • remove the `auto` option from ChoiceView after a `failed`
+//     attempt so the operator doesn't loop on a path that just
+//     refused them.
+// Cleared back to `idle` when the operator manually re-triggers from
+// any of the three buttons (auto / agent / manual). A successful run
+// flips state.outdated=false and the whole panel unmounts, so we
+// don't need to track `succeeded` explicitly.
+export type AutoUpdateOutcome = 'idle' | 'running' | 'failed';
+const [outcome, setOutcome] = createSignal<AutoUpdateOutcome>('idle');
+export const autoUpdateOutcome = (): AutoUpdateOutcome => outcome();
+const [lastErrorReason, setLastErrorReason] = createSignal<string | null>(null);
+export const autoUpdateLastErrorReason = (): string | null => lastErrorReason();
+
 export const isAutoUpdating = (): boolean => isOpen();
 
 export function openAutoUpdateFlow(): void {
   if (isOpen()) return;
   cancelled = false;
+  setOutcome('running');
+  setLastErrorReason(null);
   setPhase({ kind: 'step', idx: 0 });
   setIsOpen(true);
   void runFlow();
 }
 
-const dismiss = (): void => { cancelled = true; setIsOpen(false); };
-const fallback = (): void => { setIsOpen(false); /* V97: cockpit's inline DaemonOutdatedPanel takes over */ };
+// Operator explicitly bailed → leave outcome as `failed` (or `idle` if
+// we were still on step 0) so the panel shows the choice options.
+const dismiss = (): void => {
+  cancelled = true;
+  if (outcome() === 'running') setOutcome('failed');
+  setIsOpen(false);
+};
+// "Use a different path" → modal closes, panel surfaces ChoiceView
+// without the auto option (we just failed at it).
+const fallback = (): void => {
+  if (outcome() === 'running') setOutcome('failed');
+  setIsOpen(false);
+};
 
 async function sleep(ms: number): Promise<void> {
   const start = Date.now();
@@ -72,7 +102,7 @@ async function runFlow(): Promise<void> {
   const myRun = ++runToken;
   cancelled = false;
   const client = daemonStore.state.client;
-  if (!client) { dismiss(); return; }
+  if (!client) { setOutcome('failed'); setLastErrorReason('no daemon client'); dismiss(); return; }
   setPhase({ kind: 'step', idx: 0 });
   try {
     const r = await client.selfUpdate({});
@@ -83,12 +113,18 @@ async function runFlow(): Promise<void> {
         const d = JSON.parse(r.body) as { convs?: unknown };
         if (Array.isArray(d.convs)) convs = d.convs.filter((c): c is string => typeof c === 'string');
       } catch { /* not JSON */ }
+      // Operator-actionable: chat turns are in flight. Outcome stays
+      // `running` because the BusyView lets them cancel + retry inline.
+      // If they `fallback` from there, `fallback()` flips to `failed`.
       setPhase({ kind: 'busy', convs });
       return;
     }
     if (!r.ok) {
       log.warn('[auto-update] /self-update failed', r.status, r.body);
-      setPhase({ kind: 'error', reason: `Daemon refused the update: ${r.status} ${r.body.slice(0, 200)}` });
+      const reason = `Daemon refused the update: ${r.status} ${r.body.slice(0, 200)}`;
+      setOutcome('failed');
+      setLastErrorReason(reason);
+      setPhase({ kind: 'error', reason });
       return;
     }
     const { new_port, new_pid } = r.data;
@@ -103,14 +139,13 @@ async function runFlow(): Promise<void> {
     const newHealth = await awaitNewDaemon(new_port, myRun);
     if (myRun !== runToken || cancelled) return;
     if (!newHealth) {
-      setPhase({
-        kind: 'error',
-        newPort: new_port,
-        reason:
-          `The new daemon spawned (pid ${new_pid}) on port ${new_port} but didn't answer ` +
-          `/health after ~12 s. It may still be loading; retry, or open a terminal in the ` +
-          `repo and run \`python3 .meshkore/scripts/daemon.py --port ${new_port}\` manually.`,
-      });
+      const reason =
+        `The new daemon spawned (pid ${new_pid}) on port ${new_port} but didn't answer ` +
+        `/health after ~12 s. It may still be loading; retry, or open a terminal in the ` +
+        `repo and run \`python3 .meshkore/scripts/daemon.py --port ${new_port}\` manually.`;
+      setOutcome('failed');
+      setLastErrorReason(reason);
+      setPhase({ kind: 'error', newPort: new_port, reason });
       return;
     }
     setPhase({ kind: 'step', idx: 3 });
@@ -125,26 +160,27 @@ async function runFlow(): Promise<void> {
     const ok = await daemonStore.switchToPort(new_port);
     if (myRun !== runToken || cancelled) return;
     if (!ok) {
-      setPhase({
-        kind: 'error',
-        newPort: new_port,
-        reason:
-          `The new daemon answered /health but the cockpit couldn't attach to it. ` +
-          `This is usually a TLS handshake failure — make sure the new daemon picked ` +
-          `up the tls/ bundle. Click Retry to try again, or use the manual options.`,
-      });
+      const reason =
+        `The new daemon answered /health but the cockpit couldn't attach to it. ` +
+        `This is usually a TLS handshake failure — make sure the new daemon picked ` +
+        `up the tls/ bundle. Click Retry to try again, or use the manual options.`;
+      setOutcome('failed');
+      setLastErrorReason(reason);
+      setPhase({ kind: 'error', newPort: new_port, reason });
       return;
     }
     // Attach succeeded — close the modal. daemonStore.outdated will
     // flip back to false on its own; Cockpit re-mounts the columns.
+    setOutcome('idle');
+    setLastErrorReason(null);
     setIsOpen(false);
   } catch (err) {
     if (myRun !== runToken) return;
     log.warn('[auto-update] flow threw', err);
-    setPhase({
-      kind: 'error',
-      reason: err instanceof Error ? err.message : String(err),
-    });
+    const reason = err instanceof Error ? err.message : String(err);
+    setOutcome('failed');
+    setLastErrorReason(reason);
+    setPhase({ kind: 'error', reason });
   }
 }
 

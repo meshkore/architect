@@ -19,18 +19,14 @@ export function ManualView(props: ManualViewProps): JSX.Element {
   };
   return (
     <>
-      <div class="flex items-center gap-2 mb-2">
+      <div class="flex items-center gap-2 mb-3">
         <button
           type="button"
-          class="text-[11px] text-gray-400 hover:text-emerald-300 flex items-center gap-1"
+          class="text-[11px] text-gray-500 hover:text-emerald-300"
           onClick={props.onBack}
         >← back</button>
-        <span class="text-[12px] text-gray-300 font-semibold">Run this in the project folder</span>
+        <span class="text-[12px] text-gray-200 font-semibold">Paste in a terminal at the project root</span>
       </div>
-      <p class="text-[11px] text-gray-500 mb-3 leading-relaxed">
-        Open a terminal in the directory where{' '}
-        <code class="font-mono">.meshkore/</code>{' '}lives, then paste:
-      </p>
       <pre class="bg-gray-950 border border-gray-800 rounded p-3 text-[11px] font-mono text-emerald-200 whitespace-pre-wrap leading-relaxed mb-3">{props.shellCmd}</pre>
       <div class="flex gap-2">
         <button

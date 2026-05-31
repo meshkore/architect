@@ -44,6 +44,11 @@ const SNAPSHOT_REFRESH_TYPES = new Set<string>([
 
 const CHAT_TYPE_PREFIX = 'chat.';
 const RUN_TYPE_PREFIX = 'run.';
+// py-1.11.0 — chat-state-rearchitecture. Conv lifecycle events emitted
+// at exact mutation points so cockpits update the rail without
+// polling /state. Active-cluster only — non-active clusters refetch
+// on switch back via bindCluster's hydration path.
+const CONV_TYPE_PREFIX = 'conv.';
 
 /**
  * Attach the bus. Returns a teardown function — call it from
@@ -64,6 +69,14 @@ export function attachEventBus(ws: DaemonWS, client: DaemonClient, clusterKey: s
       // when inactive, it mutates the cached slice so the operator
       // sees the messages on switch back.
       chatStore.ingestEventForCluster(clusterKey, ev);
+      return;
+    }
+    if (t.startsWith(CONV_TYPE_PREFIX)) {
+      // py-1.11.0 — chat-state-rearchitecture. conv.* events update
+      // the daemon-authoritative summaries store. ingestConvEvent is
+      // a no-op until snapshot.v1 has hydrated at least once, so on
+      // old daemons (or before boot finishes) we silently ignore.
+      chatStore.ingestConvEvent(ev);
       return;
     }
     if (t.startsWith(RUN_TYPE_PREFIX)) {

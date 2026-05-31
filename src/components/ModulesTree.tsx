@@ -31,25 +31,37 @@ export default function ModulesTree(props: { selected: string | null; onSelect: 
   return (
     <nav class="text-sm select-none">
       <div class="flex items-center justify-between mb-2 px-2 gap-2">
-        <span class="text-xs font-mono uppercase tracking-wider text-gray-500">Modules</span>
-        <div class="flex gap-1">
-          <For each={PILLS}>
-            {(p) => (
-              <button
-                type="button"
-                onClick={() => uiStore.setModulesPill(p)}
-                title={p === 'work' ? 'modules with active tasks' : p === 'stb' ? 'leaf modules without active tasks' : 'all modules'}
-                class={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
-                  uiStore.state.modulesPill === p
-                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20'
-                    : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-gray-200'
-                }`}
-              >
-                {p}
-              </button>
-            )}
-          </For>
-        </div>
+        <button
+          type="button"
+          onClick={() => uiStore.toggleModulesCollapsed()}
+          title="Collapse modules column"
+          class="text-xs font-mono uppercase tracking-wider text-gray-500 hover:text-emerald-300 transition-colors bg-transparent border-0 p-0 cursor-pointer"
+        >
+          Modules
+        </button>
+        {/* RJJ: filter pills (all / work / stb) hidden for now — de momento
+            esto no lo filtramos. Code preserved below, gated by a Show that
+            never renders, so it can be re-enabled by flipping the flag. */}
+        <Show when={false}>
+          <div class="flex gap-1">
+            <For each={PILLS}>
+              {(p) => (
+                <button
+                  type="button"
+                  onClick={() => uiStore.setModulesPill(p)}
+                  title={p === 'work' ? 'modules with active tasks' : p === 'stb' ? 'leaf modules without active tasks' : 'all modules'}
+                  class={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                    uiStore.state.modulesPill === p
+                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20'
+                      : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-gray-200'
+                  }`}
+                >
+                  {p}
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
       </div>
       <button
         type="button"

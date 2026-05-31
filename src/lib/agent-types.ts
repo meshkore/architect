@@ -13,8 +13,17 @@
  *
  * Kept client-side (not fetched from the daemon) so the cockpit can render
  * agent identity while offline / before the daemon is reachable.
+ *
+ * py-1.10.24 — Adds a VISUAL-ONLY kind `master-architect` for the
+ * always-on onboarding coordinator (`_onboarding_v1`). It isn't a
+ * real daemon agent type (stays `custom` on the wire), so adding it
+ * to AGENT_TYPES would force a daemon-side mirror. Instead the
+ * visual lookup goes through `agentVisualInfo(conv, meta)` which
+ * special-cases the onboarding conv id + the roadmap-architect slug
+ * pattern. Pure cosmetics, zero behavioural impact.
  */
 import type { AgentType } from '~/state/chat';
+import { ONBOARDING_CONV_ID } from '~/state/chat';
 
 export interface AgentTypeInfo {
   id: AgentType;
@@ -147,4 +156,57 @@ export function agentTypeColor(t: AgentType | string | undefined | null): string
 
 export function isServiceType(t: AgentType | string | undefined | null): boolean {
   return !!t && t !== 'custom' && t in AGENT_TYPES;
+}
+
+// py-1.10.24 — Visual-only kind for the always-on onboarding
+// coordinator (A001). The conv stays `agent_type: custom` on the
+// daemon side; we just paint it distinctly so the operator can spot
+// the project's principal architect at a glance versus the generic
+// coder fleet.
+//
+// Color choice: pink-500 (#ec4899) — clearly distinct from
+//   • emerald  (#34d399) — general coder
+//   • cyan     (#22d3ee) — roadmap-architect (Run All coordinator)
+//   • purple   (#a78bfa) — db
+//   • red      (#f87171) — audit
+//   • amber    (#fbbf24) — testing
+// Pink signals authority/identity without overlapping any service.
+const MASTER_ARCHITECT_INFO: AgentTypeInfo = {
+  id: 'custom' as AgentType, // back-fill — daemon-side type is still 'custom'
+  label: 'Master Architect',
+  shortLabel: 'Master',
+  emoji: '👑',
+  color: '#ec4899',
+  role:
+    'The cluster\'s principal coordinator. Always-on conv anchored at ' +
+    '`_onboarding_v1`. Sets up the project, designs the roadmap, owns ' +
+    'cross-cutting decisions, and answers `[architect-consult]` queries ' +
+    'from the Run All architect. One per cluster.',
+};
+
+/** py-1.10.24 — Visual-only resolution: look at the conv id first,
+ *  then the meta.type, then fall back to custom. The conv id is the
+ *  most authoritative signal because:
+ *    • `_onboarding_v1` ↔ Master Architect (A001) — unforgeable
+ *    • `roadmap-architect-<slug>` ↔ Roadmap Architect — unforgeable
+ *    • everything else falls through to `meta.type`
+ *
+ *  Callers that don't have the conv id can pass `null` and the
+ *  function degrades gracefully to `agentTypeInfo(meta.type)`. */
+export function agentVisualInfo(
+  conv: string | null | undefined,
+  meta: { type?: AgentType | string } | null | undefined,
+): AgentTypeInfo {
+  if (conv === ONBOARDING_CONV_ID) return MASTER_ARCHITECT_INFO;
+  if (conv && conv.startsWith('roadmap-architect-')) {
+    return AGENT_TYPES['roadmap-architect'];
+  }
+  return agentTypeInfo(meta?.type);
+}
+
+export function agentVisualColor(
+  conv: string | null | undefined,
+  meta: { type?: AgentType | string } | null | undefined,
+): string {
+  return agentVisualInfo(conv, meta).color;
 }

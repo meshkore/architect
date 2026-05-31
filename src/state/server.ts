@@ -21,7 +21,8 @@
 
 import { createStore } from 'solid-js/store';
 import { createMemo } from 'solid-js';
-import type { DaemonClient } from '~/lib/daemon-client';
+import type { DaemonClient, ChatConvSummary } from '~/lib/daemon-client';
+import { chatStore } from '~/state/chat';
 import { log } from '~/lib/log';
 
 export interface ClusterInfo {
@@ -54,6 +55,16 @@ export interface ServerInitiative {
   modules?: string[];
   target?: string;
   body?: string;
+  // py-1.10.15 — roadmap-ordering-archive fields.
+  // `next` is the linked-list pointer the operator curates in
+  // frontmatter; the daemon already walks it before emitting the
+  // array, so the cockpit consumes the order verbatim. `completed_at`
+  // + `commit_sha` populate on auto-archive (D-RM-ARCHIVE-02) and
+  // drive the archived-view chronological sort.
+  next?: string | null;
+  completed_at?: string | null;
+  commit_sha?: string | null;
+  task_total?: number;
   [k: string]: unknown;
 }
 
@@ -66,13 +77,20 @@ export interface ServerModule {
   [k: string]: unknown;
 }
 
+/** Legacy back-compat alias. Pre-py-1.11.0 the daemon emitted a
+ *  `chat_activity` join on /health and /state; the cockpit consumed it
+ *  via selectors. Phase 2 deleted both the payload field and the
+ *  selector consumers. ChatConvSummary now carries the same data.
+ *  Kept as a re-export so any third-party type importer (devtools,
+ *  external tools) doesn't break on a missing symbol. */
+export type ChatActivityEntry = ChatConvSummary;
+
 export interface ServerSnapshot {
   cluster?: ClusterInfo;
   modules?: ServerModule[];
   roadmap?: { tasks?: ServerTask[]; stats?: Record<string, number> };
   initiatives?: ServerInitiative[];
   docs?: Record<string, unknown>;
-  timeline?: { recent_events?: Array<{ type: string; [k: string]: unknown }> };
   generated_at?: string;
 }
 
@@ -264,4 +282,73 @@ export const isProjectEmpty = createMemo<boolean>(() => {
   return inis.length === 0 && tasks.length === 0;
 });
 
-log.debug('state/server loaded (MP2 per-cluster)');
+// ── Live activity selectors (py-1.11.0+) ────────────────────────────
+// Single source of truth for "what's live right now" across rail,
+// roadmap, and chat-wall affordances. Reads from chatStore.state.convs,
+// populated by GET /chat/snapshot + WS conv.* events. Was previously a
+// /state.chat_activity join (pre-Phase-2). Same public API so consumers
+// (InitiativeCard, TaskCard, ChatThread, ChatRail) don't change.
+
+const allConvs = createMemo<ChatConvSummary[]>(
+  () => Object.values(chatStore.state.convs),
+);
+
+/** Set of conv ids that have their OWN ChatRunner streaming. */
+export const liveConvs = createMemo<Set<string>>(() => {
+  const s = new Set<string>();
+  for (const c of allConvs()) if (c.live) s.add(c.conv);
+  return s;
+});
+
+/** Conv id → list of child conv ids it's waiting on. */
+export const waitingByConv = createMemo<Record<string, string[]>>(() => {
+  const out: Record<string, string[]> = {};
+  for (const c of allConvs()) {
+    if (c.waiting_on && c.waiting_on.length > 0) out[c.conv] = c.waiting_on;
+  }
+  return out;
+});
+
+/** Conv ids that are coordinating (waiting on >=1 live child) and
+ *  whose own runner is NOT live. The rail / wall use this to render
+ *  the 'coordinating' state instead of 'idle'. */
+export const coordinatingConvs = createMemo<Set<string>>(() => {
+  const s = new Set<string>();
+  for (const c of allConvs()) {
+    if (!c.live && c.coordinating) s.add(c.conv);
+  }
+  return s;
+});
+
+/** Initiative ids that have at least one live conv. */
+export const activeInitiativeIds = createMemo<Set<string>>(() => {
+  const s = new Set<string>();
+  for (const c of allConvs()) {
+    if (c.live && c.initiative_id) s.add(c.initiative_id);
+  }
+  return s;
+});
+
+/** Task ids currently being worked on by a live conv. Drives the
+ *  per-task chip pulse in the roadmap regardless of the task file's
+ *  on-disk `status` field. */
+export const activeTaskIds = createMemo<Set<string>>(() => {
+  const s = new Set<string>();
+  for (const c of allConvs()) {
+    if (c.live && c.task_id) s.add(c.task_id);
+  }
+  return s;
+});
+
+/** Live entries grouped by initiative id. Lets InitiativeCard surface
+ *  the actual agent ids working on it (e.g. "A015 · A902"). */
+export const activeEntriesByInitiative = createMemo<Record<string, ChatConvSummary[]>>(() => {
+  const out: Record<string, ChatConvSummary[]> = {};
+  for (const c of allConvs()) {
+    if (!c.live || !c.initiative_id) continue;
+    (out[c.initiative_id] ??= []).push(c);
+  }
+  return out;
+});
+
+log.debug('state/server loaded (py-1.11.0+ — convs-derived selectors)');

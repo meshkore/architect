@@ -1,6 +1,8 @@
-import { For, Show, createSignal, onCleanup, onMount } from 'solid-js';
-import { chatStore, type ChatMsg } from '~/state/chat';
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+import { chatStore, ONBOARDING_CONV_ID, type ChatMsg } from '~/state/chat';
+import { daemonStore } from '~/state/daemon';
 import { MessageBubble, PreparingBubble, ToolUseBubble, TaskLifecycleBubble } from '~/components/ChatBubbles';
+import { waitingByConv } from '~/state/server';
 import type { StreamItem } from '~/lib/chat-stream';
 
 // V89.1 — Hard timeout for the preparing bubble. If no delta / final
@@ -20,6 +22,35 @@ export default function ChatThread(props: {
   onMount(() => {
     const iv = setInterval(() => setNowMs(Date.now()), 1000);
     onCleanup(() => clearInterval(iv));
+  });
+
+  // py-1.11.0 — Lazy-load the active conv's recent messages the first
+  // time it gains focus. Messages come from `GET /chat/conv/<id>/messages`
+  // (newest 200) instead of the legacy `state.timeline.recent_events`
+  // replay. Daemon-authoritative: we don't render anything until the
+  // fetch resolves, but the rail card is already painted from
+  // `chatStore.state.convs[id]` which arrived in the boot snapshot.
+  // Re-fetches only when activeConv changes AND convMap is empty (the
+  // WS keeps it fresh after that).
+  const loadedConvs = new Set<string>();
+  createEffect(() => {
+    const conv = chatStore.state.activeConv;
+    if (!conv || conv === ONBOARDING_CONV_ID) return;
+    if (loadedConvs.has(conv)) return;
+    const summary = chatStore.state.convs[conv];
+    const existing = chatStore.state.convMap[conv] ?? [];
+    if (existing.length > 0) {
+      loadedConvs.add(conv);
+      return;
+    }
+    if (!summary || summary.msg_count === 0) {
+      loadedConvs.add(conv);
+      return;
+    }
+    const client = daemonStore.state.client;
+    if (!client) return;
+    loadedConvs.add(conv);
+    void chatStore.loadConvMessagesPage(client, conv, { limit: 200 });
   });
 
   // V86p — the "preparing" bubble appears when the active conv is in
@@ -68,6 +99,57 @@ export default function ChatThread(props: {
       <Show when={preparingAt()}>
         {(ts) => <PreparingBubble dispatchedAt={ts()} />}
       </Show>
+      <Show when={waitingChildren().length > 0 && !preparingAt() && !props.stream.live}>
+        <WaitingOnPill children_={waitingChildren()} />
+      </Show>
+    </div>
+  );
+
+  // py-1.11.0 — Resolve the list of child convs this conv is waiting
+  // on (subagents whose `parent_conv` points here and are streaming
+  // right now). Daemon-authoritative via `chatStore.state.convs[conv].waiting_on`
+  // (re-exported by `waitingByConv()` for back-compat). Empty when this
+  // conv isn't coordinating.
+  function waitingChildren(): Array<{ conv: string; agent_id: string | null }> {
+    const conv = chatStore.state.activeConv;
+    if (!conv) return [];
+    const children = waitingByConv()[conv] ?? [];
+    if (children.length === 0) return [];
+    return children.map((c) => ({
+      conv: c,
+      agent_id: chatStore.state.convMeta[c]?.agentId ?? null,
+    }));
+  }
+}
+
+/** Inline pill rendered when the active conv has dispatched subagents
+ *  and is waiting for their finals (architect coordinator pattern).
+ *  Renders agent ids — clicking one would ideally jump to that conv;
+ *  for now it's informational. */
+function WaitingOnPill(props: { children_: Array<{ conv: string; agent_id: string | null }> }) {
+  const setActive = (conv: string) => chatStore.setActiveConv(conv);
+  return (
+    <div class="flex items-start gap-2 text-[12px] text-gray-400 pl-2 pt-1">
+      <span class="inline-flex items-center gap-1 mt-0.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft" />
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:150ms]" />
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:300ms]" />
+      </span>
+      <span class="flex flex-wrap items-center gap-1.5">
+        <span class="text-emerald-300/80">Waiting on</span>
+        <For each={props.children_}>
+          {(c) => (
+            <button
+              type="button"
+              onClick={() => setActive(c.conv)}
+              title={`Open ${c.conv}`}
+              class="font-mono text-[11px] px-1.5 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20"
+            >
+              {c.agent_id || c.conv.slice(0, 16)}
+            </button>
+          )}
+        </For>
+      </span>
     </div>
   );
 }

@@ -54,15 +54,17 @@ export function storeToken(token: string, health?: HealthResponse, port?: number
 }
 
 /**
- * V86e — Probe ONLY the operator's last-known port (with 5570 as the
- * fallback when there's no session memory). The old version walked
- * 5570–5574 on every boot; every miss was a Chrome LNA Issue and an
- * empty TLS handshake against the loopback daemon. With a saved port,
- * that means exactly ONE probe on a typical boot.
+ * V86e (revised py-1.10.18) — Probe the operator's last-known port +
+ * the canonical 5570–5574 in parallel. Rationale: a sequence of
+ * `kill -TERM` + restart will often migrate the daemon by 1–2 ports
+ * because the kernel keeps the prior listener in TIME_WAIT briefly.
+ * The original "last + 5570" range missed that case silently and
+ * left the cockpit stuck on "No daemon detected". Parallel probe
+ * means the cold-boot path is still ~one round-trip total instead of
+ * 5×TIMEOUT serial.
  *
- * Full-range discovery (5570–5589) now lives behind the operator's
- * explicit "Scan ports" / "Rescan" button in the rail — see
- * `discovery.discoverProjects({ fullScan: true })`.
+ * Full-range discovery (5570–5589) still lives behind the operator's
+ * explicit "Scan ports" button in the rail.
  */
 export const BOOT_PROBE_TIMEOUT_MS = 1200;
 
@@ -70,27 +72,38 @@ export function bootProbePorts(): number[] {
   const last = parseInt(localStorage.getItem('meshcore-last-port') || '0', 10);
   const ordered: number[] = [];
   if (last >= 5570 && last <= 5589) ordered.push(last);
-  if (!ordered.includes(5570)) ordered.push(5570);
+  for (let p = 5570; p <= 5574; p++) {
+    if (!ordered.includes(p)) ordered.push(p);
+  }
   return ordered;
 }
 
 export async function probeLocal(timeoutMs = BOOT_PROBE_TIMEOUT_MS): Promise<{ port: number; health: HealthResponse } | null> {
-  for (const port of bootProbePorts()) {
-    const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), timeoutMs);
-    try {
-      const res = await fetch(`${daemonHttpBase(port)}/health`, { signal: ctl.signal });
-      clearTimeout(t);
-      if (res.ok) {
+  const ports = bootProbePorts();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  // Promise.any resolves with the FIRST fulfilled probe; we abort the
+  // rest as soon as a winner is known to avoid 4 wasted fetches sitting
+  // in CONNECTING. Each probe rejects on non-OK / network error so
+  // they don't accidentally "win" with a stale daemon's bad response.
+  try {
+    const winner = await Promise.any(
+      ports.map(async (port) => {
+        const res = await fetch(`${daemonHttpBase(port)}/health`, { signal: ctl.signal });
+        if (!res.ok) throw new Error(`port ${port}: HTTP ${res.status}`);
         const health = await res.json() as HealthResponse;
         return { port, health };
-      }
-    } catch {
-      clearTimeout(t);
-      // Connection refused / aborted — try the next port.
-    }
+      }),
+    );
+    return winner;
+  } catch {
+    // All probes failed (AggregateError from Promise.any) or the
+    // outer timeout fired — caller treats this as no-daemon.
+    return null;
+  } finally {
+    clearTimeout(timer);
+    ctl.abort();
   }
-  return null;
 }
 
 /**

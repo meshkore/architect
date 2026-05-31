@@ -70,31 +70,24 @@ export function isDaemonAtLeast(
 /**
  * MIN_DAEMON_VERSION — the lowest daemon version the cockpit promises
  * to support. When the connected daemon's version is lower, the
- * cockpit shows the V47 upgrade modal (M6.3) and offers `/self-update`.
+ * cockpit shows the upgrade modal and offers `/self-update`.
  *
- * V94 — bumped to `py-1.10.3`. The cockpit now hard-depends on:
- *   - /runs endpoints + run.* WS events (py-1.10.0)
- *   - /health.chat_active_convs (py-1.10.2)
- *   - roadmap-architect agent type (py-1.10.3)
- * Older daemons would silently no-op those calls, leaving the
- * operator with a broken UI and no diagnostic. Failing closed via
- * the outdated modal is the honest behaviour.
+ * py-1.11.1 — bumped to py-1.11.0. Phase 2 of chat-state-rearchitecture
+ * deleted the legacy fallback path; the cockpit now hard-depends on
+ * `GET /chat/snapshot` + WS `conv.*` events. A pre-1.11 daemon would
+ * leave the rail empty with no diagnostic — fail loud via the
+ * outdated panel instead.
  */
-export const MIN_DAEMON_VERSION = 'py-1.10.3';
+export const MIN_DAEMON_VERSION = 'py-1.11.0';
 
 /**
  * EXPECTED_DAEMON_VERSION — the daemon version THIS COCKPIT BUNDLE
  * was built against. Used for the "ahead" detector: if the daemon
  * is *newer* than this, the cockpit may not understand new event
  * shapes or response fields, so we surface a "refresh recommended"
- * banner. The operator's tab still works, but a refresh picks up
- * the matching cockpit bundle.
- *
- * Keep this equal to the daemon version of the LAST commit that
- * cockpit code statically depends on. If you bump the daemon and
- * the cockpit consumes a new field, bump this too in the same PR.
+ * banner.
  */
-export const EXPECTED_DAEMON_VERSION = 'py-1.10.3';
+export const EXPECTED_DAEMON_VERSION = 'py-1.11.1';
 
 /** Convenience: gate against the project's MIN. */
 export function meetsMinimum(actual: string | DaemonVersion | undefined | null): boolean {
@@ -121,7 +114,7 @@ export function meetsMinimum(actual: string | DaemonVersion | undefined | null):
  */
 export const REQUIRED_DAEMON_FEATURES: readonly string[] = [
   'agents.architect-wake.v1',  // py-1.10.22 — architect resumes after subagent finishes
-  'chat.activity.v1',          // py-1.10.20 — /state.chat_activity for live agent surface
+  'chat.snapshot.v1',          // py-1.11.0 — daemon-authoritative conv list + paginated messages
 ];
 
 export function missingRequiredFeatures(features: readonly string[] | undefined | null): string[] {

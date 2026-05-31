@@ -92,7 +92,13 @@ function shouldStream(): boolean {
 function daemonSupports(): boolean {
   const h = daemonHealth();
   const features = (h?.features as string[] | undefined) ?? [];
-  return features.includes(FEATURE_FLAG);
+  if (!features.includes(FEATURE_FLAG)) return false;
+  // py-1.10.21 — Honour `cluster.yaml.debug.enabled: false`. The daemon
+  // advertises the live state at `/health.debug.enabled`. When the
+  // operator opts out we drain silently so the buffer never grows.
+  const dbg = (h as { debug?: { enabled?: boolean } } | null)?.debug;
+  if (dbg && dbg.enabled === false) return false;
+  return true;
 }
 
 async function flushOnce(): Promise<void> {

@@ -21,7 +21,6 @@ import {
   readStoredToken,
   type ConnectionStatus,
 } from '~/lib/connection';
-import type { DaemonEvent } from '~/lib/daemon-client';
 import { store } from '~/state/store';
 import { daemonStore } from '~/state/daemon';
 import { serverStore, isProjectEmpty } from '~/state/server';
@@ -102,45 +101,24 @@ export default function App() {
       // hydrate from `/runs?active=1` once attach() resolves.
       storyStore.resetForClusterSwap();
     });
-    // V86q — Rehydrate convMap from the snapshot's
-    // `timeline.recent_events` (py-1.1.0+ — the daemon has been
-    // emitting up to 500 timeline events inside /state for this exact
-    // purpose since the very first cockpit). The vanilla V80 monolith
-    // had an `indexEvents()` step here that the Solid port dropped on
-    // its way over; now we replay them through the same `ingestEvent`
-    // reducer the WS uses, so dedup / streaming / cancel logic stays
-    // in ONE place and history survives a hard refresh.
+    // py-1.11.0 — chat-state-rearchitecture. The daemon is the single
+    // source of truth for the conv list. One round-trip to
+    // /chat/snapshot replaces the pre-1.11 chain (timeline replay +
+    // /health.chat_active_convs + bulk-archive + /chat/archives).
+    // After this hydrate, WS conv.* events keep convs in sync; chat
+    // messages are lazy-loaded by ChatThread when the conv gains focus.
     void serverStore.refreshNow(client, activeId).then(() => {
-      const snap = serverStore.state.snapshot as { timeline?: { recent_events?: DaemonEvent[] } } | null;
-      const events = snap?.timeline?.recent_events ?? [];
-      if (events.length > 0) {
-        chatStore.hydrateFromTimeline(events);
-        log.info('chat hydrated from timeline', { events: events.length });
-      }
-      // V89.4 — Seed agent-rail "working" + chat preparing bubble
-      // from /health.chat_active_convs (py-1.10.2). Closes the
-      // ~20 s gap between F5 and the next WS delta when the daemon
-      // had a turn in flight: the operator now sees the live agent
-      // immediately, before any new event arrives.
-      const activeConvs = health.chat_active_convs ?? [];
-      if (activeConvs.length > 0) {
-        chatStore.hydrateActiveConvs(activeConvs);
-        log.info('active convs hydrated from health', { count: activeConvs.length, convs: activeConvs });
-      }
-      // py-1.10.24-hotfix — Bulk-archive finished work-* subagent
-      // convs from the rail. Pass the live set so any conv the
-      // daemon still has in flight is left alone — bug from the
-      // first iteration that archived live mid-turn agents.
-      const liveSet = new Set<string>(activeConvs);
-      chatStore.bulkArchiveFinishedSubagents(liveSet);
-      // V102 + V104 — fetch the daemon's archived-conv list and seed
-      // the cockpit's filter. V104 fixes the wire shape: the daemon
-      // returns an ARRAY of {conv, archived_at, by}, not a Record.
-      void client.chatArchives().then((res) => {
+      void client.chatSnapshot().then((res) => {
         if (res.ok) {
-          const list = res.data.archived ?? [];
-          chatStore.hydrateArchives(list);
-          log.info('archives hydrated from daemon', { count: list.length });
+          chatStore.hydrateFromSnapshot(res.data);
+          log.info('chat.snapshot.v1 hydrated', {
+            convs: res.data.convs.length,
+            live: res.data.convs.filter((c) => c.live).length,
+            archived: res.data.convs.filter((c) => c.archived).length,
+            daemon_version: res.data.version,
+          });
+        } else {
+          log.error('chat.snapshot fetch failed; daemon may be older than py-1.11.0', { status: res.status });
         }
       });
       // V89 — fetch any active runs from the daemon so the UI paints

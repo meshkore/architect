@@ -29,6 +29,8 @@ export interface UIStoreState {
   initiativeGroupByPhase: boolean;
   /** Modules-tree filter pill (V80 monolith parity). */
   modulesPill: ModulesPill;
+  /** Collapse the modules nav column to a vertical rail. */
+  modulesCollapsed: boolean;
 }
 
 // localStorage keys — KEEP IN SYNC with V80 monolith.
@@ -42,6 +44,7 @@ const KEYS = {
   wsTab: 'mc-ws-tab',
   initiativeGroupByPhase: 'mc-initiative-group-by-phase',
   modulesPill: 'mc-modules-pill',
+  modulesCollapsed: 'mc-modules-collapsed',
 } as const;
 
 function readString<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
@@ -102,6 +105,7 @@ const initial: UIStoreState = {
   wsTab: readString<WsTab>(KEYS.wsTab, 'tasks', ['tasks', 'context', 'diagrams', 'modules']),
   initiativeGroupByPhase: readBool(KEYS.initiativeGroupByPhase, false),
   modulesPill: readString<ModulesPill>(KEYS.modulesPill, 'all', ['all', 'work', 'stb']),
+  modulesCollapsed: readBool(KEYS.modulesCollapsed, false),
 };
 
 const [state, setState] = createStore<UIStoreState>(initial);
@@ -151,6 +155,15 @@ function setModulesPill(p: ModulesPill): void {
   writeStr(KEYS.modulesPill, p);
 }
 
+function setModulesCollapsed(v: boolean): void {
+  setState('modulesCollapsed', v);
+  writeStr(KEYS.modulesCollapsed, v ? '1' : '0');
+}
+
+function toggleModulesCollapsed(): void {
+  setModulesCollapsed(!state.modulesCollapsed);
+}
+
 export const uiStore = {
   state,
   setActiveTab,
@@ -162,6 +175,8 @@ export const uiStore = {
   setWsTab,
   setInitiativeGroupByPhase,
   setModulesPill,
+  setModulesCollapsed,
+  toggleModulesCollapsed,
 };
 
 log.debug('state/ui loaded', state.activeTab, state.activeZone);

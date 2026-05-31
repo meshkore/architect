@@ -21,7 +21,7 @@
 
 import { Show } from 'solid-js';
 import type { ConvMeta, AgentStatusKind } from '~/state/chat';
-import { agentTypeInfo } from '~/lib/agent-types';
+import { agentVisualInfo } from '~/lib/agent-types';
 
 export interface AgentCardProps {
   conv: string;
@@ -51,7 +51,12 @@ export default function AgentCard(props: AgentCardProps) {
   // here so the rail card is the canonical place to learn "what kind
   // of agent this is", and the chat header stays compact for the
   // name + actions.
-  const typeInfo = () => agentTypeInfo(props.meta.type);
+  // py-1.10.24 — Visual-only resolution. The conv id outranks the
+  // stored type so A001 (`_onboarding_v1`) shows as Master Architect
+  // even though its daemon-side agent_type is still `custom`, and
+  // a roadmap-architect slug always renders as Architect regardless
+  // of what conv_meta drift may say.
+  const typeInfo = () => agentVisualInfo(props.conv, props.meta);
 
   // V86n — border state-machine. Precedence (highest first):
   //   drag-over  → dashed cyan-400 1.5px + bg cyan-500/5

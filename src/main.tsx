@@ -4,7 +4,13 @@ import App from '~/App';
 import { log } from '~/lib/log';
 import { installChunkGuard } from '~/lib/chunk-guard';
 import { startCockpitVersionPoll, COCKPIT_COMMIT, COCKPIT_VERSION } from '~/lib/cockpit-version';
+import { installDebugTransport } from '~/lib/debug-transport';
 import './index.css';
+
+// py-1.10.17 — Wire the debug stream sink BEFORE the first log.* call
+// so the boot line below is captured. Feature-gated server-side; no-op
+// if the daemon doesn't advertise `debug.stream.v1`.
+installDebugTransport();
 
 log.info('script loaded', { version: COCKPIT_VERSION, commit: COCKPIT_COMMIT });
 

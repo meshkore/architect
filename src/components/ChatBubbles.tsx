@@ -275,6 +275,23 @@ function formatBubbleTs(ts: string): string {
   }
 }
 
+// py-1.11.0-cockpit — Authors emitted by the daemon itself (not the
+// operator) when synthesising a `chat.user` event into a conv. Today:
+// `architect-wake` (the wake hook posts result previews into the parent
+// architect's conv after a subagent finishes). These messages are
+// agent↔agent traffic surfaced to the operator FOR INFORMATION — they
+// were rendering on the operator side, which read as "the operator
+// said this", a lie. We pivot them to the agent side (left-aligned,
+// agent tone) while keeping the verbatim author label.
+const SYSTEM_USER_AUTHORS = new Set<string>([
+  'architect-wake',
+]);
+
+function isSystemAuthored(msg: ChatMsg): boolean {
+  const a = msg.author?.trim();
+  return !!a && SYSTEM_USER_AUTHORS.has(a);
+}
+
 export function UserBubble(props: { msg: ChatMsg; prepend?: boolean }) {
   // UI strings are English-only. Legacy "architect"/"operator"/"user"
   // author tags are normalised to "USER"; any custom author string the
@@ -284,18 +301,21 @@ export function UserBubble(props: { msg: ChatMsg; prepend?: boolean }) {
     if (a && a !== 'architect' && a !== 'operator' && a !== 'user') return a;
     return 'USER';
   };
+  // py-1.11.0-cockpit — System-authored chat.user events render
+  // mirrored: left-aligned, agent tone. Same content, opposite side.
+  const sys = (): boolean => isSystemAuthored(props.msg);
   return (
-    <div class="flex flex-col gap-1.5 items-end w-full">
+    <div class={`flex flex-col gap-1.5 w-full ${sys() ? 'items-start' : 'items-end'}`}>
       <BubbleHeader
         primary={label()}
         ts={props.msg.ts}
-        align="right"
-        tone="operator"
+        align={sys() ? 'left' : 'right'}
+        tone={sys() ? 'agent' : 'operator'}
         suffix={props.prepend ? 'queued · merges into next turn' : undefined}
       />
-      <div class={`max-w-[85%] text-sm leading-relaxed text-right pr-2 ${
-        props.prepend ? 'text-amber-200/95' : 'text-gray-200'
-      }`}>
+      <div class={`max-w-[85%] text-sm leading-relaxed ${
+        sys() ? 'text-left pl-2' : 'text-right pr-2'
+      } ${props.prepend ? 'text-amber-200/95' : 'text-gray-200'}`}>
         <CollapsibleText text={props.msg.text} />
       </div>
     </div>

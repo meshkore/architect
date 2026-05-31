@@ -22,6 +22,7 @@
 
 import { Show, createMemo, createSignal } from 'solid-js';
 import type { ServerTask } from '~/state/server';
+import { activeTaskIds } from '~/state/server';
 
 const PREVIEW_LINES = 3;
 const PREVIEW_CHARS = 220;
@@ -73,9 +74,22 @@ export default function TaskCard(props: { task: ServerTask }) {
     >
       <div class="flex items-baseline gap-3 min-w-0">
         <span
-          aria-label={`status ${props.task.status}`}
-          title={props.task.status}
-          class={`flex-shrink-0 inline-block min-w-[3.5rem] text-center font-mono text-[10px] uppercase tracking-wider px-1.5 py-1 rounded border leading-none ${codeChipClass(props.task.status)}`}
+          aria-label={`status ${props.task.status}${activeTaskIds().has(props.task.id) ? ' · agent working live' : ''}`}
+          title={
+            activeTaskIds().has(props.task.id)
+              ? `${props.task.status} · agent working live`
+              : props.task.status
+          }
+          class={`flex-shrink-0 inline-block min-w-[3.5rem] text-center font-mono text-[10px] uppercase tracking-wider px-1.5 py-1 rounded border leading-none ${
+            // py-1.11.0 — Live signal wins over the on-disk task status:
+            // if any agent is currently dispatched against this task_id
+            // (derived from chatStore.state.convs[…].task_id where
+            // live=true), force the pulsing amber chip even if the
+            // task's frontmatter still says `next`/`planned`.
+            activeTaskIds().has(props.task.id)
+              ? 'bg-amber-500/30 text-amber-100 border-amber-400/70 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.35)]'
+              : codeChipClass(props.task.status)
+          }`}
         >
           {props.task.id}
         </span>

@@ -22,8 +22,7 @@ import InitiativeCard from '~/components/InitiativeCard';
 import EmptyOnboardingPanel from '~/components/EmptyOnboardingPanel';
 import { viewStore } from '~/state/view';
 import { chatStore } from '~/state/chat';
-import { storyStore } from '~/state/story';
-import { daemonStore } from '~/state/daemon';
+import { daemonStore, daemonHealth } from '~/state/daemon';
 import { uiStore } from '~/state/ui';
 import { log } from '~/lib/log';
 
@@ -190,46 +189,67 @@ export default function InitiativesPanel() {
   // Stop = cancel + archive that conv; only then does Run all spawn
   // a fresh one.
   const archCandidates = createMemo<string[]>(() => {
-    // V99 — Detect via TWO predicates so we don't miss convs whose
-    // type field is stale from a pre-V92 bundle (the type union
-    // hadn't been extended; ensureConvMeta may have fallen back to
-    // 'custom'). Slug prefix `roadmap-architect-…` is the
-    // unforgeable signal because createConv emits exactly that
-    // shape for this type. Either predicate hitting counts as
-    // "this is an architect conv".
-    return Object.entries(chatStore.state.convMeta)
-      .filter(([conv, meta]) => {
-        if (chatStore.state.archivedConvs[conv]) return false;
-        if (meta.type === 'roadmap-architect') return true;
-        if (conv.startsWith('roadmap-architect-')) return true;
+    // py-1.11.2-cockpit — Source of truth is `chatStore.state.convs`
+    // (daemon-authoritative since Phase 2). Reading from convMeta was
+    // the bug: it's a local cache that survives a cluster swap + can
+    // keep entries for convs the daemon has since archived. After my
+    // cleanup of ikamiro, the rail correctly showed only Master but
+    // STOP ARCHITECT still appeared because convMeta still held the
+    // archived roadmap-architect entry.
+    //
+    // Detection uses two predicates so we catch convs whose stored
+    // agent_type drifted ('custom' for some legacy entries) — the
+    // slug `roadmap-architect-*` is the unforgeable shape createConv
+    // emits for this role.
+    return Object.values(chatStore.state.convs)
+      .filter((c) => {
+        if (c.archived) return false;
+        if (c.agent_type === 'roadmap-architect') return true;
+        if (c.conv.startsWith('roadmap-architect-')) return true;
         return false;
       })
-      .sort((a, b) => {
-        const la = (chatStore.state.convMap[a[0]] ?? []).at(-1)?.ts ?? '';
-        const lb = (chatStore.state.convMap[b[0]] ?? []).at(-1)?.ts ?? '';
-        return lb.localeCompare(la);
-      })
-      .map(([conv]) => conv);
+      .sort((a, b) => (b.last_activity_at || '').localeCompare(a.last_activity_at || ''))
+      .map((c) => c.conv);
   });
   /** True when at least one non-archived roadmap-architect conv
-   *  exists. While true, the button is in "Stop" mode — clicking
-   *  cancels + archives the architect's conv so a fresh one can
-   *  spawn next time. Singleton-by-construction; multi-architect
-   *  was an accident waiting to happen. */
+   *  exists. Used to decide WHICH conv to reuse on Run All. */
   const architectExists = () => archCandidates().length > 0;
   const activeArchConv = (): string | null => archCandidates()[0] ?? null;
 
-  /** V106 — Any per-initiative story-run currently in flight on
-   *  the cluster. Used to MUTUAL-EXCLUDE Run all: while a single
-   *  initiative is running, spawning the roadmap architect would
-   *  fight over the same files. Operator's spec:
-   *  "si alguna iniciativa se está ejecutando, el botón Run all
-   *   debería estar apagado." */
-  const anyStoryRunLive = createMemo(() =>
-    storyStore.state.runs.some((r) =>
-      (r.status === 'running' || r.status === 'stopping') && r.live,
-    ),
-  );
+  /** py-1.11.2-cockpit — True only when the architect conv is LIVE
+   *  (own runner streaming OR coordinating subagents). Drives the
+   *  STOP button — idle architect convs (carrying past-pass summaries)
+   *  no longer trigger STOP, the operator gets "Run all" so they can
+   *  resume / continue. */
+  const architectLive = createMemo<boolean>(() => {
+    const conv = activeArchConv();
+    if (!conv) return false;
+    const s = chatStore.state.convs[conv];
+    return !!s && (s.live || s.coordinating);
+  });
+
+  /** py-1.11.2-cockpit — "Is any other activity in flight in this
+   *  cluster that ISN'T the roadmap architect itself?" Single source
+   *  of truth: `chatStore.state.convs` (daemon-authoritative). Covers
+   *  per-initiative story runs AND any subagent dispatched by the
+   *  architect AND manual chat turns. The architect's own conv is
+   *  excluded because its live state is what `architectLive` itself
+   *  reports — disabling Run All on the architect being live would be
+   *  redundant with the STOP/RUN toggle.
+   *
+   *  Spec 2026-05-31: "si hay otra historia en marcha, el botón Run
+   *  all debería estar apagado". Same rule applied symmetrically to
+   *  the per-initiative play buttons via `otherActivityLive` in
+   *  InitiativeCard. */
+  const anyStoryRunLive = createMemo<boolean>(() => {
+    const archConv = activeArchConv();
+    for (const c of Object.values(chatStore.state.convs)) {
+      if (!c.live && !c.coordinating) continue;
+      if (c.conv === archConv) continue; // the architect itself
+      return true;
+    }
+    return false;
+  });
   // V107.14 — The Run All feature-gate moved to the canonical
   // `daemonStore.state.outdated` signal (extended in lib/version.ts
   // via REQUIRED_DAEMON_FEATURES). When features are missing, the
@@ -240,16 +260,10 @@ export default function InitiativesPanel() {
   // a parallel UX path that confused operators; deleted here in
   // favour of the single Outdated-Panel + AutoUpdateFlow contract.
 
-  /** True only when the architect is mid-turn (streaming OR
-   *  awaiting first delta). Used purely as a label hint, not for
-   *  enabling/disabling the button. */
-  const architectStreaming = () => {
-    const conv = activeArchConv();
-    if (!conv) return false;
-    const list = chatStore.state.convMap[conv] ?? [];
-    if (list.some((m) => m.kind === 'assistant' && m.streaming)) return true;
-    return chatStore.state.pendingReplyConvs[conv] !== undefined;
-  };
+  // py-1.11.2-cockpit — `architectStreaming` deleted. Was used as a
+  // label hint on the STOP button; that role is now covered by the
+  // `animate-pulse` red dot on the button itself (which only renders
+  // when `architectLive()` is true).
 
   const onRunAll = async (): Promise<void> => {
     const client = daemonStore.state.client;
@@ -257,35 +271,24 @@ export default function InitiativesPanel() {
       log.warn('[run-all] no daemon client — abort');
       return;
     }
-    // V106.1 — STOP path. The original V100 spec said "Stop ≠ archive"
-    // (the conv stays as a permanent record). That created a deadlock:
-    // after the architect finished a turn (status=idle), the conv was
-    // still alive → architectExists() stayed true → per-initiative
-    // plays stayed disabled forever, and clicking "Stop architect"
-    // again did nothing visible (cancel on an idle conv is a no-op).
-    //
-    // V106.1 reverses it: Stop = cancel in-flight stream + archive
-    // the conv (both locally AND daemon-side). Archived convs still
-    // exist and are reachable via the "Archived" history filter, so
-    // we preserve the "permanent record" intent without leaving the
-    // system in a half-locked state.
-    if (architectExists()) {
+    // py-1.11.2-cockpit — STOP path runs only when the architect is
+    // LIVE (own runner streaming OR coordinating subagents). Idle
+    // architect convs (post-pass summaries) no longer trigger Stop;
+    // the operator sees "Run all" instead and clicking it RESUMES the
+    // existing conv with a new bootstrap, preserving the prior summary.
+    if (architectLive()) {
       const conv = activeArchConv();
       if (!conv) {
-        log.warn('[stop-architect] architectExists() true but activeArchConv() is null — state mismatch');
+        log.warn('[stop-architect] architectLive() true but activeArchConv() is null — state mismatch');
         return;
       }
-      log.info('[stop-architect] start', { conv, streaming: architectStreaming() });
-      // V50 — emit lifecycle marker into the debug stream so
-      // `GET /debug/tail` shows the operator's Stop click interleaved
-      // with the daemon's cancel/archive trace.
+      log.info('[stop-architect] start', { conv });
       void import('~/lib/debug-transport').then(({ debugEmit }) => {
-        debugEmit('ux.stop-architect', 'Stop Architect clicked', {
-          conv,
-          data: { streaming: architectStreaming() },
-        });
+        debugEmit('ux.stop-architect', 'Stop Architect clicked', { conv });
       });
-      // 1. Cancel any in-flight chat turn (no-op if already idle).
+      // Cancel any in-flight chat turn. The daemon broadcasts
+      // chat.cancelled + conv.activity → the rail flips back to idle
+      // and the button switches to "Run all" on its own.
       try {
         const res = await client.chatCancel(conv);
         log.info('[stop-architect] /chat/cancel', { ok: res.ok, status: res.status });
@@ -293,29 +296,11 @@ export default function InitiativesPanel() {
       } catch (e) {
         log.warn('[stop-architect] cancel threw', e instanceof Error ? e.message : String(e));
       }
-      // 2. Archive the conv on the daemon (authoritative).
-      try {
-        const res = await client.chatArchive(conv);
-        log.info('[stop-architect] /chat/archive', { ok: res.ok, status: res.status });
-        if (!res.ok) log.warn('[stop-architect] archive non-OK', res.status);
-      } catch (e) {
-        log.warn('[stop-architect] archive threw', e instanceof Error ? e.message : String(e));
-      }
-      // 3. Archive locally so the UI flips immediately (don't wait
-      //    for the WS broadcast to round-trip).
-      chatStore.archiveConv(conv);
-      log.info('[stop-architect] local archiveConv done', { conv, archivedNow: chatStore.state.archivedConvs[conv] === true });
-      // 4. Surface a non-architect conv so the operator isn't left
-      //    staring at the (now archived) architect chat.
-      const remaining = Object.keys(chatStore.state.convMeta).find(
-        (c) => !chatStore.state.archivedConvs[c] && c !== conv,
-      );
-      if (remaining) chatStore.setActiveConv(remaining);
-      log.info('[stop-architect] done — architectExists now?', architectExists());
       return;
     }
-    // SPAWN path — no architect exists. Build the visible-initiative
-    // summary (the architect reads the actual files itself).
+    // RUN ALL path — architect is idle (either no conv yet, or the
+    // previous pass finished). Build the visible-initiative summary
+    // (the architect reads the actual files itself).
     const list = filtered()
       .filter((it) => {
         if (viewStore.isInitiativeArchived(it.id)) return false;
@@ -325,7 +310,14 @@ export default function InitiativesPanel() {
         return tasks.some((t) => t.status !== 'done' && t.status !== 'cancelled');
       });
     if (list.length === 0) return;
-    const conv = chatStore.createConv({
+    // py-1.11.2-cockpit — REUSE the existing idle architect conv when
+    // present. Spawning a fresh roadmap-architect-* on every Run All
+    // was the source of "many equal coordinators" — operator's
+    // explicit ask 2026-05-31: "solo puede haber un coordinador del
+    // roadmap". Single conv per cluster, rerun continues the same
+    // thread with a new turn.
+    const existing = activeArchConv();
+    const conv = existing ?? chatStore.createConv({
       type: 'roadmap-architect',
       title: 'Roadmap Architect',
       model: 'auto',
@@ -405,39 +397,36 @@ export default function InitiativesPanel() {
               type="button"
               onClick={() => { void onRunAll(); }}
               disabled={
-                !architectExists() && (
+                !architectLive() && (
                   filtered().length === 0 ||
                   anyStoryRunLive()
                 )
               }
               title={
-                architectExists()
-                  ? (architectStreaming()
-                      ? 'Stop the running Roadmap Architect and archive its conv (Run all spawns fresh next time)'
-                      : 'An architect conv already exists — click to cancel + archive it so Run all can spawn a fresh one')
+                architectLive()
+                  ? 'Stop the running Roadmap Architect (cancel the in-flight turn; the conv stays so you can read the summary)'
                   : anyStoryRunLive()
-                    ? 'Hay otras iniciativas en marcha en este momento. No se puede ejecutar Run all a la vez — paráalas primero desde cada card.'
+                    ? 'Hay otras iniciativas en marcha. Páralas primero desde cada card.'
                     : filtered().length === 0
                       ? 'No hay iniciativas elegibles para Run all'
-                      : 'Spawn a Roadmap Architect agent to plan + dispatch the visible roadmap'
+                      : architectExists()
+                        ? 'Resume the existing Roadmap Architect with a new turn over the visible scope'
+                        : 'Spawn a Roadmap Architect agent to plan + dispatch the visible roadmap'
               }
               class={`px-3 py-1.5 rounded-md text-[11px] font-mono uppercase tracking-wider transition-colors border disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 ${
-                architectExists()
+                architectLive()
                   ? 'bg-red-500/15 hover:bg-red-500/30 text-red-300 border-red-500/40'
                   : 'bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border-cyan-500/40'
               }`}
             >
-              <Show when={architectExists()} fallback={
+              <Show when={architectLive()} fallback={
                 <span class="inline-flex items-center gap-1.5">
                   <span aria-hidden="true">🗺️</span>
                   <span class="runall-label-full">Run all</span>
                   <span class="runall-label-short" aria-hidden="true">Run</span>
                 </span>
               }>
-                <span
-                  class={`inline-block w-1.5 h-1.5 rounded-full bg-red-400 ${architectStreaming() ? 'animate-pulse' : ''}`}
-                  aria-hidden="true"
-                />
+                <span class="inline-block w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" aria-hidden="true" />
                 <span class="runall-label-full">Stop architect</span>
                 <span class="runall-label-short" aria-hidden="true">Stop</span>
               </Show>
@@ -451,6 +440,11 @@ export default function InitiativesPanel() {
             and feature gaps) is the single recovery surface. By the
             time InitiativesPanel renders, the daemon is guaranteed to
             satisfy the gate. */}
+        {/* py-1.10.26 — Rate-limit banner. Surfaces when any
+            agent_type is currently paused (auto from rate-limit
+            detection or manual via /agent-types/<t>/pause). One-click
+            unpause for operator override. */}
+        <RateLimitBanner />
         <Show when={filtered().length > 0} fallback={<NoMatch totalInitiatives={allInitiatives().length} />}>
           <ul class="space-y-4">
             <For each={filtered()}>
@@ -502,3 +496,135 @@ function NoMatch(props: { totalInitiatives: number }) {
 // DaemonOutdatedPanel + AutoUpdateFlow is the single recovery
 // surface. See lib/version.ts REQUIRED_DAEMON_FEATURES + state/daemon.ts
 // outdated computation for the unified trigger.
+
+/** py-1.10.27 — Quota / rate-limit pause banner.
+ *  Reads from `/health.quota` (per-key state — preferred) and falls
+ *  back to `/health.paused_agent_types` (back-compat for daemons that
+ *  haven't been upgraded yet). One row per paused quota_key:
+ *     `<platform>/<model> · until HH:MM · retried Nx · Unpause`
+ *  Unpause button posts to the daemon endpoint that matches the data
+ *  source (quota_key → /quota/<key>/unpause; agent_type → /agent-types/<t>/unpause).
+ */
+interface PausedRow {
+  label: string;            // what we show ("claude-code/auto" or agent_type fallback)
+  unpauseUrl: string;       // server-relative path to post to
+  expires_at: string;
+  reason?: string;
+  consecutive: number;
+  last_probe?: string;
+}
+function RateLimitBanner() {
+  const paused = createMemo<PausedRow[]>(() => {
+    const h = daemonHealth() as {
+      quota?: Record<string, {
+        paused?: boolean;
+        platform?: string;
+        model?: string;
+        paused_until?: string;
+        reason?: string;
+        consecutive_rate_limits?: number;
+        probes?: Array<{ at?: string; outcome?: string }>;
+      }>;
+      paused_agent_types?: Record<string, {
+        expires_at?: string;
+        reason?: string;
+        quota_key?: string;
+        consecutive_rate_limits?: number;
+      }>;
+    } | null;
+    const out: PausedRow[] = [];
+    // Prefer /health.quota — it's the canonical per-key view.
+    const q = h?.quota;
+    if (q && typeof q === 'object') {
+      for (const [key, entry] of Object.entries(q)) {
+        if (!entry?.paused) continue;
+        const probes = entry.probes ?? [];
+        const last = probes[probes.length - 1];
+        out.push({
+          label: key,
+          unpauseUrl: `/quota/${key}/unpause`,
+          expires_at: String(entry.paused_until ?? ''),
+          reason: entry.reason,
+          consecutive: Number(entry.consecutive_rate_limits ?? 0),
+          last_probe: last ? `${String(last.at ?? '').slice(11, 16)} → ${last.outcome ?? '?'}` : undefined,
+        });
+      }
+      return out;
+    }
+    // Back-compat fallback (daemon < py-1.10.27).
+    const legacy = h?.paused_agent_types;
+    if (legacy && typeof legacy === 'object') {
+      for (const [type, entry] of Object.entries(legacy)) {
+        out.push({
+          label: entry.quota_key ?? type,
+          unpauseUrl: `/agent-types/${type}/unpause`,
+          expires_at: String(entry.expires_at ?? ''),
+          reason: entry.reason,
+          consecutive: Number(entry.consecutive_rate_limits ?? 0),
+        });
+      }
+    }
+    return out;
+  });
+  const unpause = async (path: string): Promise<void> => {
+    const client = daemonStore.state.client;
+    if (!client) return;
+    try {
+      await fetch(`${client.transport.httpBase}${path}`, {
+        method: 'POST',
+        headers: client.transport.token
+          ? { Authorization: `Bearer ${client.transport.token}` }
+          : {},
+        body: JSON.stringify({}),
+      });
+      log.info('[rate-limit] unpause requested', { path });
+    } catch (e) {
+      log.warn('[rate-limit] unpause failed', e instanceof Error ? e.message : String(e));
+    }
+  };
+  return (
+    <Show when={paused().length > 0}>
+      <div class="mb-4 rounded-lg border border-rose-500/40 bg-rose-500/5 px-4 py-3 text-sm">
+        <div class="flex items-start gap-3">
+          <span class="text-rose-300 text-lg leading-none" aria-hidden="true">⏸</span>
+          <div class="flex-1 min-w-0">
+            <p class="font-medium text-rose-200">
+              {paused().length === 1 ? 'Quota pool paused — rate-limited' : `${paused().length} quota pools paused — rate-limited`}
+            </p>
+            <p class="text-rose-100/75 text-xs mt-1 leading-relaxed">
+              Dispatches against these pools will return 503 until the cooldown expires. The daemon's
+              QuotaProber re-checks each one every ~minute and auto-unpauses when the upstream window resets.
+            </p>
+            <div class="mt-3 space-y-1.5">
+              <For each={paused()}>
+                {(p) => (
+                  <div class="flex flex-wrap items-center gap-2 text-xs text-rose-100/80">
+                    <code class="font-mono px-1.5 py-0.5 rounded bg-rose-500/15 border border-rose-500/40 text-rose-100">{p.label}</code>
+                    <span class="text-gray-400">until</span>
+                    <span class="font-mono text-rose-200">{p.expires_at.slice(11, 16) || p.expires_at}</span>
+                    <Show when={p.consecutive > 1}>
+                      <span class="text-amber-300/80 font-mono">×{p.consecutive}</span>
+                    </Show>
+                    <Show when={p.last_probe}>
+                      <span class="text-gray-500 font-mono">probe@{p.last_probe}</span>
+                    </Show>
+                    <Show when={p.reason}>
+                      <span class="text-gray-500 truncate">· {p.reason}</span>
+                    </Show>
+                    <button
+                      type="button"
+                      onClick={() => { void unpause(p.unpauseUrl); }}
+                      class="ml-auto px-2 py-0.5 rounded-md text-[10px] font-mono uppercase tracking-wider border bg-rose-500/15 hover:bg-rose-500/30 text-rose-200 border-rose-500/40"
+                    >
+                      Unpause now
+                    </button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Show>
+  );
+}

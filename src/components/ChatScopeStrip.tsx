@@ -16,7 +16,7 @@
 
 import { Show, createSignal } from 'solid-js';
 import { ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
-import { agentTypeInfo } from '~/lib/agent-types';
+import { agentVisualInfo } from '~/lib/agent-types';
 import { debugDropCount } from '~/lib/debug-transport';
 
 interface Props {
@@ -43,7 +43,10 @@ export default function ChatScopeStrip(props: Props) {
   const [confirmArchive, setConfirmArchive] = createSignal(false);
 
   const title = () => props.meta?.title?.trim() || props.meta?.agentId || props.conv;
-  const typeInfo = () => agentTypeInfo(props.meta?.type);
+  // py-1.10.24 — Use conv-aware visual lookup so the onboarding conv
+  // shows as Master Architect (👑 pink) and roadmap-architect slugs
+  // render with the cyan cap even if conv_meta has drifted.
+  const typeInfo = () => agentVisualInfo(props.conv, props.meta);
   const chatActive = () => !props.historyOpen;
 
   const beginEdit = () => {

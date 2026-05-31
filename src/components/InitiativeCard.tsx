@@ -21,6 +21,7 @@
 
 import { For, Show, createMemo, createResource } from 'solid-js';
 import type { ServerInitiative, ServerTask } from '~/state/server';
+import { activeEntriesByInitiative } from '~/state/server';
 import { sortTasks, groupByPhases } from '~/components/initiative/task-grouping';
 import { TaskGrid, StatusBadge } from '~/components/initiative/TaskGrid';
 import { storyStore } from '~/state/story';
@@ -81,16 +82,38 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
     const r = thisRun();
     return !!r && r.status === 'paused';
   };
-  const isOtherLive = () => {
-    const r = storyStore.state.run;
-    if (!r || !r.live) return false;
-    return r.initiativeId !== props.initiative.id;
-  };
-  // V106 — when a Roadmap Architect (Run all) is active, per-initiative
-  // play buttons must be disabled. The architect drives the roadmap as
-  // a whole; letting the operator also spawn a per-initiative agent
-  // would race two coordinators on the same task graph.
-  const architectLive = () => chatStore.findActiveArchitectConv() !== null;
+  // py-1.11.2-cockpit — Unified "is anything else running in this
+  // cluster" predicate. Operator's spec 2026-05-31: "que no hay otra
+  // historia en marcha" — that single condition covers both:
+  //   1. Run All (the roadmap architect's own runner is live, OR it's
+  //      coordinating subagents)
+  //   2. Any per-initiative story-run elsewhere (its conv has live=true)
+  //   3. Any subagent the architect dispatched on another initiative
+  //      (work-* conv with live=true)
+  // The previous code split this into `isOtherLive()` + `architectLive()`
+  // and the second one read convMeta (a local cache that could lie),
+  // leaving the per-initiative play disabled long after a Run All
+  // ended. Reading from chatStore.state.convs (daemon-authoritative,
+  // updated via WS conv.activity) is the single source of truth.
+  const otherActivityLive = createMemo<boolean>(() => {
+    for (const c of Object.values(chatStore.state.convs)) {
+      if (!c.live && !c.coordinating) continue;
+      // A live worker tagged to THIS initiative isn't "other" activity.
+      if (c.initiative_id === props.initiative.id) continue;
+      return true;
+    }
+    return false;
+  });
+
+  // py-1.11.0 — live agents on THIS initiative, derived from
+  // chatStore.state.convs (entries where live=true && initiative_id
+  // matches). Drives the play→spinner swap so the operator sees
+  // who's working without leaving the roadmap view.
+  const liveAgentsHere = createMemo(() => {
+    const bucket = activeEntriesByInitiative()[props.initiative.id] ?? [];
+    return bucket;
+  });
+  const isWorking = (): boolean => liveAgentsHere().length > 0;
 
   const startRun = async (): Promise<void> => {
     const taskIds = collectStoryTaskIds(props.initiative.id);
@@ -213,15 +236,43 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
             </span>
           }
         >
+          {/* py-1.11.0 — When live agents are working on this initiative
+              (daemon-authoritative via chatStore.state.convs), the
+              disabled play turns into an animated spinner so the
+              operator sees activity at a glance. Tooltip + aria label
+              name the agents. */}
+          <Show when={isWorking()}>
+            <span
+              title={`Working: ${liveAgentsHere().map((e) => e.agent_id || e.conv).join(' · ')}`}
+              aria-label={`agents working on this initiative: ${liveAgentsHere().map((e) => e.agent_id || e.conv).join(', ')}`}
+              class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 border border-emerald-500/50 bg-emerald-500/15 text-emerald-200 relative"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+                class="animate-spin"
+                style={{ 'animation-duration': '1.6s' }}
+              >
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+            </span>
+          </Show>
+          <Show when={!isWorking()}>
           <button
             type="button"
             onClick={toggleRun}
-            disabled={(isOtherLive() || architectLive()) && !isThisLive()}
+            disabled={otherActivityLive() && !isThisLive()}
             title={
               isThisLive() ? 'Stop the run live on this initiative'
               : isThisPaused() ? 'Resume this run (the previous turn was cut by a reload)'
-              : architectLive() ? 'Run all está en marcha (Roadmap Architect activo). Páralo desde el botón Run all del header para arrancar iniciativas individuales.'
-              : isOtherLive() ? 'Another initiative is running — stop it first'
+              : otherActivityLive() ? 'Otra ejecución está en marcha en este cluster — páralas primero (Run All o la otra iniciativa).'
               : 'Run initiative (spawns a fresh agent)'
             }
             class={`w-7 h-7 rounded-md flex items-center justify-center text-xs flex-shrink-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:grayscale border ${
@@ -229,13 +280,14 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
                 ? 'bg-red-500/15 hover:bg-red-500/30 text-red-300 border-red-500/40'
                 : isThisPaused()
                   ? 'bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
-                  : architectLive()
+                  : otherActivityLive()
                     ? 'bg-gray-700/30 text-gray-500 border-gray-700/50'
                     : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
             }`}
           >
             {isThisLive() ? '■' : '▶'}
           </button>
+          </Show>
         </Show>
         <button
           type="button"

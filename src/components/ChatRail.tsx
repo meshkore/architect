@@ -1,8 +1,7 @@
 import { For, Show, createMemo, createSignal } from 'solid-js';
 import { chatStore, ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
-// isProjectEmpty no longer needed here — Coordinator is permanent (V82).
 import AgentCard from '~/components/AgentCard';
-import { agentTypeColor, isServiceType } from '~/lib/agent-types';
+import { agentVisualColor, isServiceType } from '~/lib/agent-types';
 import { uiStore } from '~/state/ui';
 import { loadRailOrder, saveRailOrder } from './chat/rail-order';
 
@@ -23,20 +22,19 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
     // V82 — Coordinator is the always-on agent. It's NEVER hidden from
     // the rail (even if user has typed no messages yet, even when the
     // project has initiatives) and it's ALWAYS pinned at the top.
-    // Earlier logic retired the synthetic card once initiatives appeared;
-    // we keep the card permanently because the Coordinator handles
-    // roadmap / cluster comms even after the project is bootstrapped.
     if (!chatStore.state.convMap[ONBOARDING_CONV_ID]) {
       chatStore.seedOnboardingConv();
     }
-    const all = Object.keys(chatStore.state.convMap).filter((c) => {
-      if (chatStore.state.archivedConvs[c]) return false;
-      return true;
-    });
+    // py-1.11.0 — chat-state-rearchitecture. The daemon-authoritative
+    // convs map is the source of truth for the rail. Until the boot
+    // snapshot fetch resolves the rail shows just the Coordinator card.
+    const snapshotConvs = chatStore.state.convs;
+    const all = Object.keys(snapshotConvs).filter((c) => !snapshotConvs[c]?.archived);
+    if (!all.includes(ONBOARDING_CONV_ID)) all.push(ONBOARDING_CONV_ID);
     all.forEach((c) => chatStore.ensureConvMeta(c));
     const byRecency = (a: string, b: string) => {
-      const aLast = (chatStore.state.convMap[a] ?? []).at(-1)?.ts ?? '';
-      const bLast = (chatStore.state.convMap[b] ?? []).at(-1)?.ts ?? '';
+      const aLast = snapshotConvs[a]?.last_activity_at ?? '';
+      const bLast = snapshotConvs[b]?.last_activity_at ?? '';
       return bLast.localeCompare(aLast);
     };
     // Coordinator first, then custom, then service agents.
@@ -52,14 +50,13 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
   });
 
   const statusOf = (conv: string) => {
-    const meta = chatStore.state.convMeta[conv];
-    if (meta?.agentId) {
-      const s = chatStore.state.agentStatus[meta.agentId];
-      if (s && (s.state === 'working' || s.state === 'thinking')) return 'working' as const;
-    }
-    const list = chatStore.state.convMap[conv] ?? [];
-    const streaming = list.some((m) => m.kind === 'assistant' && m.streaming);
-    return streaming ? ('working' as const) : ('idle' as const);
+    // py-1.11.0 — chat-state-rearchitecture. Single source of truth:
+    // the daemon's `live` OR `coordinating` flag on the conv summary.
+    // No more OR-ing across heuristics — the daemon computes both
+    // server-side and pushes deltas via `conv.activity` WS events.
+    const summary = chatStore.state.convs[conv];
+    if (!summary) return 'idle' as const;
+    return (summary.live || summary.coordinating) ? ('working' as const) : ('idle' as const);
   };
 
   const drop = (target: string) => {
@@ -105,7 +102,7 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
                 active={chatStore.state.activeConv === c}
                 status={statusOf(c)}
                 pendingReview={false}
-                stripe={agentTypeColor(meta().type)}
+                stripe={agentVisualColor(c, meta())}
                 compact={compact()}
                 onSelect={chatStore.setActiveConv}
                 onDragStart={(id) => setDragSrc(id)}
@@ -132,8 +129,10 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
               chatStore.setActiveConv(ONBOARDING_CONV_ID);
             }}
             class="text-left rounded-md border border-dashed border-emerald-500/35 bg-emerald-500/5 px-3 py-3 hover:border-emerald-500/55"
-            /* dynamic: stripe colour pulled from the agent-type registry */
-            style={{ 'border-left': `3px solid ${agentTypeColor('custom')}` }}
+            /* dynamic: stripe colour pulled from the agent-type registry.
+               This CTA seeds the onboarding conv, so use the master-architect
+               pink — matches what the operator will see right after clicking. */
+            style={{ 'border-left': `3px solid ${agentVisualColor(ONBOARDING_CONV_ID, null)}` }}
             title="Talk to the Coordinator — kicks off the project's roadmap"
           >
             <div class="text-[11px] font-mono text-emerald-300 mb-1">⬢ General coder</div>

@@ -105,7 +105,8 @@ function buildMemorySnapshot(t: DebugTarget): unknown {
       daemon_outdated: inst?.outdated ?? null,
       daemon_ahead: inst?.ahead ?? null,
       ws_state: inst?.wsState ?? null,
-      active_convs_health: inst?.health.chat_active_convs ?? [],
+      convs_total: isActive ? Object.keys(chatStore.state.convs).length : null,
+      convs_live: isActive ? Object.values(chatStore.state.convs).filter((c) => c.live).length : null,
       conv_count_in_memory: isActive ? Object.keys(chatStore.state.convMap).length : null,
       conv_meta_count_in_memory: isActive ? Object.keys(chatStore.state.convMeta).length : null,
       archived_conv_count: isActive ? Object.keys(chatStore.state.archivedConvs).length : null,
@@ -124,11 +125,14 @@ function buildMemorySnapshot(t: DebugTarget): unknown {
     } : null,
     chatStore_active_slice: isActive ? {
       activeConv: chatStore.state.activeConv,
+      convsHydratedAt: chatStore.state.convsHydratedAt,
+      convs_total: Object.keys(chatStore.state.convs).length,
+      convs_live: Object.values(chatStore.state.convs).filter((c) => c.live).length,
+      convs_coordinating: Object.values(chatStore.state.convs).filter((c) => c.coordinating).length,
       convMeta: chatStore.state.convMeta,
       archivedConvs: chatStore.state.archivedConvs,
       pendingReplyConvs: chatStore.state.pendingReplyConvs,
       lastDeltaTsByConv: chatStore.state.lastDeltaTsByConv,
-      agentStatus: chatStore.state.agentStatus,
       convMap_summary: Object.fromEntries(
         Object.entries(chatStore.state.convMap).map(([k, msgs]) => [
           k, { count: msgs.length, lastTs: msgs.at(-1)?.ts ?? null, lastKind: msgs.at(-1)?.kind ?? null },
