@@ -26,6 +26,17 @@ import { chatStore } from '~/state/chat';
 import { serverStore } from '~/state/server';
 import { storyStore } from '~/state/story';
 import { log } from './log';
+import { createSignal } from 'solid-js';
+
+/** py-1.12.5 — Global runner auth state. Set when the daemon emits
+ *  `runner.auth.required`; cleared on `runner.auth.completed`. */
+export interface RunnerAuthRequest {
+  platform: string;
+  conv: string;
+  ts: string;
+}
+const [runnerAuthRequest, setRunnerAuthRequest] = createSignal<RunnerAuthRequest | null>(null);
+export { runnerAuthRequest, setRunnerAuthRequest };
 
 const SNAPSHOT_REFRESH_TYPES = new Set<string>([
   'state.rebuilt',
@@ -92,6 +103,20 @@ export function attachEventBus(ws: DaemonWS, client: DaemonClient, clusterKey: s
     }
     if (SNAPSHOT_REFRESH_TYPES.has(t)) {
       void serverStore.refresh(client, clusterKey);
+      return;
+    }
+    // py-1.12.5 — Runner auth events
+    if (t === 'runner.auth.required') {
+      setRunnerAuthRequest({
+        platform: typeof ev.platform === 'string' ? ev.platform : '',
+        conv: typeof ev.conv === 'string' ? ev.conv : '',
+        ts: typeof ev.ts === 'string' ? ev.ts : new Date().toISOString(),
+      });
+      return;
+    }
+    if (t === 'runner.auth.completed') {
+      setRunnerAuthRequest(null);
+      return;
     }
   });
   log.debug('event-bus attached', { cluster: clusterKey });
