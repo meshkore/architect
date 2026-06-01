@@ -26,16 +26,31 @@ import { chatStore } from '~/state/chat';
 import { serverStore } from '~/state/server';
 import { storyStore } from '~/state/story';
 import { log } from './log';
-import { createSignal } from 'solid-js';
+import { createSignal, createRoot } from 'solid-js';
 
 /** py-1.12.5 — Global runner auth state. Set when the daemon emits
- *  `runner.auth.required`; cleared on `runner.auth.completed`. */
+ *  `runner.auth.required`; cleared on `runner.auth.completed`.
+ *
+ *  Wrapped in createRoot so the signal has a permanent reactive owner
+ *  and does not break SolidJS's ownership tree on app remount
+ *  (which caused a "Maximum call stack size exceeded" on page Reload). */
 export interface RunnerAuthRequest {
   platform: string;
   conv: string;
   ts: string;
 }
-const [runnerAuthRequest, setRunnerAuthRequest] = createSignal<RunnerAuthRequest | null>(null);
+
+// eslint-disable-next-line prefer-const
+let runnerAuthRequest!: () => RunnerAuthRequest | null;
+// eslint-disable-next-line prefer-const
+let setRunnerAuthRequest!: (v: RunnerAuthRequest | null) => void;
+
+createRoot(() => {
+  const [get, set] = createSignal<RunnerAuthRequest | null>(null);
+  runnerAuthRequest = get;
+  setRunnerAuthRequest = set;
+});
+
 export { runnerAuthRequest, setRunnerAuthRequest };
 
 const SNAPSHOT_REFRESH_TYPES = new Set<string>([

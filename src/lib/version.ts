@@ -77,6 +77,10 @@ export function isDaemonAtLeast(
  * `GET /chat/snapshot` + WS `conv.*` events. A pre-1.11 daemon would
  * leave the rail empty with no diagnostic — fail loud via the
  * outdated panel instead.
+ *
+ * py-1.12.6 — pluggable runners (cursor / claude-code), universal auth flow
+ * (POST /auth/<platform>/start + runner.auth.* WS events for cursor,
+ * claude-code, wrangler, gh, fly, vercel). RunnerAuthCard shown in chat.
  */
 export const MIN_DAEMON_VERSION = 'py-1.11.0';
 
@@ -87,7 +91,7 @@ export const MIN_DAEMON_VERSION = 'py-1.11.0';
  * shapes or response fields, so we surface a "refresh recommended"
  * banner.
  */
-export const EXPECTED_DAEMON_VERSION = 'py-1.11.1';
+export const EXPECTED_DAEMON_VERSION = 'py-1.12.6';
 
 /** Convenience: gate against the project's MIN. */
 export function meetsMinimum(actual: string | DaemonVersion | undefined | null): boolean {
