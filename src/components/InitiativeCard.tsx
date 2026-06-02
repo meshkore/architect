@@ -395,17 +395,17 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
 }
 
 /**
- * Description — V107.7.
+ * Description — V107.28 (chrome stripped).
  *
- * Renders the initiative's slug + oneliner + body. Collapsed view
- * shows the oneliner (operator-authored 1-sentence hook) + the first
- * ~3 lines of body (so the operator gets context without expanding).
- * "+ show more" reveals the full body; "— show less" at the bottom
- * collapses it back. Empty body or absent fields render gracefully.
+ * Renders the initiative's oneliner + body. Collapsed view shows the
+ * oneliner (operator-authored 1-sentence hook) + the first ~3 lines
+ * of body. "+ show more" reveals the full body; "— show less" at the
+ * bottom collapses it back. Empty body or absent fields render
+ * gracefully.
  *
- * Polished: clearer hierarchy, subtle left accent bar, larger body
- * text (13px) with 1.55 line-height for readability, no surrounding
- * box (the slug chip + accent bar are visual anchors enough).
+ * V107.28 — Dropped the id chip + the left accent bar (operator
+ * request 2026-06-02). The card header already shows the initiative
+ * id elsewhere; this block is for the prose. Just the text.
  */
 function Description(props: {
   oneliner: string;
@@ -430,15 +430,7 @@ function Description(props: {
   const hasBody = (): boolean => props.body.trim().length > 0;
 
   return (
-    <div class="relative pl-3 border-l-2 border-emerald-500/30">
-      <div class="flex items-center gap-2 mb-2">
-        <span
-          class="font-mono text-[9px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded px-1.5 py-0.5 uppercase tracking-wider"
-          title="Initiative ID — reference this in chat"
-        >
-          {props.slug}
-        </span>
-      </div>
+    <div>
       <Show when={hasOneliner()}>
         <p class="text-[13.5px] text-gray-100 font-medium leading-snug mb-2">
           {props.oneliner}
