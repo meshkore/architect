@@ -82,13 +82,19 @@ type ActiveChangeListener = (activeId: string | null) => void;
 const activeChangeListeners = new Set<ActiveChangeListener>();
 
 function notifyActiveChanged(): void {
-  const id = state.activeId;
-  console.log('[RAIL] notifyActiveChanged → listeners count:', activeChangeListeners.size, 'activeId:', id);
-  for (const fn of activeChangeListeners) {
-    try { fn(id); } catch (e) {
-      log.warn('active-change listener threw', e instanceof Error ? e.message : String(e));
+  // Defer so we never run the cross-store side-effect bus synchronously
+  // inside a Solid effect (status → attachClient → notifyActiveChanged).
+  // Nested flush waves during mount caused runUpdates/completeUpdates to
+  // recurse until "Maximum call stack size exceeded" on page refresh.
+  queueMicrotask(() => {
+    const id = state.activeId;
+    console.log('[RAIL] notifyActiveChanged → listeners count:', activeChangeListeners.size, 'activeId:', id);
+    for (const fn of activeChangeListeners) {
+      try { fn(id); } catch (e) {
+        log.warn('active-change listener threw', e instanceof Error ? e.message : String(e));
+      }
     }
-  }
+  });
 }
 
 /**
@@ -501,21 +507,42 @@ async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
   // we refuse to attach and surface a clear error.
   const verify = await verifyDaemonIdentity(daemonHttpBase(port), token, health.features ?? []);
   console.log('[RAIL] switchToPort identity', { port, outcome: verify.kind });
+
+  if (verify.kind === 'no-token') {
+    // Daemon is reachable but we have no token stored for this cluster yet.
+    // Open the unlock modal immediately — don't wait for a chat call to 401.
+    // Once the operator saves a valid token, re-run switchToPortDetailed so
+    // the client is properly attached and the cockpit body renders.
+    log.info('switchToPort — no token for cluster, opening unlock dialog', { port, cluster: health.cluster_id });
+    return new Promise<SwitchOutcome>((resolve) => {
+      openTokenUnlockModal({
+        project: { port, cluster_id: health.cluster_id ?? null, cluster_name: health.cluster_name ?? null },
+        onUnlocked: (_tok) => {
+          // Token is now saved in the per-cluster map; re-attach.
+          void switchToPortDetailed(port).then(resolve);
+        },
+        onCancel: () => {
+          // Operator dismissed — attach anyway with empty token so the project
+          // becomes visible (read-only); they can unlock later from the rail.
+          const c = new DaemonClient(localTransport(port, ''));
+          attachClient(c, health);
+          resolve({ ok: true });
+        },
+      });
+    });
+  }
+
   if (verify.kind === 'mismatch') {
     log.error('switchToPort REFUSED — auth challenge failed (possible MITM)', { port, cluster: health.cluster_id });
-    // V86 — no native alert(). The cockpit's existing
-    // TokenUnlockModal handles auth-related interruptions; route the
-    // security failure through it so the operator sees a styled
-    // dialog inside the cockpit chrome rather than an OS popup.
     openTokenUnlockModal({
       project: { port, cluster_id: health.cluster_id ?? null, cluster_name: health.cluster_name ?? null },
       reason:
         'Auth challenge failed — the daemon at ' +
         `https://daemon.meshkore.com:${port} couldn't prove ownership of the stored ` +
         'token. Likely causes: stale local token, or someone impersonating the daemon on ' +
-        'this network. Paste a fresh token from .meshkore/credentials/architect-token, ' +
+        'this network. Paste a fresh token from .meshkore/credentials/portal-token, ' +
         'or move to a trusted network.',
-      onUnlocked: () => { /* operator will retry from the rail */ },
+      onUnlocked: () => { void switchToPortDetailed(port); },
     });
     return { ok: false, reason: 'unknown', detail: 'auth mismatch' };
   }
