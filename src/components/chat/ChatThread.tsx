@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
-import { chatStore, ONBOARDING_CONV_ID, type ChatMsg } from '~/state/chat';
+import { chatStore, type ChatMsg } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
 import { MessageBubble, PreparingBubble, ToolUseBubble, TaskLifecycleBubble } from '~/components/ChatBubbles';
 import { waitingByConv } from '~/state/server';
@@ -32,10 +32,20 @@ export default function ChatThread(props: {
   // `chatStore.state.convs[id]` which arrived in the boot snapshot.
   // Re-fetches only when activeConv changes AND convMap is empty (the
   // WS keeps it fresh after that).
+  //
+  // V107.24 — `_onboarding_v1` (the Master / Architect Agent since
+  // V107.12) is NO LONGER excluded. Pre-V107.12 it was a synthetic
+  // local-only conv (the old Coordinator welcome bubble), so fetching
+  // its history was wasted work. Now it's the always-on master that
+  // persists 48+ real messages on the daemon — skipping it left
+  // operators with an empty chat after every reload of a non-MeshKore
+  // cluster (Cavioca field report 2026-06-02). The remaining guards
+  // below (existing.length > 0, summary.msg_count === 0) already
+  // prevent re-fetches for genuinely-empty conversations.
   const loadedConvs = new Set<string>();
   createEffect(() => {
     const conv = chatStore.state.activeConv;
-    if (!conv || conv === ONBOARDING_CONV_ID) return;
+    if (!conv) return;
     if (loadedConvs.has(conv)) return;
     const summary = chatStore.state.convs[conv];
     const existing = chatStore.state.convMap[conv] ?? [];
@@ -43,7 +53,16 @@ export default function ChatThread(props: {
       loadedConvs.add(conv);
       return;
     }
-    if (!summary || summary.msg_count === 0) {
+    if (!summary) {
+      // Snapshot hasn't landed yet — wait. Don't mark loaded so the
+      // createEffect re-fires when `convs[conv]` arrives via the boot
+      // hydrate path. (V107.24 — guarding against a boot race where
+      // seedOnboardingConv runs before chatSnapshot resolves; pre-fix
+      // we'd mark loaded here and never re-evaluate, leaving Master
+      // empty for the whole session.)
+      return;
+    }
+    if (summary.msg_count === 0) {
       loadedConvs.add(conv);
       return;
     }
