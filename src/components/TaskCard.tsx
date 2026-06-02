@@ -36,12 +36,21 @@ import { log } from '~/lib/log';
 const taskBodyCache = new Map<string, string>();
 
 function codeChipClass(status: string): string {
+  // Pulse + glow are reserved for `activeTaskIds().has(task.id)` (a coder
+  // subagent is alive against this task). `status: active`/`in_progress`
+  // in frontmatter alone renders as **solid amber** — no blink. Before
+  // the fix, a status-only "active" pulsed identically to a real live
+  // agent, and orphaned status fields (architect set `active` and
+  // never reset, or operator manually marked) showed false execution
+  // signal. Operator field report 2026-06-02: "edited tasks stay
+  // blinking after the editing stops". Now the file status is just
+  // a tint; the live-agent branch in the caller keeps the pulse.
   switch (status) {
     case 'done':
       return 'bg-emerald-500/25 text-emerald-100 border-emerald-500/50';
     case 'active':
     case 'in_progress':
-      return 'bg-amber-500/30 text-amber-100 border-amber-400/70 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.35)]';
+      return 'bg-amber-500/25 text-amber-200 border-amber-500/55';
     case 'next':
       return 'bg-amber-500/12 text-amber-300 border-amber-500/35';
     case 'blocked':
