@@ -9,7 +9,28 @@ let mermaidPromise: Promise<MermaidLike> | null = null;
 
 export interface MarkedLike {
   parse: (src: string, opts?: { gfm?: boolean }) => string;
+  use?: (...extensions: unknown[]) => void;
 }
+
+/** V107.25 — Marked extension that adds `target="_blank" rel="noopener noreferrer"`
+ *  to every absolute (http/https) anchor it renders. Internal anchors
+ *  (`#section`, relative `/foo`) pass through untouched. Reason:
+ *  agents now emit github commit/PR/branch refs as full markdown
+ *  links (closure-protocol R2.1) — clicking one inside the cockpit
+ *  navigated the entire tab AWAY from architect.meshkore.com,
+ *  losing the operator's place. */
+const externalLinksTargetBlank = {
+  renderer: {
+    link(token: { href?: string; title?: string | null; text?: string; tokens?: unknown[] }): string {
+      const href = token.href ?? '';
+      const text = token.text ?? href;
+      const isExternal = /^https?:\/\//i.test(href);
+      const titleAttr = token.title ? ` title="${token.title.replace(/"/g, '&quot;')}"` : '';
+      const targetAttr = isExternal ? ' target="_blank" rel="noopener noreferrer"' : '';
+      return `<a href="${href}"${titleAttr}${targetAttr}>${text}</a>`;
+    },
+  },
+};
 
 export interface MermaidLike {
   initialize: (cfg: Record<string, unknown>) => void;
@@ -26,7 +47,13 @@ const dynImport = (url: string): Promise<unknown> =>
 
 export function ensureMarked(): Promise<MarkedLike> {
   if (!markedPromise) {
-    markedPromise = dynImport(MARKED_URL).then((m) => (m as { marked: MarkedLike }).marked);
+    markedPromise = dynImport(MARKED_URL).then((m) => {
+      const marked = (m as { marked: MarkedLike }).marked;
+      if (typeof marked.use === 'function') {
+        marked.use(externalLinksTargetBlank);
+      }
+      return marked;
+    });
   }
   return markedPromise;
 }
