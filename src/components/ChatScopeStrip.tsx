@@ -14,10 +14,12 @@
  * other panel is open; it highlights to show which view is current.
  */
 
-import { Show, createSignal } from 'solid-js';
-import { ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
+import { Show, createMemo, createSignal } from 'solid-js';
+import { chatStore, ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
+import { daemonStore } from '~/state/daemon';
 import { agentVisualInfo } from '~/lib/agent-types';
 import { debugDropCount } from '~/lib/debug-transport';
+import { log } from '~/lib/log';
 
 interface Props {
   conv: string;
@@ -76,6 +78,47 @@ export default function ChatScopeStrip(props: Props) {
    *  thread is the history toggle, so clicking the chat icon while
    *  history is open closes it. */
   const goChat = () => { if (props.historyOpen) props.onToggleHistory(); };
+
+  // V107.20 — Persistent STOP in the header. The inline ■ stop on
+  // BubbleHeader only shows while a streaming assistant bubble is
+  // visible. But the agent stays "live" through tool calls, file
+  // edits, and subagent coordination — moments where no streaming
+  // bubble is on screen yet the operator might want to halt. Read
+  // daemon-authoritative `live` + `coordinating` from chat.snapshot
+  // (py-1.11.0+) so this button mirrors ground truth, not just the
+  // local streaming flag.
+  const convState = createMemo(() => chatStore.state.convs[props.conv] ?? null);
+  const isWorking = (): boolean => {
+    const c = convState();
+    if (c && (c.live || c.coordinating)) return true;
+    // Fallback for daemons predating chat.snapshot.v1: check the
+    // local convMap for a streaming assistant bubble.
+    const msgs = chatStore.state.convMap[props.conv] ?? [];
+    const last = msgs[msgs.length - 1];
+    return !!(last && last.kind === 'assistant' && last.streaming && !last.cancelled);
+  };
+  const stopLabel = (): string => (convState()?.coordinating ? 'STOP all' : 'STOP');
+  const stopTitle = (): string => {
+    const c = convState();
+    if (c?.coordinating) {
+      return `Coordinating ${c.waiting_on?.length ?? 0} subagent(s) — cancels THIS agent's turn (subagents continue unless they're on their own STOP)`;
+    }
+    return 'Stop this turn — sends SIGTERM to the agent process. Any tool call already in flight (file write, bash) may finish before the kill lands.';
+  };
+  const [stopping, setStopping] = createSignal(false);
+  const onStop = async (): Promise<void> => {
+    const client = daemonStore.state.client;
+    if (!client) return;
+    setStopping(true);
+    try {
+      const r = await client.chatCancel(props.conv);
+      if (!r.ok) log.warn('[chat-scope-strip:stop] /chat/cancel failed', r.status);
+    } finally {
+      // Hold the "stopping…" state for ~1s so the operator gets
+      // visible feedback before the live signal flips off via WS.
+      setTimeout(() => setStopping(false), 1000);
+    }
+  };
 
   return (
     <div class="flex items-center gap-2 px-2 py-1.5 border-b border-gray-800/60">
@@ -142,6 +185,25 @@ export default function ChatScopeStrip(props: Props) {
           >
             ⚠ debug-drops {debugDropCount()}
           </span>
+        </Show>
+        {/* V107.20 — Persistent STOP. Visible whenever the conv is
+            daemon-authoritative `live` OR `coordinating`. The inline
+            ■ stop on streaming bubbles is kept as a redundant control
+            for visual proximity; this one survives tool calls, idle
+            tool-use gaps, and subagent coordination — moments where
+            the streaming bubble is absent but the agent is still
+            burning CPU / making file edits / spending tokens. */}
+        <Show when={isWorking()}>
+          <button
+            type="button"
+            onClick={() => { void onStop(); }}
+            disabled={stopping()}
+            title={stopTitle()}
+            class="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono uppercase tracking-wider text-red-200 bg-red-500/15 border border-red-500/50 hover:bg-red-500/25 hover:border-red-500/70 active:bg-red-500/35 transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-wait"
+          >
+            <span class="inline-block w-1.5 h-1.5 rounded-sm bg-red-300" aria-hidden="true" />
+            {stopping() ? 'stopping…' : stopLabel()}
+          </button>
         </Show>
       </Show>
       <Show when={!editing()}>

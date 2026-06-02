@@ -14,8 +14,14 @@
  */
 
 import { For, Show, createSignal, createMemo } from 'solid-js';
-import { store, type Task } from '~/state/store';
-import { allModules } from '~/state/server';
+import { allModules, allTasks, serverStore, type ServerTask } from '~/state/server';
+// V107.21 — Migrated off the legacy `store` (single-snapshot, global,
+// NOT cluster-scoped). On project swap there was a window where this
+// list still rendered the prior cluster's tasks until store.attach
+// fetched the new /state. allTasks() reads the per-cluster facade
+// (state.snapshot of serverStore.byCluster[activeClusterKey]), so the
+// swap flips slices atomically.
+type Task = ServerTask;
 
 const STATUSES = ['next', 'in_progress', 'done', 'backlog', 'blocked'] as const;
 type Status = typeof STATUSES[number];
@@ -44,7 +50,7 @@ export default function RoadmapList(props: { moduleId: string | null; onSelectMo
 
   const filtered = createMemo(() => {
     const q = query().toLowerCase().trim();
-    return store.tasks().filter((t) => {
+    return allTasks().filter((t) => {
       if (props.moduleId && t.category !== props.moduleId) return false;
       if (statusFilter() !== 'all' && t.status !== statusFilter()) return false;
       if (q && !t.title.toLowerCase().includes(q) && !t.id.toLowerCase().includes(q)) return false;
@@ -105,14 +111,14 @@ export default function RoadmapList(props: { moduleId: string | null; onSelectMo
 
       <p class="text-xs text-gray-600 mt-6">
         {filtered().length} of {scopedTotal(props.moduleId)} task{scopedTotal(props.moduleId) === 1 ? '' : 's'} in this scope · driven live by daemon · last refresh{' '}
-        {store.snapshot.generated_at ? <time class="font-mono">{new Date(store.snapshot.generated_at).toLocaleTimeString()}</time> : 'pending'}
+        {serverStore.state.snapshot?.generated_at ? <time class="font-mono">{new Date(serverStore.state.snapshot.generated_at).toLocaleTimeString()}</time> : 'pending'}
       </p>
     </section>
   );
 }
 
 function scopedTotal(moduleId: string | null): number {
-  return store.tasks().filter((t) => !moduleId || t.category === moduleId).length;
+  return allTasks().filter((t) => !moduleId || t.category === moduleId).length;
 }
 
 function Breadcrumb(props: { crumbs: Crumb[]; onSelect: (id: string | null) => void }) {

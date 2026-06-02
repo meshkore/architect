@@ -19,6 +19,7 @@
 
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
+import { allModules, clusterInfo } from '~/state/server';
 import { uiStore } from '~/state/ui';
 import { log } from '~/lib/log';
 import type { LinksModule, LinksRegistry } from '~/lib/daemon-client';
@@ -98,6 +99,14 @@ export default function LinksPanel() {
           <Show when={!registry.loading && modules().length === 0 && !registry.error}>
             <EmptyNotice />
           </Show>
+
+          {/* V107.18 — when the registry is empty AND the cluster has
+              declared modules in cluster.yaml, the EmptyNotice's
+              hardcoded `meshkore-web` example was misleading on every
+              other project. Now the example is rendered from
+              `allModules()` so cavioca sees `web/api/builder/...`,
+              not `meshkore-web`. Falls back to a generic `<your-module>`
+              placeholder only when the cluster has no modules either. */}
 
           <ul class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
             <For each={modules()}>
@@ -208,24 +217,70 @@ function ErrorNotice(props: { error: string }) {
 }
 
 function EmptyNotice() {
+  // V107.18 — example now uses the actual cluster's module ids
+  // (read from cluster.yaml via serverStore). Old code hardcoded
+  // `meshkore-web` / `meshkore.com` which was correct only for the
+  // MeshKore repo itself and misled every other project.
+  const example = createMemo(() => {
+    const codeModules = allModules().filter((m) => m.kind !== 'area');
+    const first = codeModules[0];
+    const clusterId = clusterInfo()?.id ?? 'your-cluster';
+    if (!first) {
+      return `version: 1
+modules:
+  - id: <your-module>          # match an id from cluster.yaml
+    prod:
+      url: https://<your-domain>
+      provider: cloudflare-pages
+      project: ${clusterId}-<module>
+    local:
+      url: http://localhost:8788
+      command: <how you run it locally>
+    repo:
+      branch: main`;
+    }
+    return `version: 1
+modules:
+  - id: ${first.id}
+    prod:
+      url: https://<your-domain>
+      provider: cloudflare-pages
+      project: ${clusterId}-${first.id}
+    local:
+      url: http://localhost:8788
+      command: <how you run it locally>
+    repo:
+      branch: main`;
+  });
+
+  const declared = createMemo(() =>
+    allModules().filter((m) => m.kind !== 'area').map((m) => m.id),
+  );
+
   return (
     <div class="rounded-lg border border-gray-800/70 bg-gray-900/40 px-5 py-6 text-sm text-gray-400">
       <p class="mb-2">No links declared yet.</p>
       <p class="text-[12px] text-gray-500 mb-3">
-        Add a <code class="font-mono text-sky-300/80">.meshkore/public/links.yaml</code> with one block per module. Minimal example:
+        Add a <code class="font-mono text-sky-300/80">.meshkore/public/links.yaml</code> with one block per module. Minimal example
+        <Show when={declared().length > 0}>
+          {' '}— prefilled with this cluster's modules
+        </Show>:
       </p>
-      <pre class="text-[11px] font-mono text-gray-300 bg-gray-950/70 border border-gray-800/70 rounded-md px-3 py-2 whitespace-pre-wrap">{`version: 1
-modules:
-  - id: webapp
-    prod:
-      url: https://meshkore.com
-      provider: cloudflare-pages
-      project: meshkore-web
-    local:
-      url: http://localhost:8788
-      command: cd webapp && npx wrangler pages dev . --port 8788
-    repo:
-      branch: main`}</pre>
+      <pre class="text-[11px] font-mono text-gray-300 bg-gray-950/70 border border-gray-800/70 rounded-md px-3 py-2 whitespace-pre-wrap">{example()}</pre>
+      <Show when={declared().length > 0}>
+        <p class="text-[11px] text-gray-500 mt-3">
+          Modules declared in <code class="font-mono text-sky-300/80">cluster.yaml</code>:{' '}
+          <For each={declared()}>
+            {(id, idx) => (
+              <>
+                <code class="font-mono text-sky-300/90">{id}</code>
+                <Show when={idx() < declared().length - 1}>{', '}</Show>
+              </>
+            )}
+          </For>
+          . Add a block per module you want to surface here.
+        </p>
+      </Show>
     </div>
   );
 }

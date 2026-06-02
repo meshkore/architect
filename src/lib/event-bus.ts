@@ -26,6 +26,7 @@ import type { RunnerAuthRequest } from '~/state/daemon';
 import { chatStore } from '~/state/chat';
 import { serverStore } from '~/state/server';
 import { storyStore } from '~/state/story';
+import { daemonStore } from '~/state/daemon';
 import { log } from './log';
 
 const SNAPSHOT_REFRESH_TYPES = new Set<string>([
@@ -66,6 +67,29 @@ export function attachEventBus(
   clusterKey: string,
   onRunnerAuth?: (req: RunnerAuthRequest | null) => void,
 ): () => void {
+  // V107.21 — Cluster guard at INGEST. Each daemon instance has its
+  // own bus; without this check, a `conv.created` from cavioca's WS
+  // mutates MeshKore's active chatStore (operator-visible bug
+  // 2026-06-01: deploy-cavioca-* agents appearing in MeshKore Core's
+  // AGENTS rail). Three event families now share the same rule:
+  //
+  //   - `chat.*`  — already guarded via ingestEventForCluster(key, ev)
+  //                 which routes to active-store vs cached-slice.
+  //   - `conv.*`  — was UNGUARDED; mutated the active facade directly.
+  //                 Now wrapped: write to active store ONLY when this
+  //                 bus's clusterKey IS the active cluster; otherwise
+  //                 fold into the inactive slice (or drop until
+  //                 snapshot rehydrate on switch-back).
+  //   - `run.*`   — was UNGUARDED; storyStore has a single facade.
+  //                 Now drops events for non-active clusters silently;
+  //                 storyStore.hydrate refetches on switch-back.
+  //   - `state.*` / `task.*` / `initiative.*` / `module.*` /
+  //     `docs.*` / `links.updated` / `protocols.updated`
+  //                — refresh is keyed by clusterKey, writes to
+  //                serverStore.byCluster[clusterKey]; that side IS
+  //                cluster-scoped. Kept as-is.
+  const isActiveCluster = (): boolean => daemonStore.state.activeId === clusterKey;
+
   const unsubscribe = ws.onAny((ev: DaemonEvent) => {
     const t = ev.type;
     if (!t) return;
@@ -82,21 +106,38 @@ export function attachEventBus(
       // the daemon-authoritative summaries store. ingestConvEvent is
       // a no-op until snapshot.v1 has hydrated at least once, so on
       // old daemons (or before boot finishes) we silently ignore.
+      //
+      // V107.21 — Only the active cluster's bus may mutate the
+      // active chatStore. Non-active buses drop the event; on
+      // switch-back the operator's bindCluster + chatSnapshot
+      // refetch picks up the daemon's authoritative state.
+      if (!isActiveCluster()) {
+        log.debug('[event-bus] dropping conv.* from non-active cluster', { clusterKey, active: daemonStore.state.activeId, type: t });
+        return;
+      }
       chatStore.ingestConvEvent(ev);
       return;
     }
     if (t.startsWith(RUN_TYPE_PREFIX)) {
       // py-1.10.0 — run.started / run.advanced / run.cancelled /
       // run.done / run.failed. Daemon broadcasts the full RunRecord;
-      // the cockpit's storyStore just upserts by id. Multi-cluster
-      // safe because run records are scoped to the daemon emitting
-      // them (we'd need MP4-style per-cluster runs if cockpit ever
-      // attaches to two daemons in the same tab, not the case today).
+      // the cockpit's storyStore just upserts by id.
+      //
+      // V107.21 — storyStore is a single facade (not per-cluster),
+      // so events from non-active daemons would leak. Guard at
+      // ingest; storyStore.hydrate refetches the right runs from
+      // the active daemon on switch-back (App.tsx bus already does).
+      if (!isActiveCluster()) {
+        log.debug('[event-bus] dropping run.* from non-active cluster', { clusterKey, active: daemonStore.state.activeId, type: t });
+        return;
+      }
       const run = (ev as { run?: RunRecord }).run;
       if (run) storyStore.ingestRunEvent({ type: t, run });
       return;
     }
     if (SNAPSHOT_REFRESH_TYPES.has(t)) {
+      // serverStore.refresh writes to byCluster[clusterKey] — already
+      // cluster-scoped on the WRITE side. Safe to call from any bus.
       void serverStore.refresh(client, clusterKey);
       return;
     }

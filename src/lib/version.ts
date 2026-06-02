@@ -90,6 +90,14 @@ export const MIN_DAEMON_VERSION = 'py-1.11.0';
  * is *newer* than this, the cockpit may not understand new event
  * shapes or response fields, so we surface a "refresh recommended"
  * banner.
+ *
+ * **Auto-synced** at build time by `scripts/sync-daemon-version.mjs`
+ * which reads DAEMON_VERSION from `.meshkore/scripts/daemon.py` and
+ * rewrites this constant. Run via `npm run sync-version` (and via
+ * `prebuild`). Without that step the cockpit would forever lag the
+ * daemon by however many bumps happened since the last manual edit,
+ * and operators get an infinite "Reload" loop (the new bundle has
+ * the same stale EXPECTED → banner reappears).
  */
 export const EXPECTED_DAEMON_VERSION = 'py-1.12.6';
 

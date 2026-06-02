@@ -19,15 +19,10 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
   const [dragTgt, setDragTgt] = createSignal<string | null>(null);
 
   const orderedConvs = createMemo(() => {
-    // V82 — Coordinator is the always-on agent. It's NEVER hidden from
-    // the rail (even if user has typed no messages yet, even when the
-    // project has initiatives) and it's ALWAYS pinned at the top.
+    // Master is always-on, ALWAYS at the top.
     if (!chatStore.state.convMap[ONBOARDING_CONV_ID]) {
       chatStore.seedOnboardingConv();
     }
-    // py-1.11.0 — chat-state-rearchitecture. The daemon-authoritative
-    // convs map is the source of truth for the rail. Until the boot
-    // snapshot fetch resolves the rail shows just the Coordinator card.
     const snapshotConvs = chatStore.state.convs;
     const all = Object.keys(snapshotConvs).filter((c) => !snapshotConvs[c]?.archived);
     if (!all.includes(ONBOARDING_CONV_ID)) all.push(ONBOARDING_CONV_ID);
@@ -37,16 +32,32 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
       const bLast = snapshotConvs[b]?.last_activity_at ?? '';
       return bLast.localeCompare(aLast);
     };
-    // Coordinator first, then custom, then service agents.
+    // py-1.12.1-cockpit — Rail order, top to bottom:
+    //   1. Master (_onboarding_v1) — pinned first
+    //   2. Roadmap Architect — pinned second; the coordinator stays
+    //      above the workers it dispatches. Without this pin the new
+    //      work-* conv (more recent activity) pushed the architect
+    //      down on every dispatch — confusing, since the architect IS
+    //      the parent. Operator's request 2026-05-31.
+    //   3. Workers + custom agents — by recency
+    //   4. Other service types (deploy/db/testing/audit/docs/review) — by recency
+    const isArchitect = (c: string): boolean => {
+      const s = snapshotConvs[c];
+      if (s?.agent_type === 'roadmap-architect') return true;
+      return c.startsWith('roadmap-architect-');
+    };
     const rest = all.filter((c) => c !== ONBOARDING_CONV_ID);
-    const custom = rest.filter((c) => !isService(chatStore.state.convMeta[c])).sort(byRecency);
-    const services = rest.filter((c) => isService(chatStore.state.convMeta[c])).sort(byRecency);
-    const defaults = [ONBOARDING_CONV_ID, ...custom, ...services];
-    // Reorder respects the operator's drag-saved order BUT always keeps
-    // the Coordinator pinned first regardless of `order()`.
-    const positioned = order().filter((id) => all.includes(id) && id !== ONBOARDING_CONV_ID);
-    const unpositioned = defaults.filter((id) => id !== ONBOARDING_CONV_ID && !positioned.includes(id));
-    return [ONBOARDING_CONV_ID, ...positioned, ...unpositioned];
+    const architects = rest.filter(isArchitect).sort(byRecency);
+    const others = rest.filter((c) => !isArchitect(c));
+    const custom = others.filter((c) => !isService(chatStore.state.convMeta[c])).sort(byRecency);
+    const services = others.filter((c) => isService(chatStore.state.convMeta[c])).sort(byRecency);
+    const defaults = [ONBOARDING_CONV_ID, ...architects, ...custom, ...services];
+    // Drag-saved order respected, BUT Master + architect stay pinned
+    // in slots 0+1 regardless. Workers can be reordered freely below.
+    const pinned = new Set<string>([ONBOARDING_CONV_ID, ...architects]);
+    const positioned = order().filter((id) => all.includes(id) && !pinned.has(id));
+    const unpositioned = defaults.filter((id) => !pinned.has(id) && !positioned.includes(id));
+    return [ONBOARDING_CONV_ID, ...architects, ...positioned, ...unpositioned];
   });
 
   const statusOf = (conv: string) => {

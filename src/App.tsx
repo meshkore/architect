@@ -25,7 +25,7 @@ import { store } from '~/state/store';
 import { daemonStore } from '~/state/daemon';
 import { serverStore, isProjectEmpty } from '~/state/server';
 import { projectsStore } from '~/state/projects';
-import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
+import { chatStore, ONBOARDING_CONV_ID, loadLastActiveConv } from '~/state/chat';
 import { viewStore } from '~/state/view';
 import { storyStore } from '~/state/story';
 import { log } from '~/lib/log';
@@ -107,8 +107,27 @@ export default function App() {
     // /health.chat_active_convs + bulk-archive + /chat/archives).
     // After this hydrate, WS conv.* events keep convs in sync; chat
     // messages are lazy-loaded by ChatThread when the conv gains focus.
+    //
+    // V107.21 — Stale-request guard. Each async resolution re-checks
+    // that this swap is still the current one before writing to a
+    // single-facade store. Without this, swap-A→B→C where A's
+    // chatSnapshot resolves AFTER C's bindCluster overwrites C's
+    // slice with A's convs. Captured `swapActiveId` from the closure
+    // at start; if activeId has changed by the time the promise
+    // resolves, drop the result silently — the new cluster's own
+    // chain is already running.
+    const swapActiveId = activeId;
+    const stillCurrent = (): boolean => daemonStore.state.activeId === swapActiveId;
     void serverStore.refreshNow(client, activeId).then(() => {
+      if (!stillCurrent()) {
+        log.debug('[swap-guard] dropping post-swap chatSnapshot/runs fetch — active changed', { from: swapActiveId, to: daemonStore.state.activeId });
+        return;
+      }
       void client.chatSnapshot().then((res) => {
+        if (!stillCurrent()) {
+          log.debug('[swap-guard] dropping stale chatSnapshot result', { from: swapActiveId, to: daemonStore.state.activeId });
+          return;
+        }
         if (res.ok) {
           chatStore.hydrateFromSnapshot(res.data);
           log.info('chat.snapshot.v1 hydrated', {
@@ -124,6 +143,14 @@ export default function App() {
       // V89 — fetch any active runs from the daemon so the UI paints
       // ground truth immediately (the WS handles updates from here on).
       void storyStore.hydrate(client).then(() => {
+        if (!stillCurrent()) {
+          log.debug('[swap-guard] dropping stale runs hydrate', { from: swapActiveId, to: daemonStore.state.activeId });
+          // storyStore.hydrate already wrote to state.runs — wipe so
+          // we don't leave the previous cluster's runs visible until
+          // the new bus's hydrate lands.
+          storyStore.resetForClusterSwap();
+          return;
+        }
         log.info('runs hydrated from daemon', { count: storyStore.state.runs.length });
       });
     });
@@ -246,11 +273,17 @@ export default function App() {
 }
 
 // Pick the conv the cockpit should land on after the daemon binds.
-// Prefer the most recently active non-archived conv; else seed and
-// return the Coordinator (the always-on fallback).
+// V107.17 — first preference is the operator's last-selected conv for
+// THIS cluster (persisted to localStorage by chatStore.setActiveConv).
+// If absent / stale (conv no longer exists or is archived), fall back
+// to the most recently active non-archived conv; else seed and return
+// the Architect Agent (the always-on fallback).
 function pickDefaultConv(): string {
   const meta = chatStore.state.convMeta;
   const archived = chatStore.state.archivedConvs;
+  const clusterId = daemonStore.state.health?.cluster_id ?? null;
+  const saved = loadLastActiveConv(clusterId);
+  if (saved && meta[saved] && !archived[saved]) return saved;
   const candidates = Object.keys(meta).filter((c) => !archived[c]);
   if (candidates.length > 0) {
     const byTs = candidates

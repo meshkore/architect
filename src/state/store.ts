@@ -128,6 +128,14 @@ function appendEvent(ev: DaemonEvent): void {
 async function attach(client: DaemonClient): Promise<void> {
   attachedClient = client;
   setWsState('connecting');
+  // V107.21 — Clear the legacy snapshot on attach. This store is
+  // single-snapshot (NOT cluster-scoped) so on project swap there
+  // was a window where readers saw the prior cluster's tasks /
+  // modules / initiatives until refresh() resolved. RoadmapList +
+  // every other reader has been migrated to serverStore, but the
+  // reset stays as defense-in-depth for any future caller.
+  setSnapshot({ generated_at: undefined, cluster: undefined, modules: [], roadmap: { tasks: [], stats: {} }, initiatives: [], timeline: { recent: [] }, members: [], docs: undefined });
+  setEvents([]);
   await refresh();
   log.info('store attached to', client.transport.label);
 }

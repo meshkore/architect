@@ -24,13 +24,12 @@ import type { ServerInitiative, ServerTask } from '~/state/server';
 import { activeEntriesByInitiative } from '~/state/server';
 import { sortTasks, groupByPhases } from '~/components/initiative/task-grouping';
 import { TaskGrid, StatusBadge } from '~/components/initiative/TaskGrid';
-import { storyStore } from '~/state/story';
 import { chatStore } from '~/state/chat';
 import { viewStore } from '~/state/view';
 import { daemonStore } from '~/state/daemon';
-import { collectStoryTaskIds } from '~/components/story/StoryRunner';
+import { runArchitectOnScope, stopArchitect } from '~/lib/architect-dispatch';
+import { parseInitiativeBody } from '~/lib/task-id';
 import StoryProgressPill from '~/components/story/StoryProgressPill';
-import { log } from '~/lib/log';
 
 const DESCRIPTION_PREVIEW_CHARS = 220;
 
@@ -59,133 +58,113 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
 
   const grouped = createMemo<[string, ServerTask[]][]>(() => groupByPhases(sorted()));
 
-  /** Computed description preview/full state. `oneliner` is always the
-   *  short hook; `body` is the long-form. If only one of the two is
-   *  present we fall back gracefully. */
+  /** V107.22 — Initiative body fetcher. The daemon's /state payload
+   *  exposes `path` but not `body` for initiatives (avoiding payload
+   *  bloat across N initiatives). Fetch the markdown on demand from
+   *  the same path served as a static file. Parse `## Description`
+   *  section for the collapsible operator-readable description; fall
+   *  back to the inline `oneliner` + legacy `body` field if no
+   *  Description block is declared.
+   *
+   *  createResource keyed on (client, path) so it refetches when the
+   *  operator swaps clusters or the file is touched. */
+  const [bodyRes] = createResource<string, { path: string }>(
+    () => {
+      const client = daemonStore.state.client;
+      const path = props.initiative.path;
+      if (!client || !path) return null;
+      return { path };
+    },
+    async (input) => {
+      const client = daemonStore.state.client;
+      if (!client) return '';
+      const r = await client.readMarkdownFile(input.path);
+      return r.ok ? r.body : '';
+    },
+  );
+  const parsed = createMemo(() => parseInitiativeBody(bodyRes() ?? ''));
+  /** Computed description preview/full state. New convention: the
+   *  `## Description` block in the body. Legacy: `oneliner` (short
+   *  hook in frontmatter) + ServerInitiative.body (used to be set,
+   *  now always empty — kept for back-compat). */
   const oneliner = (): string => (props.initiative.oneliner ?? '').trim();
-  const body = (): string => (props.initiative.body ?? '').trim();
-  const hasDescription = (): boolean => oneliner().length > 0 || body().length > 0;
+  const description = (): string => {
+    const d = parsed().description;
+    if (d) return d;
+    const legacyBody = (props.initiative.body ?? '').trim();
+    if (legacyBody) return legacyBody;
+    return oneliner();
+  };
+  const hasDescription = (): boolean => description().length > 0;
   const hasMore = (): boolean => {
-    const b = body();
-    if (!b) return false;
-    if (b === oneliner()) return false;
-    return b.length > DESCRIPTION_PREVIEW_CHARS || b.includes('\n');
+    const d = description();
+    if (!d) return false;
+    return d.length > DESCRIPTION_PREVIEW_CHARS || d.split('\n').length > 3;
   };
 
-  // V89 — All run state lives daemon-side. Cockpit just reflects.
-  const thisRun = () => storyStore.runForInitiative(props.initiative.id);
-  const isThisLive = () => {
-    const r = thisRun();
-    return !!r && r.live && r.status !== 'paused';
-  };
-  const isThisPaused = () => {
-    const r = thisRun();
-    return !!r && r.status === 'paused';
-  };
-  // py-1.11.2-cockpit — Unified "is anything else running in this
-  // cluster" predicate. Operator's spec 2026-05-31: "que no hay otra
-  // historia en marcha" — that single condition covers both:
-  //   1. Run All (the roadmap architect's own runner is live, OR it's
-  //      coordinating subagents)
-  //   2. Any per-initiative story-run elsewhere (its conv has live=true)
-  //   3. Any subagent the architect dispatched on another initiative
-  //      (work-* conv with live=true)
-  // The previous code split this into `isOtherLive()` + `architectLive()`
-  // and the second one read convMeta (a local cache that could lie),
-  // leaving the per-initiative play disabled long after a Run All
-  // ended. Reading from chatStore.state.convs (daemon-authoritative,
-  // updated via WS conv.activity) is the single source of truth.
+  // py-1.12.0-cockpit — Per-initiative play now routes through the
+  // SAME architect entrypoint as Run All (`runArchitectOnScope`). One
+  // code path, one conv per cluster, one set of state derivations.
+  // The old storyStore-based path (story-<initId> convs via /runs)
+  // is dead — it ran in parallel to the architect, duplicated state,
+  // and was the source of "play turned amber but nothing happened"
+  // (a paused story-run with no actual progress).
+  //
+  // States this card surfaces, in order of precedence:
+  //   • isWorking      — the architect has live subagents on THIS
+  //                       initiative (spinner + STOP)
+  //   • otherActivityLive — the architect is busy on a DIFFERENT
+  //                       initiative OR Run All is running elsewhere
+  //                       (disabled + tooltip)
+  //   • idle           — ▶ Run initiative
+
+  /** Live agents working on THIS initiative right now. Derived from
+   *  the daemon-authoritative `activeEntriesByInitiative` (WS
+   *  conv.activity). When the operator clicks ▶ on this card the
+   *  architect itself shows up here first (it's dispatched with
+   *  initiative_id=<this>) — and only later, after it reads + plans,
+   *  do the work-* subagents appear. We split the two so the UI can
+   *  tell the operator "preparing…" vs "task in flight". */
+  const liveAgentsHere = createMemo(
+    () => activeEntriesByInitiative()[props.initiative.id] ?? [],
+  );
+  const isWorking = (): boolean => liveAgentsHere().length > 0;
+  const liveWorkersHere = createMemo(
+    () => liveAgentsHere().filter((e) => e.conv.startsWith('work-')),
+  );
+  /** py-1.12.0-cockpit — TRUE while the architect is live/coordinating
+   *  on this initiative but has not dispatched a worker yet. Real-world
+   *  gap: 5-20s between ▶ click and the first `work-*` going live,
+   *  during which the card looked idle even though the architect was
+   *  reading frontmatters + planning. Drives the "preparing dispatch"
+   *  banner that pulses inside the expanded card. */
+  const isPreparing = (): boolean =>
+    isWorking() && liveWorkersHere().length === 0;
+
+  /** True iff something else in the cluster is live AND it's not on
+   *  this initiative. Includes the architect's own runner (`live`)
+   *  and any coordinating parent waiting on children. */
   const otherActivityLive = createMemo<boolean>(() => {
     for (const c of Object.values(chatStore.state.convs)) {
       if (!c.live && !c.coordinating) continue;
-      // A live worker tagged to THIS initiative isn't "other" activity.
       if (c.initiative_id === props.initiative.id) continue;
       return true;
     }
     return false;
   });
 
-  // py-1.11.0 — live agents on THIS initiative, derived from
-  // chatStore.state.convs (entries where live=true && initiative_id
-  // matches). Drives the play→spinner swap so the operator sees
-  // who's working without leaving the roadmap view.
-  const liveAgentsHere = createMemo(() => {
-    const bucket = activeEntriesByInitiative()[props.initiative.id] ?? [];
-    return bucket;
-  });
-  const isWorking = (): boolean => liveAgentsHere().length > 0;
-
-  const startRun = async (): Promise<void> => {
-    const taskIds = collectStoryTaskIds(props.initiative.id);
-    if (taskIds.length === 0) {
-      log.warn('initiative has no open tasks to run', props.initiative.id);
-      return;
-    }
-    const client = daemonStore.state.client;
-    if (!client) {
-      log.warn('startRun: no daemon client');
-      return;
-    }
-    // Always spawn a fresh agent + conv — isolated cancellation domain.
-    const conv = chatStore.createStoryConv({
-      initiativeId: props.initiative.id,
-      initiativeTitle: props.initiative.title,
-    });
-    const agentId = chatStore.state.convMeta[conv]?.agentId ?? '?';
-    const res = await storyStore.start(client, {
-      initiativeId: props.initiative.id,
-      initiativeTitle: props.initiative.title,
-      conv,
-      agentId,
-      agentTitle: props.initiative.title,
-      taskIds,
-    });
-    if (!res.ok) log.warn('startRun: daemon create failed', res.status, res.error);
-  };
-
-  const stopRun = async (): Promise<void> => {
-    const run = thisRun();
-    if (!run) return;
-    const client = daemonStore.state.client;
-    if (!client) return;
-    await storyStore.cancel(client, run.id);
-  };
-
-  /** V89 — When the run is paused (status='running' server-side but
-   *  no live chat session), the play button resumes it: re-dispatch
-   *  the current step on the existing conv. Reuses the same prompt
-   *  builder StoryRunner uses on auto-advance. */
-  const resumeRun = async (): Promise<void> => {
-    const run = thisRun();
-    if (!run) return;
-    const client = daemonStore.state.client;
-    if (!client) return;
-    const taskId = run.taskIds[run.cursor];
-    if (!taskId) {
-      // Cursor past the end — finish it.
-      await storyStore.finish(client, run.id, 'done');
-      return;
-    }
-    chatStore.setActiveConv(run.conv);
-    const prompt = buildResumePrompt(taskId, run.initiativeTitle, run.cursor, run.taskIds.length);
-    const res = await client.chatDispatch({
-      conv: run.conv,
-      author: 'architect',
-      text: prompt,
-      initiative_id: run.initiativeId,
-      task_id: taskId,
-    });
-    if (!res.ok) {
-      log.warn('resumeRun: dispatch failed', res.status, res.body);
-      return;
-    }
-    await storyStore.setStream(client, run.id, res.data.stream_id);
-  };
-
+  /** ▶ click handler. Three branches:
+   *    1. Already working on this → stop the architect (cancels its turn).
+   *    2. Other activity live → no-op (button is disabled anyway).
+   *    3. Idle → dispatch the architect on this initiative only.
+   *  All three reuse the cluster's single architect conv. */
   const toggleRun = (): void => {
-    if (isThisLive()) void stopRun();
-    else if (isThisPaused()) void resumeRun();
-    else void startRun();
+    if (isWorking()) {
+      void stopArchitect();
+      return;
+    }
+    if (otherActivityLive()) return;
+    void runArchitectOnScope({ mode: 'single', initiative: props.initiative });
   };
 
   // V86w — archive / unarchive lives in viewStore (per-cluster
@@ -241,12 +220,45 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
               disabled play turns into an animated spinner so the
               operator sees activity at a glance. Tooltip + aria label
               name the agents. */}
-          <Show when={isWorking()}>
-            <span
-              title={`Working: ${liveAgentsHere().map((e) => e.agent_id || e.conv).join(' · ')}`}
-              aria-label={`agents working on this initiative: ${liveAgentsHere().map((e) => e.agent_id || e.conv).join(', ')}`}
-              class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 border border-emerald-500/50 bg-emerald-500/15 text-emerald-200 relative"
+          {/* py-1.12.0-cockpit — Single button that flips between three
+              visual states depending on the daemon-authoritative live
+              flags. Click is wired to `toggleRun`:
+                • working → spinner + STOP affordance; click cancels
+                  the architect's in-flight turn for this initiative
+                • other-activity-live → grayed-out, disabled, tooltip
+                  names the blocker
+                • idle → ▶ green play; click dispatches the architect
+                  on this initiative ONLY (mode='single'). */}
+          <button
+            type="button"
+            onClick={toggleRun}
+            disabled={!isWorking() && otherActivityLive()}
+            title={
+              isWorking()
+                ? `Stop the architect — currently dispatching on this initiative (${liveAgentsHere().map((e) => e.agent_id || e.conv).join(' · ')})`
+                : otherActivityLive()
+                  ? 'Otra ejecución está en marcha en este cluster — páralas primero (Run All o la otra iniciativa)'
+                  : 'Run initiative — dispatches the Roadmap Architect on this initiative only'
+            }
+            aria-label={
+              isWorking()
+                ? `Stop the run live on initiative ${props.initiative.id}`
+                : `Run initiative ${props.initiative.id}`
+            }
+            class={`w-7 h-7 rounded-md flex items-center justify-center text-xs flex-shrink-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:grayscale border relative ${
+              isWorking()
+                ? 'bg-emerald-500/15 hover:bg-red-500/20 hover:border-red-500/40 hover:text-red-300 text-emerald-200 border-emerald-500/50'
+                : otherActivityLive()
+                  ? 'bg-gray-700/30 text-gray-500 border-gray-700/50'
+                  : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
+            }`}
+          >
+            <Show
+              when={isWorking()}
+              fallback={<span aria-hidden="true">▶</span>}
             >
+              {/* Animated arc spinner — same shape Run All uses on the
+                  header so the operator's eye reads "running" in 100ms. */}
               <svg
                 viewBox="0 0 24 24"
                 width="14"
@@ -262,32 +274,8 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
               >
                 <path d="M21 12a9 9 0 1 1-6.219-8.56" />
               </svg>
-            </span>
-          </Show>
-          <Show when={!isWorking()}>
-          <button
-            type="button"
-            onClick={toggleRun}
-            disabled={otherActivityLive() && !isThisLive()}
-            title={
-              isThisLive() ? 'Stop the run live on this initiative'
-              : isThisPaused() ? 'Resume this run (the previous turn was cut by a reload)'
-              : otherActivityLive() ? 'Otra ejecución está en marcha en este cluster — páralas primero (Run All o la otra iniciativa).'
-              : 'Run initiative (spawns a fresh agent)'
-            }
-            class={`w-7 h-7 rounded-md flex items-center justify-center text-xs flex-shrink-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:grayscale border ${
-              isThisLive()
-                ? 'bg-red-500/15 hover:bg-red-500/30 text-red-300 border-red-500/40'
-                : isThisPaused()
-                  ? 'bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
-                  : otherActivityLive()
-                    ? 'bg-gray-700/30 text-gray-500 border-gray-700/50'
-                    : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
-            }`}
-          >
-            {isThisLive() ? '■' : '▶'}
+            </Show>
           </button>
-          </Show>
         </Show>
         <button
           type="button"
@@ -336,18 +324,26 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
         </button>
       </header>
 
+      {/* V107.22 — Description block lives ABOVE the expanded section
+          now (operator request 2026-06-01: "el título y debajo debería
+          tener la descripción limitada a un máximo de tres líneas
+          visibles con el botón ver más o ver menos"). Always rendered
+          when description text exists, regardless of card expansion. */}
+      <Show when={hasDescription()}>
+        <div class="border-t border-gray-800/60 px-4 py-3">
+          <Description
+            oneliner={oneliner()}
+            body={description()}
+            expanded={descExpanded()}
+            toggleable={hasMore()}
+            onToggle={toggleDesc}
+            slug={props.initiative.id}
+          />
+        </div>
+      </Show>
+
       <Show when={expanded()}>
         <div class="border-t border-gray-800/60 px-4 py-3 space-y-4">
-          <Show when={hasDescription()}>
-            <Description
-              oneliner={oneliner()}
-              body={body()}
-              expanded={descExpanded()}
-              toggleable={hasMore()}
-              onToggle={toggleDesc}
-              slug={props.initiative.id}
-            />
-          </Show>
 
           {/* V86w — detail tabs. `tasks` keeps the existing per-phase
               grid; `activity` surfaces git commits + files modified
@@ -359,6 +355,25 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
 
           <Show when={tab() === 'activity'} fallback={
             <Show when={props.tasks.length > 0} fallback={<NoTasks />}>
+              {/* py-1.12.0-cockpit — "Preparing dispatch" banner. The
+                  architect's first turn after a Run-initiative click
+                  takes ~5-20s of file reads + planning before any
+                  worker conv goes live. Without this banner the
+                  operator sees a static task list and assumes nothing
+                  is happening. The banner sits between the tabs and
+                  the first phase header so it reads as "the whole
+                  list is waiting on planning". */}
+              <Show when={isPreparing()}>
+                <div class="flex items-center gap-2 px-3 py-2 rounded-md border border-emerald-500/30 bg-emerald-500/[0.06] text-[11px] text-emerald-200 mb-3">
+                  <span class="inline-flex items-center gap-0.5 flex-shrink-0" aria-hidden="true">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse-soft" />
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse-soft [animation-delay:150ms]" />
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse-soft [animation-delay:300ms]" />
+                  </span>
+                  <span class="font-medium">Architect preparing dispatch</span>
+                  <span class="text-emerald-300/60">— reading task frontmatters, resolving <code class="font-mono">depends_on</code>, picking the first wave</span>
+                </div>
+              </Show>
               <For each={grouped()}>
                 {([phase, tasks]) => (
                   <div class="mb-4 last:mb-0">
@@ -561,28 +576,12 @@ function CommitRow(props: { commit: import('~/lib/daemon-client').InitiativeActi
   );
 }
 
-/** V89 — Resume prompt used when the operator clicks ▶ on a paused
- *  run (status=running server-side but no live chat session, e.g.
- *  cockpit reloaded mid-run). Same shape as StoryRunner.buildPrompt
- *  with a header that tells the agent the prior turn was cut. */
-function buildResumePrompt(taskId: string, initiativeTitle: string, cursor: number, total: number): string {
-  const stepLabel = `${cursor + 1}/${total}`;
-  return [
-    `[story-run · resuming step ${stepLabel} of "${initiativeTitle}"]`,
-    ``,
-    `The previous turn for this story step was interrupted (cockpit reload`,
-    `or daemon restart). Pick the work back up on task \`${taskId}\`:`,
-    ``,
-    `1. Open the task file under \`.meshkore/modules/<module>/tasks/${taskId}*.md\` and read its body.`,
-    `2. Continue the work described under "Done when" / the task body.`,
-    `3. Mark the task \`status: done\` in its frontmatter when finished.`,
-    `4. Post a 1-sentence summary of what you did here in chat.`,
-    `5. STOP and wait — the story runner will dispatch the next task automatically.`,
-    ``,
-    `If you can detect from the timeline that this step was already finished,`,
-    `say so in one line and stop — the runner will advance.`,
-  ].join('\n');
-}
+// py-1.12.0-cockpit — `buildResumePrompt` was the storyStore-driven
+// resume turn used when a story-run was paused mid-flight. That code
+// path is gone (per-initiative play now routes through the
+// architect, no separate run state machine). Kept here as a comment
+// marker so anyone searching for "resume prompt" lands on the
+// architect-dispatch decision instead of a missing function.
 
 function formatCommitTs(ts: string): string {
   try {

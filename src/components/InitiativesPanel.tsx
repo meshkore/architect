@@ -23,7 +23,7 @@ import EmptyOnboardingPanel from '~/components/EmptyOnboardingPanel';
 import { viewStore } from '~/state/view';
 import { chatStore } from '~/state/chat';
 import { daemonStore, daemonHealth } from '~/state/daemon';
-import { uiStore } from '~/state/ui';
+import { runArchitectOnScope, stopArchitect } from '~/lib/architect-dispatch';
 import { log } from '~/lib/log';
 
 // V90 — visibility modes replace the old visibility + status-filter
@@ -265,100 +265,24 @@ export default function InitiativesPanel() {
   // `animate-pulse` red dot on the button itself (which only renders
   // when `architectLive()` is true).
 
+  /** py-1.12.0-cockpit — Run All delegates to the shared
+   *  `runArchitectOnScope`. Same function the per-initiative ▶ calls
+   *  with mode='single', ensuring there is ONE code path that drives
+   *  the architect (rail state, conv reuse, bootstrap, debug stream,
+   *  spinner derivation). Stop = same `stopArchitect()` everywhere. */
   const onRunAll = async (): Promise<void> => {
-    const client = daemonStore.state.client;
-    if (!client) {
-      log.warn('[run-all] no daemon client — abort');
-      return;
-    }
-    // py-1.11.2-cockpit — STOP path runs only when the architect is
-    // LIVE (own runner streaming OR coordinating subagents). Idle
-    // architect convs (post-pass summaries) no longer trigger Stop;
-    // the operator sees "Run all" instead and clicking it RESUMES the
-    // existing conv with a new bootstrap, preserving the prior summary.
     if (architectLive()) {
-      const conv = activeArchConv();
-      if (!conv) {
-        log.warn('[stop-architect] architectLive() true but activeArchConv() is null — state mismatch');
-        return;
-      }
-      log.info('[stop-architect] start', { conv });
-      void import('~/lib/debug-transport').then(({ debugEmit }) => {
-        debugEmit('ux.stop-architect', 'Stop Architect clicked', { conv });
-      });
-      // Cancel any in-flight chat turn. The daemon broadcasts
-      // chat.cancelled + conv.activity → the rail flips back to idle
-      // and the button switches to "Run all" on its own.
-      try {
-        const res = await client.chatCancel(conv);
-        log.info('[stop-architect] /chat/cancel', { ok: res.ok, status: res.status });
-        if (!res.ok) log.warn('[stop-architect] cancel non-OK', res.status);
-      } catch (e) {
-        log.warn('[stop-architect] cancel threw', e instanceof Error ? e.message : String(e));
-      }
+      await stopArchitect();
       return;
     }
-    // RUN ALL path — architect is idle (either no conv yet, or the
-    // previous pass finished). Build the visible-initiative summary
-    // (the architect reads the actual files itself).
-    const list = filtered()
-      .filter((it) => {
-        if (viewStore.isInitiativeArchived(it.id)) return false;
-        if (it.status === 'backlog') return false;
-        const tasks = tasksByInitiative().get(it.id) ?? [];
-        if (tasks.length === 0) return false;
-        return tasks.some((t) => t.status !== 'done' && t.status !== 'cancelled');
-      });
-    if (list.length === 0) return;
-    // py-1.11.2-cockpit — REUSE the existing idle architect conv when
-    // present. Spawning a fresh roadmap-architect-* on every Run All
-    // was the source of "many equal coordinators" — operator's
-    // explicit ask 2026-05-31: "solo puede haber un coordinador del
-    // roadmap". Single conv per cluster, rerun continues the same
-    // thread with a new turn.
-    const existing = activeArchConv();
-    const conv = existing ?? chatStore.createConv({
-      type: 'roadmap-architect',
-      title: 'Roadmap Architect',
-      model: 'auto',
+    const list = filtered().filter((it) => {
+      if (viewStore.isInitiativeArchived(it.id)) return false;
+      if (it.status === 'backlog') return false;
+      const tasks = tasksByInitiative().get(it.id) ?? [];
+      if (tasks.length === 0) return false;
+      return tasks.some((t) => t.status !== 'done' && t.status !== 'cancelled');
     });
-    // py-1.10.17 — Emit a lifecycle marker into the debug stream so
-    // `GET /debug/tail` shows "operator clicked Run All, scope = N"
-    // before the architect's first turn appears.
-    void import('~/lib/debug-transport').then(({ debugEmit }) => {
-      debugEmit('ux.run-all', `Run All clicked (${list.length} initiative(s))`, {
-        conv,
-        data: { scope_size: list.length, initiative_ids: list.map((it) => it.id) },
-      });
-    });
-    uiStore.setActiveZone('architect');
-    // V107.3 — Bootstrap rewritten. The V92 bootstrap said
-    // "Continue until you ship OR hit a blocker; then stop and tell
-    // me what you need" — that user-turn instruction OVERRODE the
-    // daemon's py-1.10.x system SOP (which says: never halt, use
-    // catalog → stub-flag → matrix → consult-A001). Operator observed
-    // the architect literally quoting "stop on the first blocker per
-    // SOP" from this bootstrap. Removed every contradicting line.
-    // The bootstrap now JUST kicks off the daemon's SOP — no
-    // procedure, no stop conditions, just scope + go.
-    const bootstrap = [
-      `Run all.`,
-      ``,
-      `Active scope (${list.length} initiative${list.length === 1 ? '' : 's'}, lower-id first):`,
-      ...list.map((it, i) => `${i + 1}. ${it.id} — ${it.title}`),
-      ``,
-      `Follow your SOP exactly. The chain on every blocker: DECISION CATALOG → STUB-AND-FLAG → DECISION MATRIX → CONSULT-A001. Never halt mid-pass. The single voluntary halt is the end-of-pass 4-bucket summary.`,
-      ``,
-      `Start now. Your very first line MUST be \`═══ VALIDATION GREEN ═══\` or \`═══ VALIDATION RED ═══\`. Be terse.`,
-    ].join('\n');
-    const res = await chatStore.dispatchMessage(client, {
-      conv,
-      text: bootstrap,
-      author: 'architect',
-    });
-    if (!res.ok) {
-      log.error('roadmap-architect bootstrap failed', res.status, res.error);
-    }
+    await runArchitectOnScope({ mode: 'all', list });
   };
 
   return (

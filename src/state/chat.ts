@@ -139,6 +139,22 @@ function metaKey(): string {
   return CONV_META_KEY_PREFIX + (activeClusterId() ?? 'unknown');
 }
 
+// V107.17 — sticky-last-conv per cluster. The operator's most-recent
+// active conv is written here on every `setActiveConv`, and read back
+// at boot by App.pickDefaultConv so a reload lands on the same agent
+// (master Architect or any other) rather than "most recently active".
+const LAST_CONV_KEY_PREFIX = 'mc-last-conv-v1::';
+function lastConvKey(clusterId: string | null): string {
+  return LAST_CONV_KEY_PREFIX + (clusterId ?? 'unknown');
+}
+export function loadLastActiveConv(clusterId: string | null): string | null {
+  try {
+    return localStorage.getItem(lastConvKey(clusterId));
+  } catch {
+    return null;
+  }
+}
+
 // py-1.11.0 Phase 2 — `archivedConvs` localStorage cache removed.
 // The set is now authored server-side and arrives via:
 //   1. `GET /chat/snapshot` on boot (seeded by hydrateFromSnapshot)
@@ -529,6 +545,12 @@ function ensureConvMeta(convId: string, init: Partial<ConvMeta> = {}): ConvMeta 
 
 function setActiveConv(conv: string | null): void {
   setState('activeConv', conv);
+  // V107.17 — persist per-cluster so a reload lands on the same agent.
+  try {
+    const key = lastConvKey(activeClusterId());
+    if (conv) localStorage.setItem(key, conv);
+    else localStorage.removeItem(key);
+  } catch { /* quota — non-fatal */ }
 }
 
 /**

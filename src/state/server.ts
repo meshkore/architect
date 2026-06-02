@@ -42,6 +42,11 @@ export interface ServerTask {
   initiative?: string;
   tags?: string[];
   body?: string;
+  /** V107.22 — Repo-relative path the daemon emits for the task's
+   *  .md file (`.meshkore/modules/<m>/tasks/<id>-<slug>.md`). The
+   *  cockpit fetches this via `client.readMarkdownFile(path)` to
+   *  render the rich body on row expand without bloating /state. */
+  path?: string;
   depends_on?: string[];
   blocks?: string[];
   [k: string]: unknown;
@@ -55,6 +60,12 @@ export interface ServerInitiative {
   modules?: string[];
   target?: string;
   body?: string;
+  /** V107.22 — Repo-relative path the daemon emits for the
+   *  initiative's .md file (`.meshkore/roadmap/initiatives/<id>.md`).
+   *  The cockpit fetches this via `client.readMarkdownFile(path)`
+   *  to render the `## Description` block collapsible without
+   *  bloating /state. */
+  path?: string;
   // py-1.10.15 — roadmap-ordering-archive fields.
   // `next` is the linked-list pointer the operator curates in
   // frontmatter; the daemon already walks it before emitting the

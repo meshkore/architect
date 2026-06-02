@@ -29,8 +29,14 @@ export default function ModulesTree(props: { selected: string | null; onSelect: 
   const rootKids = createMemo(() => (tree().byParent.get('__root__') ?? []).filter((m) => passes(m.id)));
 
   return (
-    <nav class="text-sm select-none">
-      <div class="flex items-center justify-between mb-2 px-2 gap-2">
+    <nav class="text-sm select-none flex flex-col h-full min-h-0">
+      {/* V107.19 — Header uses the same `.col-header-row` styling as
+          the .subtab-bar in the next column (38px height, col-pad-x
+          padding, border-bottom + bg-bar). Visual unity per operator
+          ask 2026-06-01: "Fíjate la siguiente columna del roadmap,
+          como las letras tienen su padding arriba, izquierda,
+          derecha, abajo." */}
+      <div class="col-header-row" style={{ 'justify-content': 'space-between', gap: '8px' }}>
         <button
           type="button"
           onClick={() => uiStore.toggleModulesCollapsed()}
@@ -63,72 +69,75 @@ export default function ModulesTree(props: { selected: string | null; onSelect: 
           </div>
         </Show>
       </div>
-      <button
-        type="button"
-        onClick={() => props.onSelect(null)}
-        class={`w-full text-left px-2 py-1.5 rounded-md flex items-center justify-between gap-2 transition-colors ${
-          props.selected === null
-            ? 'bg-emerald-500/10 text-emerald-300'
-            : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
-        }`}
-      >
-        <span>All</span>
-        <span class="font-mono text-[10px] text-gray-500">{allTasks().length}</span>
-      </button>
-      <For each={rootKids()}>
-        {(m) => (
-          <ModuleNode
-            mod={m}
-            depth={0}
-            tree={tree()}
-            expanded={expanded()}
-            passes={passes}
-            selectedId={props.selected}
-            onSelect={props.onSelect}
-            onToggle={toggle}
-          />
-        )}
-      </For>
-      <Show when={allModules().length === 0}>
-        <p class="text-xs text-gray-600 px-2 mt-3 leading-relaxed">
-          No modules declared in <span class="font-mono">cluster.yaml</span>. Add a <span class="font-mono">modules:</span> block and reload.
-        </p>
-      </Show>
 
-      {/* V86i — project-level docs section. Renders below the modules
-          tree. These are docs that live at the project root (architecture,
-          security, deploy, conventions, …) and don't belong to a single
-          module. Selecting one re-scopes Context + Diagrams panels via
-          `doc:<category>/<slug>`. */}
-      <Show when={projectDocs().length > 0}>
-        <div class="mt-4 pt-3 border-t border-gray-800/60">
-          <div class="text-xs font-mono uppercase tracking-wider text-gray-500 px-2 mb-1">Project</div>
-          <For each={projectDocs()}>
-            {(d) => (
-              <button
-                type="button"
-                onClick={() => props.onSelect(d.scopeId)}
-                class={`w-full text-left px-2 py-1.5 rounded-md flex items-center gap-2 transition-colors ${
-                  props.selected === d.scopeId
-                    ? 'bg-emerald-500/10 text-emerald-300'
-                    : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
-                }`}
-              >
-                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-blue-400/80"
-                  title="Has context — open in CONTEXT tab"
-                  aria-label="has context doc" />
-                <span class="truncate flex-1" title={`${d.category}/${d.slug}`}>{d.label}</span>
-                <Show when={d.hasDiagrams}>
-                  <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-orange-400"
-                    title="Diagram(s) declared — open in DIAGRAMS tab"
-                    aria-label="has diagram(s)" />
-                </Show>
-                <span class="font-mono text-[9px] text-gray-600 uppercase tracking-wider">{d.category}</span>
-              </button>
-            )}
-          </For>
-        </div>
-      </Show>
+      <div class="flex-1 min-h-0 overflow-y-auto px-2 pt-2 pb-3">
+        <button
+          type="button"
+          onClick={() => props.onSelect(null)}
+          class={`w-full text-left px-2 py-1.5 rounded-md flex items-center justify-between gap-2 transition-colors ${
+            props.selected === null
+              ? 'bg-emerald-500/10 text-emerald-300'
+              : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
+          }`}
+        >
+          <span>All</span>
+          <span class="font-mono text-[10px] text-gray-500">{allTasks().length}</span>
+        </button>
+        <For each={rootKids()}>
+          {(m) => (
+            <ModuleNode
+              mod={m}
+              depth={0}
+              tree={tree()}
+              expanded={expanded()}
+              passes={passes}
+              selectedId={props.selected}
+              onSelect={props.onSelect}
+              onToggle={toggle}
+            />
+          )}
+        </For>
+        <Show when={allModules().length === 0}>
+          <p class="text-xs text-gray-600 px-2 mt-3 leading-relaxed">
+            No modules declared in <span class="font-mono">cluster.yaml</span>. Add a <span class="font-mono">modules:</span> block and reload.
+          </p>
+        </Show>
+
+        {/* V86i — project-level docs section. Renders below the modules
+            tree. These are docs that live at the project root (architecture,
+            security, deploy, conventions, …) and don't belong to a single
+            module. Selecting one re-scopes Context + Diagrams panels via
+            `doc:<category>/<slug>`. */}
+        <Show when={projectDocs().length > 0}>
+          <div class="mt-4 pt-3 border-t border-gray-800/60">
+            <div class="text-xs font-mono uppercase tracking-wider text-gray-500 px-2 mb-1">Project</div>
+            <For each={projectDocs()}>
+              {(d) => (
+                <button
+                  type="button"
+                  onClick={() => props.onSelect(d.scopeId)}
+                  class={`w-full text-left px-2 py-1.5 rounded-md flex items-center gap-2 transition-colors ${
+                    props.selected === d.scopeId
+                      ? 'bg-emerald-500/10 text-emerald-300'
+                      : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
+                  }`}
+                >
+                  <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-blue-400/80"
+                    title="Has context — open in CONTEXT tab"
+                    aria-label="has context doc" />
+                  <span class="truncate flex-1" title={`${d.category}/${d.slug}`}>{d.label}</span>
+                  <Show when={d.hasDiagrams}>
+                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-orange-400"
+                      title="Diagram(s) declared — open in DIAGRAMS tab"
+                      aria-label="has diagram(s)" />
+                  </Show>
+                  <span class="font-mono text-[9px] text-gray-600 uppercase tracking-wider">{d.category}</span>
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
+      </div>
     </nav>
   );
 }

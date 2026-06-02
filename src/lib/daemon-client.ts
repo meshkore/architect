@@ -492,6 +492,34 @@ export class DaemonClient {
     }
   }
 
+  /** V107.22 — fetch ANY file under the cluster root as raw markdown
+   *  via the daemon's static file route. `path` is the repo-relative
+   *  string the daemon embeds in task / initiative records
+   *  (`.meshkore/modules/<m>/tasks/<file>.md`, etc.). Used by the
+   *  Roadmap UI to render rich initiative descriptions + task bodies
+   *  on expand without bloating the /state payload. */
+  async readMarkdownFile(path: string, signal?: AbortSignal): Promise<{ ok: true; body: string } | { ok: false; status: number; error?: string }> {
+    // Strip a leading slash; the daemon mounts the cluster root at /
+    const rel = path.replace(/^\/+/, '');
+    const url = this.transport.httpBase + '/' + rel.split('/').map(encodeURIComponent).join('/');
+    const token = this.transport.token;
+    try {
+      const r = await fetch(url, {
+        signal,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!r.ok) return { ok: false, status: r.status };
+      const body = await r.text();
+      const head = body.slice(0, 200).toLowerCase();
+      if (head.includes('<!doctype') || head.includes('<html')) {
+        return { ok: false, status: 0, error: 'daemon returned HTML for markdown request' };
+      }
+      return { ok: true, body };
+    } catch (e) {
+      return { ok: false, status: 0, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   // ── Mutating endpoints ────────────────────────────────────────────
 
   async chatDispatch(body: DispatchBody, signal?: AbortSignal): Promise<Result<DispatchResponse>> {

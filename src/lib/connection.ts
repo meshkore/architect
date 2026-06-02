@@ -79,6 +79,33 @@ export function bootProbePorts(): number[] {
 }
 
 export async function probeLocal(timeoutMs = BOOT_PROBE_TIMEOUT_MS): Promise<{ port: number; health: HealthResponse } | null> {
+  // V107.17 — sticky-project boot. The operator's last-selected port is
+  // already saved (ProjectsRailRow / switchProject). When multiple
+  // daemons are running, the previous `Promise.any` race winner was
+  // non-deterministic — whichever daemon's `/health` responded first
+  // became "the project" after reload. Now we do a fast solo probe of
+  // the saved port FIRST so the cockpit lands on the project the
+  // operator was actually using. If the saved port is dead (daemon
+  // stopped / port shifted), we fall through to the parallel race.
+  const last = parseInt(localStorage.getItem('meshcore-last-port') || '0', 10);
+  if (last >= 5570 && last <= 5589) {
+    const soloCtl = new AbortController();
+    const soloTimer = setTimeout(() => soloCtl.abort(), Math.min(timeoutMs, 600));
+    try {
+      const res = await fetch(`${daemonHttpBase(last)}/health`, { signal: soloCtl.signal });
+      if (res.ok) {
+        const health = await res.json() as HealthResponse;
+        clearTimeout(soloTimer);
+        return { port: last, health };
+      }
+    } catch {
+      // Saved port unreachable — fall through to the parallel race.
+    } finally {
+      clearTimeout(soloTimer);
+      soloCtl.abort();
+    }
+  }
+
   const ports = bootProbePorts();
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
