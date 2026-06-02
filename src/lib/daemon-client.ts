@@ -368,6 +368,31 @@ export function setDaemonVersionListener(fn: DaemonVersionListener | null): void
   daemonVersionListener = fn;
 }
 
+/** V107.26 — Map a cluster-relative `.meshkore/<area>/...` path into
+ *  the static-file route the daemon actually exposes. See readMarkdownFile
+ *  for context. Returns the input untouched if no rule matches (caller
+ *  hits the daemon's default 404 for unknown routes, same as before).
+ *  Exported for tests / other call sites that need the same translation. */
+export function rewriteMeshkoreStaticPath(rel: string): string {
+  // Tolerate both `.meshkore/x/y` and bare `x/y` (some path fields
+  // arrive without the `.meshkore/` prefix). Match on the area name.
+  const stripped = rel.replace(/^\.meshkore\//, '');
+  // `.meshkore/roadmap/...` → `/tasks/...` (the daemon's route is
+  // historically named after tasks even though it serves the whole
+  // roadmap subtree, including `initiatives/`, `log/`, etc.).
+  if (stripped.startsWith('roadmap/')) return 'tasks/' + stripped.slice('roadmap/'.length);
+  // The other two areas keep their name.
+  if (stripped.startsWith('docs/')) return stripped;
+  if (stripped.startsWith('modules/')) return stripped;
+  // `.meshkore/log/<file>` is served by a dedicated /log/<file> route
+  // (daemon.py: see `if p == "/log"` / `if p.startswith("/log/")`).
+  if (stripped.startsWith('log/')) return stripped;
+  // Unknown area — leave as-is so the 404 surfaces in the original
+  // route shape; helps diagnosis vs silently rewriting to something
+  // the daemon also doesn't serve.
+  return rel;
+}
+
 export class DaemonClient {
   constructor(public readonly transport: TransportConfig) {}
 
@@ -497,11 +522,28 @@ export class DaemonClient {
    *  string the daemon embeds in task / initiative records
    *  (`.meshkore/modules/<m>/tasks/<file>.md`, etc.). Used by the
    *  Roadmap UI to render rich initiative descriptions + task bodies
-   *  on expand without bloating the /state payload. */
+   *  on expand without bloating the /state payload.
+   *
+   *  V107.26 — Map the cluster-relative `.meshkore/<subdir>/...` path
+   *  into the daemon's actual static routes. The daemon does NOT mount
+   *  `.meshkore/` at root; it exposes three explicit prefixes under
+   *  different names (see daemon.py do_GET, py-1.12.x):
+   *
+   *    `.meshkore/docs/...`     → `GET /docs/...`
+   *    `.meshkore/modules/...`  → `GET /modules/...`
+   *    `.meshkore/roadmap/...`  → `GET /tasks/...`   ← yes, renamed
+   *    `.meshkore/log/...`      → `GET /log/<file>`  (handled below)
+   *
+   *  Pre-V107.26 every fetch hit `/.meshkore/...` directly → 404 every
+   *  time. Symptom: InitiativeCard descriptions + TaskCard bodies +
+   *  Diary entries all stuck on "no body" / blank on any project
+   *  whose conversation history wasn't already in convMap from a live
+   *  WS session (Cavioca field report 2026-06-02). */
   async readMarkdownFile(path: string, signal?: AbortSignal): Promise<{ ok: true; body: string } | { ok: false; status: number; error?: string }> {
     // Strip a leading slash; the daemon mounts the cluster root at /
     const rel = path.replace(/^\/+/, '');
-    const url = this.transport.httpBase + '/' + rel.split('/').map(encodeURIComponent).join('/');
+    const mapped = rewriteMeshkoreStaticPath(rel);
+    const url = this.transport.httpBase + '/' + mapped.split('/').map(encodeURIComponent).join('/');
     const token = this.transport.token;
     try {
       const r = await fetch(url, {
