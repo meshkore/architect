@@ -73,7 +73,16 @@ export default function InitiativesPanel() {
     // shadow for operator-driven manual archives.
     const list = allInitiatives().filter((it) => {
       const isDone = it.status === 'done';
-      const isArchManual = viewStore.isInitiativeArchived(it.id);
+      // V107.29 — Daemon is authoritative for `active`. If the daemon
+      // says `status: active`, the operator-shadow archive flag is
+      // suppressed. Closes a race observed 2026-06-02 (ikamiro): the
+      // V106.3 auto-archive saw a transient `tasks.every(done)` window
+      // during a daemon state-rebuild and marked 5 actives as
+      // archived in localStorage; daemon then caught up with the
+      // correct in-progress tasks, but the local shadow stayed pegged,
+      // hiding the 5 from the ACTIVE filter even though the daemon
+      // reported them active.
+      const isArchManual = viewStore.isInitiativeArchived(it.id) && it.status !== 'active';
       const isArchived = isDone || isArchManual;
       const tasks = tbi.get(it.id) ?? [];
       const complete = tasks.length > 0 && tasks.every((t) => t.status === 'done');
@@ -134,6 +143,23 @@ export default function InitiativesPanel() {
     if (tasks.length === 0) return false;
     return tasks.every((t) => t.status === 'done');
   };
+
+  // V107.29 — Auto-cleanup stale archive shadows. Runs whenever
+  // allInitiatives() changes (i.e., every state refresh). If the
+  // daemon now reports `status: active` for an initiative whose
+  // local shadow still says archived, drop the shadow. The filter
+  // already ignores stale shadows visually (see filter() above), but
+  // this clears the persisted localStorage entry so we don't keep a
+  // permanent lie sitting around for the next session to inherit.
+  // Closes the cavioca/ikamiro 2026-06-02 race where a transient
+  // tasks.every(done) window auto-archived 5 active initiatives.
+  createEffect(() => {
+    for (const it of allInitiatives()) {
+      if (it.status === 'active' && viewStore.isInitiativeArchived(it.id)) {
+        viewStore.setInitiativeArchived(it.id, false);
+      }
+    }
+  });
   createEffect(() => {
     const tbi = tasksByInitiative();
     const exitingSet = exiting();

@@ -172,7 +172,13 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
   // panel's `visibility` filter hides it from the active list — the
   // initiative still exists, can be unarchived, and reappears on
   // demand.
-  const isArchived = () => viewStore.isInitiativeArchived(props.initiative.id);
+  //
+  // V107.29 — Daemon is authoritative for `active`. If the daemon
+  // says `status: active`, the local shadow is suppressed (same rule
+  // as InitiativesPanel filter). Prevents a stale shadow from
+  // hiding a card the daemon currently considers active.
+  const isArchived = () =>
+    viewStore.isInitiativeArchived(props.initiative.id) && props.initiative.status !== 'active';
   const toggleArchive = (e: MouseEvent): void => {
     e.stopPropagation();
     viewStore.setInitiativeArchived(props.initiative.id, !isArchived());
