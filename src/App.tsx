@@ -181,19 +181,28 @@ export default function App() {
   // panel so the operator's next pick is explicit (they just told us
   // they don't want the rail's prior default), and with 0 rows the
   // empty panel shows the add/scan CTAs.
+  //
+  // Guard: only after connect() succeeds (status connected) and never
+  // re-enter while a switch is in flight — firing during the probing
+  // phase raced attachClient and re-triggered switchProject on every
+  // rows() recompute (refresh stack overflow).
+  let autoSelectInFlight = false;
   createEffect(() => {
+    if (status().kind !== 'connected') return;
     if (daemonStore.state.activeId) return;
     if (daemonStore.state.offlineSelection) return;
+    if (autoSelectInFlight) return;
     const list = rows();
     if (list.length !== 1) return;
     const only = list[0];
     if (!only) return;
+    autoSelectInFlight = true;
     log.info('auto-selecting lone project after deletion / boot', { key: only.key, port: only.port });
     void switchProject(only.port, only.key, {
       display: only.display,
       cluster_id: only.cluster_id,
       cluster_name: only.cluster_name,
-    });
+    }).finally(() => { autoSelectInFlight = false; });
   });
 
   onCleanup(() => {

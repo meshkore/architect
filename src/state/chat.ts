@@ -291,6 +291,10 @@ function restoreSlice(slice: ClusterChatSlice): void {
 
 function bindCluster(clusterId: string | null): void {
   const prevId = activeClusterId();
+  // Idempotent — repeated notifyActiveChanged for the same cluster must
+  // not reset activeConv / conv maps (that ping-pongs with App's default-
+  // conv effect and can blow the Solid flush stack on refresh).
+  if (prevId === clusterId) return;
   // Save current state to the prior cluster's slice (skipped on first
   // boot when prevId is null).
   if (prevId) clusterSnapshots.set(prevId, snapshotCurrent());

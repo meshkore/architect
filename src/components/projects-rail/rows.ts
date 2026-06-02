@@ -1,4 +1,4 @@
-import { createMemo } from 'solid-js';
+import { createMemo, createRoot } from 'solid-js';
 import { daemonStore, selectedRowKey } from '~/state/daemon';
 import { projectsStore } from '~/state/projects';
 import { chatStore } from '~/state/chat';
@@ -15,7 +15,8 @@ function initialsFor(name: string): string {
   return out.toUpperCase().padEnd(3, '·').slice(0, 3);
 }
 
-export const rows = createMemo<RailRowData[]>(() => {
+export const rows = createRoot(() =>
+  createMemo<RailRowData[]>(() => {
   const known = projectsStore.state.list;
   const livePortSet = livePorts();
   const liveById = liveClusters();
@@ -141,4 +142,5 @@ export const rows = createMemo<RailRowData[]>(() => {
 
   result.sort((a, b) => a.port - b.port);
   return result;
-});
+  }),
+);
