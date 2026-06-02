@@ -16,7 +16,6 @@ import { openTokenUnlockModal } from '~/components/modals/TokenUnlockModal';
 // state. The `onDaemonOutdated` ChatComposer prop is dead code; left
 // in place to keep the composer's contract stable for other callers.
 import { buildStream, type StreamItem } from '~/lib/chat-stream';
-import { runnerAuthRequest, setRunnerAuthRequest } from '~/lib/event-bus';
 import RunnerAuthCard from '~/components/RunnerAuthCard';
 
 // V83 — drop the `client` prop. Read the current DaemonClient
@@ -143,12 +142,12 @@ export default function ChatPanel() {
         {/* py-1.12.5 — Runner auth card. Shown when daemon emits
             `runner.auth.required` (cursor-agent / claude-code need login).
             Dismissed automatically on `runner.auth.completed`. */}
-        <Show when={runnerAuthRequest() && runnerAuthRequest()!.conv === conv()}>
+        <Show when={daemonStore.state.runnerAuth && daemonStore.state.runnerAuth!.conv === conv()}>
           <div class="px-3 pb-1">
             <RunnerAuthCard
-              platform={runnerAuthRequest()!.platform}
-              conv={runnerAuthRequest()!.conv}
-              onDismiss={() => setRunnerAuthRequest(null)}
+              platform={daemonStore.state.runnerAuth!.platform}
+              conv={daemonStore.state.runnerAuth!.conv}
+              onDismiss={() => daemonStore.setRunnerAuth(null)}
             />
           </div>
         </Show>

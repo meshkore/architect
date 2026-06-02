@@ -109,6 +109,15 @@ export interface OfflineSelection {
   reason: 'no-daemon' | 'tls' | 'unknown';
 }
 
+/** py-1.12.5 — Runner auth request pushed from event-bus into the
+ *  store so it lives inside a properly-owned createStore (no
+ *  module-level createSignal / createRoot needed). */
+export interface RunnerAuthRequest {
+  platform: string;
+  conv: string;
+  ts: string;
+}
+
 export interface DaemonStoreState {
   /** All live (or recently-live) instances, keyed by clusterKey. */
   instances: Record<string, DaemonInstance>;
@@ -136,6 +145,9 @@ export interface DaemonStoreState {
   ahead: boolean;
   autoUpdateEnabled: boolean;
   supportsSelfUpdate: boolean;
+
+  /** py-1.12.5 — pending runner auth request (null = none). */
+  runnerAuth: RunnerAuthRequest | null;
 }
 
 const initial: DaemonStoreState = {
@@ -153,6 +165,7 @@ const initial: DaemonStoreState = {
   ahead: false,
   autoUpdateEnabled: false,
   supportsSelfUpdate: false,
+  runnerAuth: null,
 };
 
 const [state, setState] = createStore<DaemonStoreState>(initial);
@@ -318,7 +331,7 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
     syncFacade();
   });
   ws.connect();
-  const detachBus = attachEventBus(ws, client, key);
+  const detachBus = attachEventBus(ws, client, key, setRunnerAuth);
   busDetachers.set(key, detachBus);
   notifyActiveChanged();
 }
@@ -584,6 +597,10 @@ async function recheckHealth(): Promise<boolean> {
   return !state.outdated;
 }
 
+function setRunnerAuth(req: RunnerAuthRequest | null): void {
+  setState('runnerAuth', req);
+}
+
 export const daemonStore = {
   state,
   attachClient,
@@ -599,6 +616,7 @@ export const daemonStore = {
   clearOfflineSelection,
   clearActiveSelection,
   onActiveChanged,
+  setRunnerAuth,
 };
 
 /**

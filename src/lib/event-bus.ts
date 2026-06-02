@@ -22,36 +22,11 @@
 
 import type { DaemonClient, RunRecord } from './daemon-client';
 import type { DaemonWS, DaemonEvent } from './ws';
+import type { RunnerAuthRequest } from '~/state/daemon';
 import { chatStore } from '~/state/chat';
 import { serverStore } from '~/state/server';
 import { storyStore } from '~/state/story';
 import { log } from './log';
-import { createSignal, createRoot } from 'solid-js';
-
-/** py-1.12.5 — Global runner auth state. Set when the daemon emits
- *  `runner.auth.required`; cleared on `runner.auth.completed`.
- *
- *  Wrapped in createRoot so the signal has a permanent reactive owner
- *  and does not break SolidJS's ownership tree on app remount
- *  (which caused a "Maximum call stack size exceeded" on page Reload). */
-export interface RunnerAuthRequest {
-  platform: string;
-  conv: string;
-  ts: string;
-}
-
-// eslint-disable-next-line prefer-const
-let runnerAuthRequest!: () => RunnerAuthRequest | null;
-// eslint-disable-next-line prefer-const
-let setRunnerAuthRequest!: (v: RunnerAuthRequest | null) => void;
-
-createRoot(() => {
-  const [get, set] = createSignal<RunnerAuthRequest | null>(null);
-  runnerAuthRequest = get;
-  setRunnerAuthRequest = set;
-});
-
-export { runnerAuthRequest, setRunnerAuthRequest };
 
 const SNAPSHOT_REFRESH_TYPES = new Set<string>([
   'state.rebuilt',
@@ -85,7 +60,12 @@ const CONV_TYPE_PREFIX = 'conv.';
  * inactive projects' events update their own slices too; for now
  * App.tsx still attaches a single bus on the active instance.
  */
-export function attachEventBus(ws: DaemonWS, client: DaemonClient, clusterKey: string): () => void {
+export function attachEventBus(
+  ws: DaemonWS,
+  client: DaemonClient,
+  clusterKey: string,
+  onRunnerAuth?: (req: RunnerAuthRequest | null) => void,
+): () => void {
   const unsubscribe = ws.onAny((ev: DaemonEvent) => {
     const t = ev.type;
     if (!t) return;
@@ -120,18 +100,22 @@ export function attachEventBus(ws: DaemonWS, client: DaemonClient, clusterKey: s
       void serverStore.refresh(client, clusterKey);
       return;
     }
-    // py-1.12.5 — Runner auth events
-    if (t === 'runner.auth.required') {
-      setRunnerAuthRequest({
-        platform: typeof ev.platform === 'string' ? ev.platform : '',
-        conv: typeof ev.conv === 'string' ? ev.conv : '',
-        ts: typeof ev.ts === 'string' ? ev.ts : new Date().toISOString(),
-      });
-      return;
-    }
-    if (t === 'runner.auth.completed') {
-      setRunnerAuthRequest(null);
-      return;
+    // py-1.12.5 — Runner auth events. State lives in daemonStore;
+    // we receive the setter as a callback to avoid a circular import
+    // (event-bus ↔ daemon).
+    if (onRunnerAuth) {
+      if (t === 'runner.auth.required') {
+        onRunnerAuth({
+          platform: typeof ev.platform === 'string' ? ev.platform : '',
+          conv: typeof ev.conv === 'string' ? ev.conv : '',
+          ts: typeof ev.ts === 'string' ? ev.ts : new Date().toISOString(),
+        });
+        return;
+      }
+      if (t === 'runner.auth.completed') {
+        onRunnerAuth(null);
+        return;
+      }
     }
   });
   log.debug('event-bus attached', { cluster: clusterKey });
