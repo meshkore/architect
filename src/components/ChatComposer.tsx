@@ -13,7 +13,7 @@
  * input row (Stop button, scope strip) is the parent's concern.
  */
 
-import { For, Show, createSignal } from 'solid-js';
+import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
 import { isProjectEmpty } from '~/state/server';
@@ -27,6 +27,21 @@ const MAX_IMAGES = 6;
 type PendingImg = { dataURL: string; mediaType: string };
 type PendingDoc = { filename: string; content: string };
 
+// V107.31 — Per-conv composer drafts. The ChatComposer is mounted once
+// inside ChatPanel and re-used across conv switches (Solid doesn't
+// remount on prop-only changes), so a single in-place draft signal
+// would leak between chats. This module-level map snapshots draft +
+// attachments by conv slug; the createEffect below saves the outgoing
+// conv's state on switch and restores (or empty-inits) the incoming
+// one. Session-only on purpose — text drafts of "next message" are
+// short-lived; persisting across page reload would risk stale prompts
+// landing in unrelated conversations.
+interface ComposerSnap { draft: string; imgs: PendingImg[]; docs: PendingDoc[] }
+const composerByConv = new Map<string, ComposerSnap>();
+function readSnap(conv: string): ComposerSnap {
+  return composerByConv.get(conv) ?? { draft: '', imgs: [], docs: [] };
+}
+
 // V83 — drop the `client` prop. Read the current DaemonClient reactively
 // from daemonStore so dispatching follows project hot-swaps without the
 // parent having to feed a fresh client down.
@@ -36,18 +51,58 @@ export default function ChatComposer(props: {
   onTokenRejected?: (draft: string) => void;
   onDaemonOutdated?: () => void;
 }) {
-  const [draft, setDraft] = createSignal('');
+  // V107.31 — Seed from this conv's snapshot on first mount so a
+  // returning operator sees their draft immediately, not a flash of
+  // empty before the effect below restores it.
+  const initial = readSnap(props.conv);
+  const [draft, setDraft] = createSignal(initial.draft);
   const [sending, setSending] = createSignal(false);
-  const [imgs, setImgs] = createSignal<PendingImg[]>([]);
-  const [docs, setDocs] = createSignal<PendingDoc[]>([]);
+  const [imgs, setImgs] = createSignal<PendingImg[]>(initial.imgs);
+  const [docs, setDocs] = createSignal<PendingDoc[]>(initial.docs);
   let fileEl: HTMLInputElement | undefined;
   let taEl: HTMLTextAreaElement | undefined;
+  // Track which conv the signals currently represent so the createEffect
+  // can stash the OUTGOING conv's state under the OLD key before
+  // loading the new one (props.conv has already advanced when the
+  // effect fires).
+  let currentConv = props.conv;
 
   const grow = () => {
     if (!taEl) return;
     taEl.style.height = 'auto';
     taEl.style.height = Math.min(taEl.scrollHeight, 180) + 'px';
   };
+
+  // V107.31 — On conv switch: snapshot outgoing → restore incoming.
+  // `currentConv` is the slug whose draft is in the signals right now;
+  // props.conv is the new slug we're moving to.
+  createEffect(() => {
+    const next = props.conv;
+    if (next === currentConv) return;
+    // Stash outgoing — only persist if non-empty so the map stays small.
+    const out: ComposerSnap = { draft: draft(), imgs: imgs(), docs: docs() };
+    if (out.draft || out.imgs.length || out.docs.length) {
+      composerByConv.set(currentConv, out);
+    } else {
+      composerByConv.delete(currentConv);
+    }
+    // Load incoming — empty defaults if no snapshot.
+    const snap = readSnap(next);
+    setDraft(snap.draft);
+    setImgs(snap.imgs);
+    setDocs(snap.docs);
+    currentConv = next;
+    // Resize textarea after the value swap lands.
+    queueMicrotask(grow);
+  });
+
+  // Save in-flight draft when the panel unmounts (e.g. cluster swap).
+  onCleanup(() => {
+    const out: ComposerSnap = { draft: draft(), imgs: imgs(), docs: docs() };
+    if (out.draft || out.imgs.length || out.docs.length) {
+      composerByConv.set(currentConv, out);
+    }
+  });
 
   const addFile = (file: File) => {
     if ((file.type || '').startsWith('image/')) {
