@@ -247,7 +247,14 @@ function CompactBody(props: {
       'transition-colors select-none',
     ];
     if (props.active) {
-      base.push('bg-amber-600 text-amber-50');
+      // V107.32 — Selected badge also pulses, in amber, so the operator
+      // can see at a glance which agent currently owns the focus
+      // (operator request 2026-06-05). Same animate-pulse-soft as the
+      // working/green case for visual rhythm consistency. If the active
+      // agent ALSO happens to be working, the amber overrides green
+      // (selection is louder than status) — the pulse still signals
+      // life either way.
+      base.push('bg-amber-600 text-amber-50 animate-pulse-soft');
       return base.join(' ');
     }
     if (props.pendingReview) {
