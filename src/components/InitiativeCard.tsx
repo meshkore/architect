@@ -401,17 +401,18 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
 }
 
 /**
- * Description — V107.28 (chrome stripped).
+ * Description — V107.33.
  *
- * Renders the initiative's oneliner + body. Collapsed view shows the
- * oneliner (operator-authored 1-sentence hook) + the first ~3 lines
- * of body. "+ show more" reveals the full body; "— show less" at the
- * bottom collapses it back. Empty body or absent fields render
- * gracefully.
+ * Single paragraph of normal-weight grey prose, clamped to 2 lines
+ * by default with a "+ show more" toggle. Picks the body if present
+ * (the `## Description` block parsed out of the markdown file),
+ * else falls back to the operator-authored `oneliner`. Pre-V107.33
+ * we rendered BOTH stacked (oneliner in bold-white above, body in
+ * grey below) which read as a duplicate header on most initiatives
+ * because the agent tends to set oneliner = first sentence of body.
  *
- * V107.28 — Dropped the id chip + the left accent bar (operator
- * request 2026-06-02). The card header already shows the initiative
- * id elsewhere; this block is for the prose. Just the text.
+ * Operator request 2026-06-05: titles up top, descriptions max 2
+ * lines, normal weight (not bold).
  */
 function Description(props: {
   oneliner: string;
@@ -421,30 +422,38 @@ function Description(props: {
   onToggle: () => void;
   slug: string;
 }) {
-  const PREVIEW_LINES = 3;
-  const bodyLines = (): string[] => props.body.split('\n');
+  // Body wins if present; oneliner is the back-compat fallback for
+  // initiatives whose markdown file never gained a `## Description`
+  // block.
+  const text = (): string => {
+    const b = props.body.trim();
+    if (b) return b;
+    return props.oneliner.trim();
+  };
+  const has = (): boolean => text().length > 0;
+  // 2-line clamp via CSS so the truncation is responsive to width.
+  // `isLong` is approximate (chars + newlines) — the toggle button
+  // shows when EITHER metric trips. False positives are fine: an
+  // empty expand simply shows the same text.
   const isLong = (): boolean => {
-    if (props.body.length > DESCRIPTION_PREVIEW_CHARS) return true;
-    return bodyLines().length > PREVIEW_LINES;
+    const t = text();
+    return t.length > 140 || t.split('\n').length > 2;
   };
-  const bodyPreview = (): string => {
-    const truncatedByLines = bodyLines().slice(0, PREVIEW_LINES).join('\n');
-    if (truncatedByLines.length <= DESCRIPTION_PREVIEW_CHARS) return truncatedByLines;
-    return truncatedByLines.slice(0, DESCRIPTION_PREVIEW_CHARS).trimEnd() + '…';
-  };
-  const hasOneliner = (): boolean => props.oneliner.trim().length > 0;
-  const hasBody = (): boolean => props.body.trim().length > 0;
+  const collapsedStyle = {
+    display: '-webkit-box',
+    '-webkit-line-clamp': '2',
+    '-webkit-box-orient': 'vertical',
+    overflow: 'hidden',
+  } as const;
 
   return (
     <div>
-      <Show when={hasOneliner()}>
-        <p class="text-[13.5px] text-gray-100 font-medium leading-snug mb-2">
-          {props.oneliner}
-        </p>
-      </Show>
-      <Show when={hasBody()}>
-        <p class="text-[12.5px] text-gray-400 leading-[1.55] whitespace-pre-wrap break-words">
-          {props.expanded ? props.body : bodyPreview()}
+      <Show when={has()}>
+        <p
+          class="text-[12.5px] text-gray-400 leading-[1.55] whitespace-pre-wrap break-words"
+          style={props.expanded ? {} : collapsedStyle}
+        >
+          {text()}
         </p>
         <Show when={isLong()}>
           <button
