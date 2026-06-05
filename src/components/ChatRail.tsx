@@ -24,7 +24,22 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
       chatStore.seedOnboardingConv();
     }
     const snapshotConvs = chatStore.state.convs;
-    const all = Object.keys(snapshotConvs).filter((c) => !snapshotConvs[c]?.archived);
+    const allSet = new Set<string>(
+      Object.keys(snapshotConvs).filter((c) => !snapshotConvs[c]?.archived),
+    );
+    // V107.30 — Include locally-created (pre-dispatch) convs in the
+    // rail. `chatStore.createConv()` from the New Agent wizard adds
+    // the slug to `convMeta` (persisted) but the daemon-authoritative
+    // `convs` map only gains the entry after the first /chat/dispatch
+    // emits `conv.created` over WS. Without this union, brand-new
+    // agents the operator just created are invisible until they send
+    // their first message — exactly the symptom field-reported on
+    // 2026-06-05. Local archived shadow (archivedConvs) still hides.
+    for (const slug of Object.keys(chatStore.state.convMeta)) {
+      if (chatStore.state.archivedConvs[slug]) continue;
+      allSet.add(slug);
+    }
+    const all = Array.from(allSet);
     if (!all.includes(ONBOARDING_CONV_ID)) all.push(ONBOARDING_CONV_ID);
     all.forEach((c) => chatStore.ensureConvMeta(c));
     const byRecency = (a: string, b: string) => {

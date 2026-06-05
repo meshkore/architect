@@ -634,7 +634,11 @@ function createConv(opts: {
   // operator's own reference but no longer auto-render.
   if (!state.convMap[slug]) setState('convMap', slug, []);
   ensureConvMeta(slug, { type: opts.type, title: opts.title, model: opts.model });
-  setState('activeConv', slug);
+  // V107.30 — Use setActiveConv (not raw setState) so the picked slug
+  // is persisted in localStorage (`mc-last-conv-v1::<cluster>`). Pre-fix,
+  // reloading right after creating an agent dropped the selection back
+  // to Master because activeConv was set in-memory only.
+  setActiveConv(slug);
   return slug;
 }
 
