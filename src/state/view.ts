@@ -38,6 +38,9 @@ interface ProjectView {
   /** V86w — initiativeId → which detail tab is selected when
    *  expanded ('tasks' default, or 'activity'). */
   initiativeTab?: Record<string, 'tasks' | 'activity'>;
+  /** V107.34 — context-tree node path → true when expanded. Used by
+   *  the CONTEXT panel's filesystem-driven tree (standard v14 §3.5). */
+  contextNodes?: Record<string, boolean>;
 }
 
 interface ViewState {
@@ -47,7 +50,7 @@ interface ViewState {
 
 const EMPTY: ProjectView = {
   initiatives: {}, modules: {}, groupByPhase: {}, descriptions: {}, tasks: {},
-  archivedInitiatives: {}, initiativeTab: {},
+  archivedInitiatives: {}, initiativeTab: {}, contextNodes: {},
 };
 
 function keyFor(cluster: string | null): string {
@@ -67,6 +70,7 @@ function loadFor(cluster: string | null): ProjectView {
       tasks: parsed.tasks ?? {},
       archivedInitiatives: parsed.archivedInitiatives ?? {},
       initiativeTab: parsed.initiativeTab ?? {},
+      contextNodes: parsed.contextNodes ?? {},
     };
   } catch {
     return { ...EMPTY };
@@ -160,6 +164,16 @@ function setInitiativeTab(id: string, tab: 'tasks' | 'activity'): void {
   persist();
 }
 
+// V107.34 — Standard v14 context tree expand state. Persisted per-cluster.
+function isContextNodeExpanded(path: string): boolean {
+  return state.view.contextNodes?.[path] === true;
+}
+function toggleContextNode(path: string): void {
+  const next = !isContextNodeExpanded(path);
+  setState('view', 'contextNodes', path, next);
+  persist();
+}
+
 export const viewStore = {
   state,
   bindCluster,
@@ -179,4 +193,6 @@ export const viewStore = {
   setInitiativeArchived,
   initiativeTab,
   setInitiativeTab,
+  isContextNodeExpanded,
+  toggleContextNode,
 };

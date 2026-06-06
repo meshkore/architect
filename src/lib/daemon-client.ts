@@ -158,6 +158,30 @@ export interface LogListResponse {
   entries: LogEntry[];
 }
 
+// V107.34 — Standard v14 project context tree, served by the daemon's
+// /context endpoint (py-1.12.10+).
+export interface ContextNode {
+  kind: 'file' | 'dir';
+  name: string;
+  path: string;
+  title: string;
+  updated?: string;
+  status?: string;
+  words?: number;
+  over_cap?: boolean;
+  children?: ContextNode[];
+}
+export interface ContextTreeResponse {
+  exists: boolean;
+  root: string;
+  total_words: number;
+  token_estimate: number;
+  budget_tokens: number;
+  over_budget: boolean;
+  warnings: string[];
+  tree: ContextNode[];
+}
+
 
 export interface InitiativeActivityCommit {
   repo?: string;
@@ -503,6 +527,32 @@ export class DaemonClient {
    *  rendering. */
   async logFile(name: string, signal?: AbortSignal): Promise<{ ok: true; body: string } | { ok: false; status: number; error?: string }> {
     const url = this.transport.httpBase + '/log/' + encodeURIComponent(name);
+    const token = this.transport.token;
+    try {
+      const r = await fetch(url, {
+        signal,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!r.ok) return { ok: false, status: r.status };
+      const body = await r.text();
+      return { ok: true, body };
+    } catch (e) {
+      return { ok: false, status: 0, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** V107.34 — Standard v14 project context. GET /context returns
+   *  the .meshkore/context/ tree (folders + files with parsed
+   *  frontmatter + word counts + budget warnings). GET /context/<path>
+   *  serves the raw markdown body of a single file. Cockpit's
+   *  Context tab consumes both. Daemon must be at py-1.12.10+. */
+  async contextTree(signal?: AbortSignal): Promise<Result<ContextTreeResponse>> {
+    return this.request<ContextTreeResponse>('GET', '/context', undefined, signal);
+  }
+
+  async contextFile(path: string, signal?: AbortSignal): Promise<{ ok: true; body: string } | { ok: false; status: number; error?: string }> {
+    const rel = path.replace(/^\/+/, '');
+    const url = this.transport.httpBase + '/context/' + rel.split('/').map(encodeURIComponent).join('/');
     const token = this.transport.token;
     try {
       const r = await fetch(url, {
