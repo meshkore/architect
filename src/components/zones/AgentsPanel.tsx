@@ -24,38 +24,28 @@
  */
 
 import { For, Show, createMemo } from 'solid-js';
-import { chatStore, ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
+import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
+import type { ChatConvSummary } from '~/lib/daemon-client';
 import { storyStore } from '~/state/story';
 import { daemonStore } from '~/state/daemon';
 import { allTasks, allInitiatives } from '~/state/server';
 import { uiStore } from '~/state/ui';
 import { log } from '~/lib/log';
 
+// V107.24 — Panel reads `chatStore.state.convs` (snapshot.v1,
+// daemon-authoritative). Operator field report 2026-06-06: cavioca
+// cockpit showed 13+ ghost "Architect" agents because the panel was
+// pulling from the localStorage `convMeta` cache, which survives long
+// after the daemon archives those convs. Snapshot source = no ghosts
+// by construction.
+
 interface AgentRow {
   conv: string;
-  meta: ConvMeta;
+  summary: ChatConvSummary;
   status: 'idle' | 'streaming';
-  lastTs: string | null;
-  lastText: string | null;
   runInitiativeId: string | null;
   runTaskId: string | null;
   isOnboarding: boolean;
-}
-
-function isStreaming(conv: string): boolean {
-  const list = chatStore.state.convMap[conv] ?? [];
-  const last = list[list.length - 1];
-  return !!(last && last.kind === 'assistant' && last.streaming);
-}
-
-function lastMessage(conv: string): { ts: string | null; text: string | null } {
-  const list = chatStore.state.convMap[conv] ?? [];
-  for (let i = list.length - 1; i >= 0; i -= 1) {
-    const m = list[i]!;
-    if (m._placeholder || m._placeholder_user) continue;
-    return { ts: m.ts ?? null, text: m.text ?? null };
-  }
-  return { ts: null, text: null };
 }
 
 function fmtRelative(ts: string | null): string {
@@ -69,8 +59,9 @@ function fmtRelative(ts: string | null): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
-function typeBadge(t: ConvMeta['type']): string {
-  return t === 'custom' ? 'agent' : t;
+function typeBadge(t: string | null | undefined): string {
+  if (!t || t === 'custom') return 'agent';
+  return t;
 }
 
 export default function AgentsPanel() {
@@ -81,19 +72,16 @@ export default function AgentsPanel() {
   const rows = createMemo<AgentRow[]>(() => {
     const out: AgentRow[] = [];
     const runsByConv = new Map(activeRuns().map((r) => [r.conv, r]));
-    for (const [conv, meta] of Object.entries(chatStore.state.convMeta)) {
-      if (chatStore.state.archivedConvs[conv]) continue;
-      const run = runsByConv.get(conv) ?? null;
-      const { ts, text } = lastMessage(conv);
+    for (const summary of Object.values(chatStore.state.convs)) {
+      if (summary.archived) continue;
+      const run = runsByConv.get(summary.conv) ?? null;
       out.push({
-        conv,
-        meta,
-        status: isStreaming(conv) ? 'streaming' : 'idle',
-        lastTs: ts,
-        lastText: text,
+        conv: summary.conv,
+        summary,
+        status: summary.live ? 'streaming' : 'idle',
         runInitiativeId: run?.initiativeId ?? null,
         runTaskId: run ? (run.taskIds[run.cursor] ?? null) : null,
-        isOnboarding: conv === ONBOARDING_CONV_ID,
+        isOnboarding: summary.conv === ONBOARDING_CONV_ID,
       });
     }
     out.sort((a, b) => {
@@ -103,8 +91,8 @@ export default function AgentsPanel() {
       const aStream = a.status === 'streaming' ? 1 : 0;
       const bStream = b.status === 'streaming' ? 1 : 0;
       if (aStream !== bStream) return bStream - aStream;
-      const aTs = a.lastTs ? Date.parse(a.lastTs) : 0;
-      const bTs = b.lastTs ? Date.parse(b.lastTs) : 0;
+      const aTs = a.summary.last_activity_at ? Date.parse(a.summary.last_activity_at) : 0;
+      const bTs = b.summary.last_activity_at ? Date.parse(b.summary.last_activity_at) : 0;
       return bTs - aTs;
     });
     return out;
@@ -267,13 +255,13 @@ function AgentRowItem(props: { row: AgentRow; onOpen: () => void; onArchive: () 
     >
       <div class="flex items-center gap-2 flex-wrap">
         <span class="font-mono text-[10px] text-emerald-300 bg-emerald-500/15 border border-emerald-500/40 rounded px-1.5 py-0.5">
-          {r().meta.agentId}
+          {r().summary.agent_id ?? '—'}
         </span>
-        <span class="text-[12px] text-gray-100 font-medium truncate" title={r().meta.title || r().conv}>
-          {r().meta.title || (r().isOnboarding ? 'Architect Agent' : r().conv)}
+        <span class="text-[12px] text-gray-100 font-medium truncate" title={r().conv}>
+          {r().isOnboarding ? 'Architect Agent' : r().conv}
         </span>
         <span class="font-mono text-[9px] text-gray-500 bg-gray-800/60 border border-gray-700/60 rounded px-1.5 py-0.5 uppercase tracking-wider">
-          {typeBadge(r().meta.type)}
+          {typeBadge(r().summary.agent_type)}
         </span>
         <Show when={r().status === 'streaming'}>
           <span class="inline-flex items-center gap-1 font-mono text-[9px] text-amber-300 bg-amber-500/15 border border-amber-500/40 rounded px-1.5 py-0.5 uppercase tracking-wider">
@@ -286,7 +274,7 @@ function AgentRowItem(props: { row: AgentRow; onOpen: () => void; onArchive: () 
             in run
           </span>
         </Show>
-        <span class="ml-auto text-[10px] font-mono text-gray-600">{fmtRelative(r().lastTs)}</span>
+        <span class="ml-auto text-[10px] font-mono text-gray-600">{fmtRelative(r().summary.last_activity_at)}</span>
         {/* V107.9 — Inline archive button. Hidden on the Coordinator
             (onboarding conv is unarchivable by design). Visible on
             hover so the resting row stays clean. One click archives —
@@ -310,9 +298,10 @@ function AgentRowItem(props: { row: AgentRow; onOpen: () => void; onArchive: () 
           <span class="font-mono text-emerald-300/90">{r().runTaskId}</span>
         </p>
       </Show>
-      <Show when={!r().runTaskId && r().lastText}>
-        <p class="text-[11px] text-gray-500 mt-1 line-clamp-1" title={r().lastText ?? ''}>
-          {r().lastText}
+      <Show when={!r().runTaskId && r().summary.task_id}>
+        <p class="text-[11px] text-gray-500 mt-1 truncate">
+          <span class="font-mono text-[9px] text-gray-600 mr-1">task</span>
+          <span class="font-mono text-emerald-300/90">{r().summary.task_id}</span>
         </p>
       </Show>
     </li>

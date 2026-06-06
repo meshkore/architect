@@ -980,8 +980,10 @@ function clearPendingReply(conv: string): void {
 function hydrateFromSnapshot(snap: ChatSnapshotResponse): void {
   const nextConvs: Record<string, ChatConvSummary> = {};
   const nextArchived: Record<string, true> = {};
+  const seenConvs = new Set<string>();
   for (const c of snap.convs) {
     nextConvs[c.conv] = c;
+    seenConvs.add(c.conv);
     if (c.archived) nextArchived[c.conv] = true;
     // Seed convMeta for any conv we don't already know about so the
     // legacy code paths (AgentCard title, dispatch body, …) keep
@@ -1001,6 +1003,31 @@ function hydrateFromSnapshot(snap: ChatSnapshotResponse): void {
       setState('convMeta', c.conv, 'agentId', c.agent_id);
     }
   }
+  // V107.24 — Prune ghosts. convMeta lives in localStorage and survives
+  // across daemon archive/wipe cycles. Without pruning, AgentsPanel and
+  // other readers see entries the daemon no longer recognises. The
+  // daemon snapshot is authoritative: any convMeta entry not present in
+  // it is dead, drop it. ONBOARDING_CONV_ID is exempt (lazy-created on
+  // first message, daemon may not have surfaced it yet).
+  let prunedMeta = 0;
+  for (const cid of Object.keys(state.convMeta)) {
+    if (cid === ONBOARDING_CONV_ID) continue;
+    if (!seenConvs.has(cid)) {
+      setState('convMeta', cid, undefined as unknown as ConvMeta);
+      prunedMeta += 1;
+    }
+  }
+  // Same for the local archivedConvs cache — drop entries the daemon
+  // no longer recognises so we don't leak archived sets across cluster
+  // wipes / migrations.
+  let prunedArchived = 0;
+  for (const cid of Object.keys(state.archivedConvs)) {
+    if (cid === ONBOARDING_CONV_ID) continue;
+    if (!seenConvs.has(cid)) {
+      setState('archivedConvs', cid, undefined as unknown as true);
+      prunedArchived += 1;
+    }
+  }
   setState('convs', nextConvs);
   setState('archivedConvs', nextArchived);
   setState('convsHydratedAt', snap.generated_at ?? new Date().toISOString());
@@ -1009,6 +1036,8 @@ function hydrateFromSnapshot(snap: ChatSnapshotResponse): void {
     convs: snap.convs.length,
     live: snap.convs.filter((c) => c.live).length,
     archived: Object.keys(nextArchived).length,
+    pruned_meta: prunedMeta,
+    pruned_archived: prunedArchived,
   });
 }
 
