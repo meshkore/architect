@@ -13,13 +13,15 @@
  * input row (Stop button, scope strip) is the parent's concern.
  */
 
-import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
 import { isProjectEmpty } from '~/state/server';
 import { onboardingBootstrapBrief } from '~/lib/onboarding-brief';
 import { isValidationRed } from '~/components/architect/ValidationBlock';
 import { debugEmit } from '~/lib/debug-transport';
+import { log } from '~/lib/log';
+import type { ChatQueueItem } from '~/lib/daemon-client';
 
 const ACCEPT = 'image/*,.md,.txt,.pdf,.json,.yaml,.yml,.csv,.log';
 const MAX_IMAGES = 6;
@@ -45,6 +47,11 @@ function readSnap(conv: string): ComposerSnap {
 // V83 — drop the `client` prop. Read the current DaemonClient reactively
 // from daemonStore so dispatching follows project hot-swaps without the
 // parent having to feed a fresh client down.
+// V107.41 — Standard v16 chat-turn queue. Hydrate-once-per-conv cache so
+// the composer only round-trips when it first focuses a conv. Subsequent
+// WS `queue.*` events keep the store fresh.
+const queueHydrated = new Set<string>();
+
 export default function ChatComposer(props: {
   conv: string;
   placeholder?: string;
@@ -103,6 +110,76 @@ export default function ChatComposer(props: {
       composerByConv.set(currentConv, out);
     }
   });
+
+  // V107.41 — Hydrate queue on first focus per conv (lazy fetch).
+  createEffect(() => {
+    const conv = props.conv;
+    if (queueHydrated.has(conv)) return;
+    const c = daemonStore.state.client;
+    if (!c) return;
+    queueHydrated.add(conv);
+    void chatStore.hydrateQueue(c, conv);
+  });
+
+  // Derived queue + working flags for the active conv.
+  const queueItems = createMemo<ChatQueueItem[]>(
+    () => chatStore.state.queues[props.conv] ?? [],
+  );
+  const isConvWorking = createMemo<boolean>(() => {
+    const s = chatStore.state.convs[props.conv];
+    return !!(s && (s.live || s.coordinating));
+  });
+  // The queue-button appears only when the conv is busy — otherwise
+  // the operator can just send normally with play (per the operator's
+  // brief: "el reloj sólo aparece cuando ya tenemos el chat en marcha").
+  // Plus: while queued items already exist, keep the button visible
+  // even after the conv goes idle briefly between turns, so the operator
+  // can append to a still-flushing queue.
+  const showQueueBtn = createMemo<boolean>(
+    () => isConvWorking() || queueItems().length > 0,
+  );
+
+  // Enqueue: same content-validation as send, but POSTs to the queue
+  // endpoint and clears the textarea without consuming the dispatch
+  // slot.
+  const enqueue = async (): Promise<void> => {
+    const text = draft().trim();
+    if (sending() || !text) return;
+    const cli = daemonStore.state.client;
+    if (!cli) return;
+    setSending(true);
+    setDraft(''); setImgs([]); setDocs([]); grow();
+    const res = await cli.queueEnqueue(props.conv, text);
+    setSending(false);
+    if (!res.ok) {
+      // Restore the draft on failure so the operator doesn't lose it.
+      setDraft(text); grow();
+      log.warn('queue enqueue failed', { status: res.status });
+      if (res.status === 401) props.onTokenRejected?.(text);
+    } else {
+      taEl?.focus();
+      // The daemon will broadcast queue.item.added, ingest will land it
+      // in the store. No optimistic insert needed.
+    }
+  };
+  const editQueued = async (id: string, text: string): Promise<void> => {
+    const c = daemonStore.state.client;
+    if (!c || !text.trim()) return;
+    const res = await c.queueEdit(props.conv, id, text);
+    if (!res.ok) log.warn('queue edit failed', { id, status: res.status });
+  };
+  const deleteQueued = async (id: string): Promise<void> => {
+    const c = daemonStore.state.client;
+    if (!c) return;
+    const res = await c.queueDelete(props.conv, id);
+    if (!res.ok) log.warn('queue delete failed', { id, status: res.status });
+  };
+  const moveQueued = async (id: string, position: number): Promise<void> => {
+    const c = daemonStore.state.client;
+    if (!c) return;
+    const res = await c.queueMove(props.conv, id, position);
+    if (!res.ok) log.warn('queue move failed', { id, status: res.status });
+  };
 
   const addFile = (file: File) => {
     if ((file.type || '').startsWith('image/')) {
@@ -205,6 +282,17 @@ export default function ChatComposer(props: {
           )}</For>
         </div>
       </Show>
+      {/* V107.41 — Queued turns (Standard v16). Renders above the input
+          when there are items waiting. Max 30vh, scrolls overflow.
+          Each row: drag handle (left) + editable text + ✕ delete. */}
+      <Show when={queueItems().length > 0}>
+        <QueuePanel
+          items={queueItems()}
+          onEdit={(id, text) => void editQueued(id, text)}
+          onDelete={(id) => void deleteQueued(id)}
+          onMove={(id, position) => void moveQueued(id, position)}
+        />
+      </Show>
       {/* V86n — Recovered the textarea width: send + attach are now
           chrome-less icon buttons stacked vertically to the right.
           Send is a filled triangle on top (primary action, draws the
@@ -222,7 +310,12 @@ export default function ChatComposer(props: {
         />
         <input ref={fileEl} type="file" multiple accept={ACCEPT} class="hidden"
           onChange={(e) => { const fs = e.currentTarget.files; if (fs) for (let i = 0; i < fs.length; i += 1) addFile(fs[i]!); e.currentTarget.value = ''; }} />
-        <div class="flex flex-col justify-between flex-shrink-0 py-0.5">
+        {/* V107.41 — Three-button stack: send (top), queue (middle,
+            only when the conv is busy), attach (bottom). Tightened
+            vertical spacing so the trio fits inside the textarea
+            bounds without overflowing — `gap-1` distributes the
+            three icons evenly. */}
+        <div class="flex flex-col flex-shrink-0 py-0.5 gap-1">
           <button type="button" title="Send (Cmd/Ctrl+Enter)" onClick={() => void send()}
             disabled={sending() || (!draft().trim() && imgs().length === 0 && docs().length === 0)}
             class="inline-flex items-center justify-center w-8 h-8 rounded text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent">
@@ -240,6 +333,22 @@ export default function ChatComposer(props: {
               </svg>
             </Show>
           </button>
+          {/* V107.41 — Queue button. Only shown when the conv is
+              actively working (live or coordinating) OR there are
+              already queued items waiting. Same content-validation
+              as send, but POSTs to the queue endpoint instead of
+              dispatch. Standard v16. */}
+          <Show when={showQueueBtn()}>
+            <button type="button" title="Queue for after current turn" onClick={() => void enqueue()}
+              disabled={sending() || !draft().trim()}
+              class="inline-flex items-center justify-center w-8 h-8 rounded text-sky-300 hover:text-sky-200 hover:bg-sky-500/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent">
+              {/* Clock icon. */}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+            </button>
+          </Show>
           <button type="button" title="Attach images or docs" onClick={() => fileEl?.click()}
             class="inline-flex items-center justify-center w-8 h-8 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800/60 transition-colors">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -248,6 +357,137 @@ export default function ChatComposer(props: {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * V107.41 — Queue panel rendered above the composer when there are
+ * items waiting. Each row: drag handle (≡), text (click to edit), ✕.
+ * max-h: 30vh, scroll on overflow. Native HTML5 drag/drop for reorder.
+ *
+ * The daemon is the source of truth — every action POSTs and we let
+ * the WS event update the store, so the panel "follows" the server.
+ * Optimistic UI would require a rollback layer we don't need yet.
+ */
+function QueuePanel(props: {
+  items: ChatQueueItem[];
+  onEdit: (id: string, text: string) => void;
+  onDelete: (id: string) => void;
+  onMove: (id: string, position: number) => void;
+}) {
+  const [editingId, setEditingId] = createSignal<string | null>(null);
+  const [editValue, setEditValue] = createSignal('');
+  const [dragId, setDragId] = createSignal<string | null>(null);
+
+  const beginEdit = (it: ChatQueueItem): void => {
+    setEditingId(it.id);
+    setEditValue(it.text);
+  };
+  const commitEdit = (): void => {
+    const id = editingId();
+    if (!id) return;
+    const next = editValue().trim();
+    setEditingId(null);
+    if (next && next !== props.items.find((it) => it.id === id)?.text) {
+      props.onEdit(id, next);
+    }
+  };
+  const cancelEdit = (): void => { setEditingId(null); };
+
+  const onDragStart = (e: DragEvent, id: string): void => {
+    setDragId(id);
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id);
+    }
+  };
+  const onDragOver = (e: DragEvent): void => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+  };
+  const onDrop = (targetIdx: number): void => {
+    const src = dragId();
+    setDragId(null);
+    if (!src) return;
+    const srcIdx = props.items.findIndex((it) => it.id === src);
+    if (srcIdx < 0 || srcIdx === targetIdx) return;
+    // Daemon move endpoint expects the FINAL position index.
+    props.onMove(src, targetIdx);
+  };
+
+  return (
+    <div
+      class="border border-gray-800/70 bg-gray-950/40 rounded-md overflow-y-auto"
+      style={{ 'max-height': '30vh' }}
+    >
+      <div class="flex items-center gap-2 px-3 py-1.5 border-b border-gray-800/60 text-[10px] font-mono uppercase tracking-wider text-sky-300/80">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+          <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" stroke-linecap="round" />
+        </svg>
+        Queue · {props.items.length} waiting
+        <span class="text-gray-500 normal-case tracking-normal font-sans">— runs after the current turn</span>
+      </div>
+      <ul class="divide-y divide-gray-800/40">
+        <For each={props.items}>
+          {(it, i) => (
+            <li
+              class={`group flex items-start gap-2 px-2 py-1.5 text-[12.5px] ${dragId() === it.id ? 'opacity-50' : ''}`}
+              draggable={editingId() !== it.id}
+              onDragStart={(e) => onDragStart(e, it.id)}
+              onDragOver={onDragOver}
+              onDrop={() => onDrop(i())}
+            >
+              {/* Drag handle — the operator's grab affordance. */}
+              <span
+                class="select-none flex-shrink-0 mt-0.5 cursor-grab active:cursor-grabbing text-gray-600 hover:text-gray-300 font-mono leading-none text-[12px] px-1"
+                title="Drag to reorder"
+                aria-label="reorder"
+              >⋮⋮</span>
+              <span class="font-mono text-[9px] text-gray-600 mt-1 w-4 text-right flex-shrink-0">{i() + 1}</span>
+              <Show
+                when={editingId() === it.id}
+                fallback={
+                  <button
+                    type="button"
+                    onClick={() => beginEdit(it)}
+                    class="flex-1 text-left text-gray-300 hover:text-gray-100 leading-snug break-words min-w-0"
+                    title="Click to edit"
+                  >
+                    {it.text}
+                  </button>
+                }
+              >
+                <textarea
+                  autofocus
+                  value={editValue()}
+                  rows="2"
+                  onInput={(e) => setEditValue(e.currentTarget.value)}
+                  onBlur={commitEdit}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commitEdit(); }
+                  }}
+                  class="flex-1 bg-gray-950 border border-sky-500/40 rounded px-2 py-1 text-[12.5px] text-gray-100 resize-none focus:outline-none"
+                />
+              </Show>
+              <Show when={it.status === 'sending'}>
+                <span class="text-[10px] font-mono text-amber-300 flex-shrink-0 mt-1">sending…</span>
+              </Show>
+              <Show when={it.status === 'failed'}>
+                <span class="text-[10px] font-mono text-red-300 flex-shrink-0 mt-1" title={it.failed_reason ?? 'dispatch failed'}>failed</span>
+              </Show>
+              <button
+                type="button"
+                onClick={() => props.onDelete(it.id)}
+                class="flex-shrink-0 text-gray-600 hover:text-red-300 px-1 py-0.5 leading-none text-[12px] opacity-60 group-hover:opacity-100 transition-opacity"
+                title="Remove from queue"
+                aria-label="delete"
+              >✕</button>
+            </li>
+          )}
+        </For>
+      </ul>
     </div>
   );
 }

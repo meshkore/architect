@@ -30,6 +30,7 @@ import type {
   DispatchBody,
   ChatConvSummary,
   ChatSnapshotResponse,
+  ChatQueueItem,
 } from '~/lib/daemon-client';
 import { log } from '~/lib/log';
 
@@ -114,6 +115,11 @@ export interface ChatStoreState {
    *  decide whether to trust `convs` (recent enough) or refetch.
    *  Null on cold start or after a cluster swap. */
   convsHydratedAt: string | null;
+  /** V107.41 — Standard v16 chat-turn queue. Per-conv list of items
+   *  waiting to be dispatched. Daemon-authoritative (auto-flushes the
+   *  head when the conv goes idle after a turn final). Cockpit ingests
+   *  via WS `queue.item.*` events. Empty array when no queue. */
+  queues: Record<string, ChatQueueItem[]>;
 }
 
 const initial: ChatStoreState = {
@@ -127,6 +133,7 @@ const initial: ChatStoreState = {
   lastDeltaTsByConv: {},
   convs: {},
   convsHydratedAt: null,
+  queues: {},
 };
 
 const [state, setState] = createStore<ChatStoreState>(initial);
@@ -1166,6 +1173,54 @@ function ingestConvEvent(ev: DaemonEvent): void {
   }
 }
 
+// V107.41 — Standard v16 chat-turn queue. WS event ingest.
+function ingestQueueEvent(ev: DaemonEvent): void {
+  const type = ev.type;
+  const conv = typeof ev.conv === 'string' ? ev.conv : '';
+  if (!conv) return;
+  const itemEv = (ev as { item?: ChatQueueItem }).item ?? null;
+  const list = state.queues[conv] ?? [];
+  if (type === 'queue.item.added') {
+    if (!itemEv) return;
+    // Dedup by id; preserve insertion order by `position`.
+    const merged = list.filter((it) => it.id !== itemEv.id).concat(itemEv);
+    merged.sort((a, b) => a.position - b.position);
+    setState('queues', conv, merged);
+    return;
+  }
+  if (type === 'queue.item.updated') {
+    if (!itemEv) return;
+    // Apply the update; if positions shifted, the daemon already
+    // re-packed them — replace the whole list.
+    const merged = list.map((it) => it.id === itemEv.id ? itemEv : it);
+    merged.sort((a, b) => a.position - b.position);
+    setState('queues', conv, merged);
+    return;
+  }
+  if (type === 'queue.item.removed' || type === 'queue.item.sent') {
+    const id = itemEv?.id;
+    if (!id) return;
+    const pruned = list.filter((it) => it.id !== id);
+    setState('queues', conv, pruned);
+    return;
+  }
+}
+
+/** V107.41 — Hydrate one conv's queue from the daemon. Called by the
+ *  composer the first time it focuses a conv (lazy fetch — most convs
+ *  have no queue, so we skip the round trip unless the user is about
+ *  to interact with one). */
+async function hydrateQueue(client: DaemonClient, conv: string): Promise<void> {
+  try {
+    const res = await client.queueList(conv);
+    if (res.ok) {
+      setState('queues', conv, res.data.items ?? []);
+    }
+  } catch (e) {
+    log.warn('queue hydrate failed', conv, e instanceof Error ? e.message : String(e));
+  }
+}
+
 export const chatStore = {
   state,
   bindCluster,
@@ -1187,6 +1242,9 @@ export const chatStore = {
   hydrateFromSnapshot,
   ingestConvEvent,
   loadConvMessagesPage,
+  // V107.41 — chat-turn queue (Standard v16).
+  ingestQueueEvent,
+  hydrateQueue,
 };
 
 log.debug('state/chat loaded');

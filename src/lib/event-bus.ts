@@ -46,6 +46,10 @@ const SNAPSHOT_REFRESH_TYPES = new Set<string>([
 
 const CHAT_TYPE_PREFIX = 'chat.';
 const RUN_TYPE_PREFIX = 'run.';
+// V107.41 — Standard v16 chat-turn queue events (queue.item.added |
+// updated | removed | sent). Same single-facade isolation rule as
+// conv.* / run.* — only the active cluster's bus mutates chatStore.
+const QUEUE_TYPE_PREFIX = 'queue.';
 // py-1.11.0 — chat-state-rearchitecture. Conv lifecycle events emitted
 // at exact mutation points so cockpits update the rail without
 // polling /state. Active-cluster only — non-active clusters refetch
@@ -116,6 +120,14 @@ export function attachEventBus(
         return;
       }
       chatStore.ingestConvEvent(ev);
+      return;
+    }
+    if (t.startsWith(QUEUE_TYPE_PREFIX)) {
+      if (!isActiveCluster()) {
+        log.debug('[event-bus] dropping queue.* from non-active cluster', { clusterKey, active: daemonStore.state.activeId, type: t });
+        return;
+      }
+      chatStore.ingestQueueEvent(ev);
       return;
     }
     if (t.startsWith(RUN_TYPE_PREFIX)) {

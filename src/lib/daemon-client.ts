@@ -158,6 +158,32 @@ export interface LogListResponse {
   entries: LogEntry[];
 }
 
+// V107.41 — Standard v16 chat-turn queue. Per-conv FIFO with auto-flush
+// (daemon py-1.12.12+). The cockpit consumes:
+//   GET    /chat/conv/<conv>/queue                       → list
+//   POST   /chat/conv/<conv>/queue           { text }    → enqueue
+//   POST   /chat/conv/<conv>/queue/<id>/edit { text }    → edit
+//   POST   /chat/conv/<conv>/queue/<id>/move { position }→ reorder
+//   POST   /chat/conv/<conv>/queue/<id>/promote          → flush this now
+//   DELETE /chat/conv/<conv>/queue/<id>                  → remove
+// WS events: queue.item.added | updated | removed | sent (each carries
+// { conv, item }).
+export type QueueItemStatus = 'queued' | 'sending' | 'sent' | 'failed' | 'cancelled';
+export interface ChatQueueItem {
+  id: string;
+  text: string;
+  created_at: string;
+  position: number;
+  status: QueueItemStatus;
+  sent_at?: string;
+  failed_reason?: string;
+}
+export interface ChatQueueResponse {
+  conv: string;
+  version: number;
+  items: ChatQueueItem[];
+}
+
 // V107.34 — Standard v14 project context tree, served by the daemon's
 // /context endpoint (py-1.12.10+).
 export interface ContextNode {
@@ -539,6 +565,38 @@ export class DaemonClient {
     } catch (e) {
       return { ok: false, status: 0, error: e instanceof Error ? e.message : String(e) };
     }
+  }
+
+  // ── Standard v16 chat-turn queue (V107.41, daemon py-1.12.12+) ────
+  async queueList(conv: string, signal?: AbortSignal): Promise<Result<ChatQueueResponse>> {
+    return this.request<ChatQueueResponse>(
+      'GET', `/chat/conv/${encodeURIComponent(conv)}/queue`, undefined, signal,
+    );
+  }
+  async queueEnqueue(conv: string, text: string, signal?: AbortSignal): Promise<Result<ChatQueueItem>> {
+    return this.request<ChatQueueItem>(
+      'POST', `/chat/conv/${encodeURIComponent(conv)}/queue`, { text }, signal,
+    );
+  }
+  async queueEdit(conv: string, id: string, text: string, signal?: AbortSignal): Promise<Result<ChatQueueItem>> {
+    return this.request<ChatQueueItem>(
+      'POST', `/chat/conv/${encodeURIComponent(conv)}/queue/${encodeURIComponent(id)}/edit`, { text }, signal,
+    );
+  }
+  async queueMove(conv: string, id: string, position: number, signal?: AbortSignal): Promise<Result<{ items: ChatQueueItem[] }>> {
+    return this.request<{ items: ChatQueueItem[] }>(
+      'POST', `/chat/conv/${encodeURIComponent(conv)}/queue/${encodeURIComponent(id)}/move`, { position }, signal,
+    );
+  }
+  async queuePromote(conv: string, id: string, signal?: AbortSignal): Promise<Result<ChatQueueItem>> {
+    return this.request<ChatQueueItem>(
+      'POST', `/chat/conv/${encodeURIComponent(conv)}/queue/${encodeURIComponent(id)}/promote`, undefined, signal,
+    );
+  }
+  async queueDelete(conv: string, id: string, signal?: AbortSignal): Promise<Result<{ removed: string }>> {
+    return this.request<{ removed: string }>(
+      'DELETE', `/chat/conv/${encodeURIComponent(conv)}/queue/${encodeURIComponent(id)}`, undefined, signal,
+    );
   }
 
   /** V107.34 — Standard v14 project context. GET /context returns
