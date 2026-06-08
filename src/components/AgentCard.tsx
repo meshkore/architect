@@ -247,14 +247,16 @@ function CompactBody(props: {
       'transition-colors select-none',
     ];
     if (props.active) {
-      // V107.32 — Selected badge also pulses, in amber, so the operator
-      // can see at a glance which agent currently owns the focus
-      // (operator request 2026-06-05). Same animate-pulse-soft as the
-      // working/green case for visual rhythm consistency. If the active
-      // agent ALSO happens to be working, the amber overrides green
-      // (selection is louder than status) — the pulse still signals
-      // life either way.
-      base.push('bg-amber-600 text-amber-50 animate-pulse-soft');
+      // V107.36 — Pulse ONLY when the selected agent is also doing
+      // real work. Pre-V107.36 (V107.32) every selected agent pulsed
+      // forever which the operator read as "stuck working" — confusing
+      // when the agent was actually idle (e.g. just opened, post-
+      // refresh boot). Now: static amber when selected & idle; pulse
+      // amber only when selected AND `status === 'working'`. Selection
+      // still beats green-outline (amber takes priority over the
+      // working-not-selected style below).
+      const pulse = props.status === 'working' ? ' animate-pulse-soft' : '';
+      base.push('bg-amber-600 text-amber-50' + pulse);
       return base.join(' ');
     }
     if (props.pendingReview) {

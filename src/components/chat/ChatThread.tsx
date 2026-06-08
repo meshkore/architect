@@ -43,6 +43,16 @@ export default function ChatThread(props: {
   // below (existing.length > 0, summary.msg_count === 0) already
   // prevent re-fetches for genuinely-empty conversations.
   const loadedConvs = new Set<string>();
+  // V107.36 — Track convs whose initial history fetch is mid-flight so
+  // the body can render a loader instead of a blank wall. Operator
+  // field report 2026-06-08: refreshing the page with a non-empty
+  // conv showed empty chat for ~1s while /chat/conv/.../messages
+  // round-tripped — read as broken because there was no signal.
+  const [loadingConvs, setLoadingConvs] = createSignal<Set<string>>(new Set());
+  const isLoadingActive = (): boolean => {
+    const c = chatStore.state.activeConv;
+    return !!c && loadingConvs().has(c);
+  };
   createEffect(() => {
     const conv = chatStore.state.activeConv;
     if (!conv) return;
@@ -69,7 +79,11 @@ export default function ChatThread(props: {
     const client = daemonStore.state.client;
     if (!client) return;
     loadedConvs.add(conv);
-    void chatStore.loadConvMessagesPage(client, conv, { limit: 200 });
+    // V107.36 — flag in-flight; clear on completion (success OR fail).
+    setLoadingConvs((s) => { const n = new Set(s); n.add(conv); return n; });
+    void chatStore.loadConvMessagesPage(client, conv, { limit: 200 }).finally(() => {
+      setLoadingConvs((s) => { const n = new Set(s); n.delete(conv); return n; });
+    });
   });
 
   // V86p — the "preparing" bubble appears when the active conv is in
@@ -98,8 +112,22 @@ export default function ChatThread(props: {
     if (last && last.kind === 'assistant' && !last.streaming) return null;
     return ts;
   };
+  // V107.36 — Show loader when the active conv's history is being
+  // fetched AND no bubbles are visible yet. Hides automatically when
+  // the fetch resolves and messages start populating convMap.
+  const showLoader = (): boolean => {
+    if (!isLoadingActive()) return false;
+    if (props.stream.pre.length > 0) return false;
+    if (props.stream.queued.length > 0) return false;
+    if (props.stream.live) return false;
+    return true;
+  };
+
   return (
     <div ref={props.ref} class="flex-1 min-h-0 overflow-y-auto p-3 space-y-6">
+      <Show when={showLoader()}>
+        <ChatLoadingPlaceholder />
+      </Show>
       <For each={props.stream.pre}>
         {(it) => {
           if (it.kind === 'msg') return <MessageBubble msg={it.msg} />;
@@ -139,6 +167,37 @@ export default function ChatThread(props: {
       agent_id: chatStore.state.convMeta[c]?.agentId ?? null,
     }));
   }
+}
+
+/** V107.36 — Chat history loader. Renders when activeConv has
+ *  msg_count > 0 in the daemon snapshot but convMap is still empty
+ *  (the initial /chat/conv/<id>/messages fetch is mid-flight). Three
+ *  pulsing skeleton bars + label. Hides automatically once the first
+ *  message lands or the fetch errors. */
+function ChatLoadingPlaceholder() {
+  return (
+    <div class="flex flex-col gap-3 px-2 pt-4 opacity-70" aria-label="Loading chat history">
+      <div class="flex items-center gap-2 text-[11px] text-gray-500 font-mono uppercase tracking-wider">
+        <span class="inline-flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft" />
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:150ms]" />
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:300ms]" />
+        </span>
+        <span>Loading chat history…</span>
+      </div>
+      {/* Skeleton bubbles — 3 graduated heights so it reads as "messages
+          are coming" rather than a single rectangle. */}
+      <div class="flex flex-col gap-3 mt-2">
+        <div class="h-3 w-1/4 rounded bg-gray-800/60 animate-pulse-soft" />
+        <div class="h-4 w-11/12 rounded bg-gray-800/40 animate-pulse-soft [animation-delay:80ms]" />
+        <div class="h-4 w-9/12 rounded bg-gray-800/40 animate-pulse-soft [animation-delay:160ms]" />
+        <div class="h-4 w-10/12 rounded bg-gray-800/40 animate-pulse-soft [animation-delay:240ms]" />
+        <div class="h-3 w-2/12 rounded bg-gray-800/60 animate-pulse-soft [animation-delay:320ms] mt-3" />
+        <div class="h-4 w-8/12 rounded bg-gray-800/40 animate-pulse-soft [animation-delay:400ms]" />
+        <div class="h-4 w-11/12 rounded bg-gray-800/40 animate-pulse-soft [animation-delay:480ms]" />
+      </div>
+    </div>
+  );
 }
 
 /** Inline pill rendered when the active conv has dispatched subagents

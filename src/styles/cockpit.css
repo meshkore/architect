@@ -276,6 +276,23 @@
       word-break: normal;
       overflow-wrap: break-word;
     }
+    /* V107.36 — Keep the leading columns un-wrapped. Tables in chat
+       routinely look like `| API 32 | api | M | active | <long resumen> |`
+       — the first 4 columns are short tokens (ids, single chars,
+       status words), the LAST column carries the prose. With every cell
+       on auto-wrap, the browser starves the id columns to give the
+       resumen column more room → `API` lands on line 1 and `32` on
+       line 2, looking broken. Pin everything except the last column to
+       `nowrap`; the parent `.chat-md table` already has overflow-x:auto
+       so anything that overflows just scrolls horizontally instead of
+       chopping ids. */
+    .chat-md th:not(:last-child),
+    .chat-md td:not(:last-child) {
+      white-space: nowrap;
+    }
+    /* Inline code inside cells also stays whole (no mid-token break),
+       even in the wrap-allowed last column. */
+    .chat-md td code, .chat-md th code { white-space: nowrap; }
     .chat-md th {
       font-weight: 600;
       font-size: 0.78em;
