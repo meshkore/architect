@@ -36,7 +36,15 @@ const BOUNDS: Record<string, LayoutBounds> = {
   // V86z — col-chat max raised 700 → 960 so the operator can expand
   // the chat panel further and shrink the central roadmap column by
   // the same amount (roadmap is the flex middle, has no explicit min).
-  'col-chat':  { min: 280, max: 960, default: 420 },
+  // V107.39 — raised again 960 → 1400 (+45%). Operator field report
+  // 2026-06-08: hit the 960 ceiling and couldn't shrink the roadmap
+  // any further to give the chat more room. The roadmap is the `1fr`
+  // middle column with no min, so it shrinks gracefully as col-chat
+  // grows; the new ceiling lets operators on wider monitors reclaim
+  // a lot more chat real estate without breaking the layout
+  // (collapses to 36 px chat icon are handled by .chat-collapsed
+  // independently of this max).
+  'col-chat':  { min: 280, max: 1400, default: 420 },
   // V86z — agents-rail min lowered 70 → 50 so the column can collapse
   // to just the A001-style id chip + status dot (~44 px chip + 6 px
   // padding). AgentCard already drops chips + body title below 130 px
