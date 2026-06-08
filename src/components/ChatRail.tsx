@@ -1,7 +1,7 @@
 import { For, Show, createMemo, createSignal } from 'solid-js';
-import { chatStore, ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
+import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
 import AgentCard from '~/components/AgentCard';
-import { agentVisualColor, isServiceType } from '~/lib/agent-types';
+import { agentVisualColor } from '~/lib/agent-types';
 import { uiStore } from '~/state/ui';
 import { loadRailOrder, saveRailOrder } from './chat/rail-order';
 
@@ -10,69 +10,103 @@ import { loadRailOrder, saveRailOrder } from './chat/rail-order';
 // 130 was picked by visual inspection — narrower than that and the
 // id-chip + agent-type chip + location chip overflow on one line.
 const COMPACT_THRESHOLD_PX = 130;
-
-const isService = (meta: ConvMeta | undefined) => isServiceType(meta?.type);
+// V107.38 — `isService` / `isServiceType` no longer used. The rail's
+// ordering algorithm is now agent-type-agnostic (only Master + primary
+// architect are special-cased in the head; everything else uses a
+// stable creation-order + drag-override body, irrespective of whether
+// the conv is a service or a custom worker).
 
 export default function ChatRail(props: { onNewAgent?: () => void }) {
   const [order, setOrder] = createSignal<string[]>(loadRailOrder());
   const [dragSrc, setDragSrc] = createSignal<string | null>(null);
   const [dragTgt, setDragTgt] = createSignal<string | null>(null);
 
+  // V107.38 — Rail ordering, rewritten clean. The previous version
+  // sorted custom + services + architects EACH by `last_activity_at`,
+  // which meant an idle agent jumped slots the moment it started
+  // working (operator field report 2026-06-08: A099 was 4th, started
+  // working, instantly moved to 2nd). Activity should never reorder
+  // the rail — operators rely on positional muscle memory.
+  //
+  // The model is intentionally two-layer:
+  //
+  //   HEAD  (always recomputed; positions 0 + optional 1):
+  //     - position 0 : Master (`_onboarding_v1`) — pinned
+  //     - position 1 : Primary roadmap-architect — most recent
+  //                    non-archived. Only ONE architect is "primary";
+  //                    older architects fall into the body. When the
+  //                    primary is archived, slot 1 collapses.
+  //
+  //   BODY  (everything else, in a stable order that does NOT move
+  //          when activity flips):
+  //     - first   : operator's saved drag order, in the order they set
+  //     - then    : anything new, by `created_at` ascending — so brand-
+  //                 new agents always land at the END of the rail,
+  //                 never bubble up past existing entries.
+  //
+  // `last_activity_at` is no longer read by this memo. Period.
   const orderedConvs = createMemo(() => {
-    // Master is always-on, ALWAYS at the top.
     if (!chatStore.state.convMap[ONBOARDING_CONV_ID]) {
       chatStore.seedOnboardingConv();
     }
     const snapshotConvs = chatStore.state.convs;
-    const allSet = new Set<string>(
-      Object.keys(snapshotConvs).filter((c) => !snapshotConvs[c]?.archived),
-    );
-    // V107.30 — Include locally-created (pre-dispatch) convs in the
-    // rail. `chatStore.createConv()` from the New Agent wizard adds
-    // the slug to `convMeta` (persisted) but the daemon-authoritative
-    // `convs` map only gains the entry after the first /chat/dispatch
-    // emits `conv.created` over WS. Without this union, brand-new
-    // agents the operator just created are invisible until they send
-    // their first message — exactly the symptom field-reported on
-    // 2026-06-05. Local archived shadow (archivedConvs) still hides.
+
+    // ── Inventory: every non-archived conv we know about. ──
+    // Daemon-authoritative `convs` ∪ locally-created `convMeta`
+    // (pre-dispatch convs from the New Agent wizard live only in
+    // convMeta until the first dispatch produces a daemon record).
+    const allSet = new Set<string>();
+    for (const c of Object.keys(snapshotConvs)) {
+      if (!snapshotConvs[c]?.archived) allSet.add(c);
+    }
     for (const slug of Object.keys(chatStore.state.convMeta)) {
       if (chatStore.state.archivedConvs[slug]) continue;
       allSet.add(slug);
     }
-    const all = Array.from(allSet);
-    if (!all.includes(ONBOARDING_CONV_ID)) all.push(ONBOARDING_CONV_ID);
-    all.forEach((c) => chatStore.ensureConvMeta(c));
-    const byRecency = (a: string, b: string) => {
-      const aLast = snapshotConvs[a]?.last_activity_at ?? '';
-      const bLast = snapshotConvs[b]?.last_activity_at ?? '';
-      return bLast.localeCompare(aLast);
-    };
-    // py-1.12.1-cockpit — Rail order, top to bottom:
-    //   1. Master (_onboarding_v1) — pinned first
-    //   2. Roadmap Architect — pinned second; the coordinator stays
-    //      above the workers it dispatches. Without this pin the new
-    //      work-* conv (more recent activity) pushed the architect
-    //      down on every dispatch — confusing, since the architect IS
-    //      the parent. Operator's request 2026-05-31.
-    //   3. Workers + custom agents — by recency
-    //   4. Other service types (deploy/db/testing/audit/docs/review) — by recency
+    allSet.add(ONBOARDING_CONV_ID); // master is always present, even on a fresh cluster
+    for (const c of allSet) chatStore.ensureConvMeta(c);
+
+    // ── Head: master + primary architect. ──
     const isArchitect = (c: string): boolean => {
-      const s = snapshotConvs[c];
-      if (s?.agent_type === 'roadmap-architect') return true;
+      if (snapshotConvs[c]?.agent_type === 'roadmap-architect') return true;
       return c.startsWith('roadmap-architect-');
     };
-    const rest = all.filter((c) => c !== ONBOARDING_CONV_ID);
-    const architects = rest.filter(isArchitect).sort(byRecency);
-    const others = rest.filter((c) => !isArchitect(c));
-    const custom = others.filter((c) => !isService(chatStore.state.convMeta[c])).sort(byRecency);
-    const services = others.filter((c) => isService(chatStore.state.convMeta[c])).sort(byRecency);
-    const defaults = [ONBOARDING_CONV_ID, ...architects, ...custom, ...services];
-    // Drag-saved order respected, BUT Master + architect stay pinned
-    // in slots 0+1 regardless. Workers can be reordered freely below.
-    const pinned = new Set<string>([ONBOARDING_CONV_ID, ...architects]);
-    const positioned = order().filter((id) => all.includes(id) && !pinned.has(id));
-    const unpositioned = defaults.filter((id) => !pinned.has(id) && !positioned.includes(id));
-    return [ONBOARDING_CONV_ID, ...architects, ...positioned, ...unpositioned];
+    const architectCandidates = [...allSet].filter(isArchitect);
+    architectCandidates.sort((a, b) => {
+      // Prefer live or coordinating over idle.
+      const aLive = (snapshotConvs[a]?.live || snapshotConvs[a]?.coordinating) ? 1 : 0;
+      const bLive = (snapshotConvs[b]?.live || snapshotConvs[b]?.coordinating) ? 1 : 0;
+      if (aLive !== bLive) return bLive - aLive;
+      // Tie-break: newest `created_at` wins (most recent spawn is the
+      // current pass; older architect convs fall into the body).
+      const aC = snapshotConvs[a]?.created_at ?? '';
+      const bC = snapshotConvs[b]?.created_at ?? '';
+      return bC.localeCompare(aC);
+    });
+    const primaryArchitect: string | null = architectCandidates[0] ?? null;
+
+    const head: string[] = [ONBOARDING_CONV_ID];
+    if (primaryArchitect) head.push(primaryArchitect);
+
+    // ── Body: stable, never-reorder-on-activity. ──
+    const pinned = new Set<string>(head);
+
+    // (a) Operator's saved drag order, filtered down to slugs still
+    //     present (and not in the head).
+    const opOrder = order().filter((id) => allSet.has(id) && !pinned.has(id));
+    const opSet = new Set(opOrder);
+
+    // (b) Newcomers — anything not in head + not in operator order.
+    //     Sort by `created_at` ASCENDING (oldest first → newest at
+    //     the bottom). Slug fallback for pre-dispatch convs that
+    //     haven't been registered in `convs` yet (their slugs embed
+    //     a timestamp anyway, so the order stays stable).
+    const ts = (c: string): string => snapshotConvs[c]?.created_at ?? c;
+    const newcomers = [...allSet]
+      .filter((id) => !pinned.has(id) && !opSet.has(id))
+      .sort((a, b) => ts(a).localeCompare(ts(b)));
+
+    return [...head, ...opOrder, ...newcomers];
   });
 
   const statusOf = (conv: string) => {
