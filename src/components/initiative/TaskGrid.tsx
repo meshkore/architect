@@ -44,6 +44,10 @@ export function StatusBadge(props: { status: string }) {
       case 'pending-operator':
       case 'pending_operator':
         return 'bg-orange-500/15 text-orange-300 border-orange-500/40';
+      // V107.40 — `draft` status. Not dispatchable. Dashed slate
+      // border + muted slate text. Visually screams "not ready".
+      case 'draft':
+        return 'bg-slate-700/30 text-slate-300 border-slate-500/40 border-dashed';
       default: return 'bg-gray-800/60 text-gray-400 border-gray-700';
     }
   };

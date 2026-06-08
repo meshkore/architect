@@ -60,6 +60,15 @@ function codeChipClass(status: string): string {
       return 'bg-orange-500/20 text-orange-300 border-orange-500/55';
     case 'cancelled':
       return 'bg-gray-800/60 text-gray-500 border-gray-700/60 line-through decoration-gray-600';
+    case 'draft':
+      // V107.40 — `draft` is the "do not dispatch yet" state. Visually
+      // distinct from `next` (warm amber, ready) and `backlog` (gray,
+      // parked). Dashed slate border + muted text reads as "in
+      // progress of being authored, not ready for execution". The
+      // architect's dispatch logic skips this status (see
+      // server.ts:isDispatchableStatus); Run All passes it over
+      // silently.
+      return 'bg-slate-700/30 text-slate-300 border-slate-500/40 border-dashed';
     default:
       return 'bg-gray-800/60 text-gray-400 border-gray-700/70';
   }
