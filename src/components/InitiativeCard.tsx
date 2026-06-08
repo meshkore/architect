@@ -23,7 +23,7 @@ import { For, Show, createMemo, createResource } from 'solid-js';
 import type { ServerInitiative, ServerTask } from '~/state/server';
 import { activeEntriesByInitiative } from '~/state/server';
 import { sortTasks, groupByPhases } from '~/components/initiative/task-grouping';
-import { TaskGrid, StatusBadge } from '~/components/initiative/TaskGrid';
+import { TaskGrid } from '~/components/initiative/TaskGrid';
 import { chatStore } from '~/state/chat';
 import { viewStore } from '~/state/view';
 import { daemonStore } from '~/state/daemon';
@@ -288,18 +288,26 @@ export default function InitiativeCard(props: { initiative: ServerInitiative; ta
           onClick={() => setExpanded(!expanded())}
           class="flex-1 flex items-center gap-3 min-w-0 text-left"
         >
-          <h3 class="text-sm font-semibold text-gray-100 truncate">{props.initiative.title}</h3>
+          {/* V107.37 — Title-first header. Removed the `ACTIVE` /
+              `BACKLOG` / etc StatusBadge (status already implied by
+              the filter pill at the top of InitiativesPanel) and
+              shortened "N modules" → `Nm` so the title takes the
+              remaining horizontal room. `archived` badge kept because
+              it's actionable info that the filter alone doesn't
+              convey (a card can be in `all` view yet manually
+              archived). */}
+          <h3 class="text-sm font-semibold text-gray-100 truncate flex-1 min-w-0">{props.initiative.title}</h3>
           <Show when={isArchived()}>
             <span class="font-mono text-[9px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5 uppercase tracking-wider flex-shrink-0">
               archived
             </span>
           </Show>
-          <Show when={props.initiative.status}>
-            <StatusBadge status={props.initiative.status as string} />
-          </Show>
           <Show when={modules().length > 1}>
-            <span class="font-mono text-[10px] text-gray-500 uppercase tracking-wider flex-shrink-0">
-              {modules().length} modules
+            <span
+              class="font-mono text-[10px] text-gray-500 flex-shrink-0"
+              title={`${modules().length} modules`}
+            >
+              {modules().length}m
             </span>
           </Show>
           <span class="ml-auto flex-shrink-0">
