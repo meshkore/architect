@@ -39,7 +39,13 @@ const STREAM_TAIL_HEIGHT_PX = 84;
  * ≈ 1.625 × 14 ≈ 23 px → 4 lines ≈ 92 px). Slightly above so the
  * "show more" toggle only kicks in for genuinely long content.
  */
-const COLLAPSED_MAX_PX = 96;
+// V107.35 — Bumped from 96 → 144 (about 8 lines at body line-height) so
+// the collapsed preview shows enough context to be useful instead of
+// teasing 4 lines. Soft-mask gradient at the bottom fades the cut so it
+// never reads as "chopped mid-word" — same technique StreamingTail uses
+// at the top for the live tail (operator request 2026-06-07).
+const COLLAPSED_MAX_PX = 144;
+const COLLAPSED_MASK = 'linear-gradient(to bottom, #000 0%, #000 70%, rgba(0,0,0,0.55) 88%, transparent 100%)';
 
 /**
  * Collapsible text wrapper. Renders text up to COLLAPSED_MAX_PX tall
@@ -114,6 +120,19 @@ function CollapsibleText(props: {
   const collapsedNow = (): boolean => !props.lockExpanded && !expanded() && overflows();
   const showToggle = (): boolean => !props.lockExpanded && overflows();
 
+  // V107.35 — Build the collapsed-state inline styles (max-height + soft
+  // mask gradient) in one helper so plain-text and markdown branches stay
+  // in lockstep. Pre-V107.35 used a hard pixel cut → cut mid-line; now
+  // the bottom 30% fades to transparent so any partial line reads as
+  // "trimmed" instead of "chopped".
+  const collapsedStyle = () => collapsedNow()
+    ? {
+        'max-height': `${COLLAPSED_MAX_PX}px`,
+        '-webkit-mask-image': COLLAPSED_MASK,
+        'mask-image': COLLAPSED_MASK,
+      }
+    : { 'max-height': 'none' };
+
   return (
     <>
       <Show
@@ -122,7 +141,7 @@ function CollapsibleText(props: {
           <div
             ref={(el) => { if (!props.markdown) bodyEl = el; }}
             class="whitespace-pre-wrap overflow-hidden transition-[max-height] duration-150"
-            style={{ 'max-height': collapsedNow() ? `${COLLAPSED_MAX_PX}px` : 'none' }}
+            style={collapsedStyle()}
           >
             {props.text}
             {props.children}
@@ -142,21 +161,15 @@ function CollapsibleText(props: {
         <div
           ref={(el) => { bodyEl = el; }}
           class="chat-md overflow-hidden transition-[max-height] duration-150"
-          style={{ 'max-height': collapsedNow() ? `${COLLAPSED_MAX_PX}px` : 'none' }}
+          style={collapsedStyle()}
           innerHTML={html() ?? ''}
         />
         {props.children}
       </Show>
       <Show when={showToggle()}>
-        {/* V86z — pale-gray fade line right above the toggle when the
-            content is clamped. Without it the cut looks like a
-            floating / unfinished paragraph; with it the operator
-            reads "this text was deliberately trimmed". Hidden once
-            expanded — at that point nothing is clipped so a fade
-            would be misleading. */}
-        <Show when={!expanded()}>
-          <span aria-hidden="true" class="block h-px w-full bg-gradient-to-r from-gray-400/40 to-transparent mt-0.5" />
-        </Show>
+        {/* V107.35 — Toggle button only. The mask-image gradient on the
+            body already signals "more below"; an extra fade line on top
+            of that just added visual noise. */}
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); setExpanded(!expanded()); }}
