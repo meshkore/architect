@@ -10,7 +10,11 @@
 .rt-wrap {
   background: #0a0d12;
   border-radius: 10px;
-  padding: 20px 18px 24px;
+  /* Asymmetric padding: minimal on the left so the line + nodes sit
+   * close to the column edge (operator field report 2026-06-10: the
+   * old 18-px L padding was stacking with the section's p-4 → ~8 px
+   * of visible drift). Right padding kept for breathing room. */
+  padding: 20px 18px 24px 4px;
 }
 
 /* Timeline has NO left padding — instead, each .rt-story owns its
