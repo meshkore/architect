@@ -79,7 +79,24 @@
  * x=15. A 28-px node centered on the line ⇒ left edge at x=1. The
  * 20-px backlog variant ⇒ left at x=5. Critical: positive coords
  * avoid the parent wrapper's `overflow:hidden` clip. */
+/* Multi-hue palette (no green primaries):
+ *   active   → sky    #0ea5e9   HOLLOW    ring invites the click
+ *   running  → fuchsia #ec4899  FILLED    pulsing, alive RIGHT NOW
+ *   next     → amber  #f59e0b   HOLLOW    upcoming
+ *   done     → violet #a78bfa   FILLED    completed, mature
+ *   backlog  → slate  #475569   HOLLOW    small, dormant
+ *
+ * Each node also accepts a `--progress` CSS variable (0..1) set
+ * inline from JSX. A conic-gradient ring around the node visualises
+ * completion as a sweep — far easier to scan than reading "5/7" mid-meta.
+ *
+ * Line gap: `box-shadow: 0 0 0 7px <panel-bg>` punches a 7px halo of
+ * panel-color around the node, hiding the vertical line for 7px past
+ * the node's outer edge. The operator asked for ≥3px; 7px reads clearly. */
 .rt-node {
+  --node-color: #6b7280;
+  --node-glow: rgba(107, 114, 128, .4);
+  --progress: 0;
   position: absolute;
   left: 1px;
   top: 0;
@@ -90,74 +107,119 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid currentColor;
-  background: #0d1117;
-  color: #6b7280;
+  border: 2px solid var(--node-color);
+  background: transparent;
+  color: var(--node-color);
   cursor: pointer;
   box-shadow:
-    0 0 0 4px #0a0d12,           /* "punch a hole" through the line */
-    0 1px 2px rgba(0, 0, 0, .4);
+    0 0 0 7px #0a0d12,           /* knockout disc — kills the line for 7px past the node edge */
+    0 1px 3px rgba(0, 0, 0, .45);
   transition:
     color .15s ease,
     background .15s ease,
     transform .12s ease,
-    box-shadow .15s ease;
+    box-shadow .2s ease;
   z-index: 1;
 }
+
+/* Progress ring — conic sweep visible as a thin halo just inside the
+ * 7-px knockout. Hidden for backlog nodes (no meaningful progress). */
+.rt-node::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--node-color) calc(var(--progress, 0) * 360deg),
+    rgba(75, 85, 99, .18) 0
+  );
+  -webkit-mask: radial-gradient(circle, transparent 64%, #000 66%);
+          mask: radial-gradient(circle, transparent 64%, #000 66%);
+  z-index: -1;
+  pointer-events: none;
+  opacity: .85;
+  transition: background .35s ease;
+}
+
 .rt-node:hover {
   transform: scale(1.08);
   box-shadow:
-    0 0 0 4px #0a0d12,
-    0 0 0 6px currentColor,
-    0 2px 4px rgba(0, 0, 0, .5);
+    0 0 0 7px #0a0d12,
+    0 0 0 9px var(--node-color),
+    0 2px 5px rgba(0, 0, 0, .55);
 }
 .rt-node:focus-visible {
-  outline: 2px solid currentColor;
+  outline: 2px solid var(--node-color);
   outline-offset: 3px;
 }
 .rt-node:disabled {
   cursor: not-allowed;
   opacity: .55;
-  box-shadow: 0 0 0 4px #0a0d12;
+  box-shadow: 0 0 0 7px #0a0d12;
 }
-.rt-node:disabled:hover { transform: none; }
+.rt-node:disabled:hover { transform: none; box-shadow: 0 0 0 7px #0a0d12; }
 
-/* Status colors — distinct, semantic. The line stays gray; the nodes
- * carry all the meaning. */
-.rt-node.is-active  { color: #3fb950; background: #0e2316; }
+/* ── Per-status: color + fill mode. ─────────────────────────────── */
+
+/* ACTIVE — sky blue, hollow. The bright ring says "click to play". */
+.rt-node.is-active {
+  --node-color: #0ea5e9;
+  --node-glow: rgba(14, 165, 233, .45);
+  background: transparent;
+}
+
+/* RUNNING — fuchsia, FILLED, with a pulse. Demands attention. */
 .rt-node.is-running {
-  color: #e24b4a;
-  background: #1f0d0d;
-  animation: rt-pulse 1.4s ease-in-out infinite;
+  --node-color: #ec4899;
+  --node-glow: rgba(236, 72, 153, .55);
+  background: #ec48991f;
+  animation: rt-pulse 1.6s ease-in-out infinite;
 }
-.rt-node.is-next    { color: #d99a2b; background: #1d1405; }
-.rt-node.is-done    {
-  color: #5cb87a;
-  background: #0e2316;
-  border-color: #2a5a3a;
+
+/* NEXT — amber, hollow. Warm anticipation. */
+.rt-node.is-next {
+  --node-color: #f59e0b;
+  --node-glow: rgba(245, 158, 11, .4);
+  background: transparent;
 }
+
+/* DONE — violet, FILLED with check. Sealed. Slightly faded ring. */
+.rt-node.is-done {
+  --node-color: #a78bfa;
+  --node-glow: rgba(167, 139, 250, .35);
+  background: #a78bfa16;
+  border-color: #6d57b8;
+}
+
+/* BACKLOG — slate, smaller, hollow, no progress ring. */
 .rt-node.is-backlog {
+  --node-color: #475569;
   left: 5px;
   top: 4px;
   width: 20px;
   height: 20px;
-  border: 2px solid #2a3038;
-  background: #0d1117;
-  color: #3a4048;
-  box-shadow: 0 0 0 4px #0a0d12;
+  border: 2px solid var(--node-color);
+  background: transparent;
+  box-shadow: 0 0 0 7px #0a0d12;
 }
-.rt-node.is-backlog:hover { transform: scale(1.05); box-shadow: 0 0 0 4px #0a0d12; }
+.rt-node.is-backlog::before { display: none; }
+.rt-node.is-backlog:hover {
+  transform: scale(1.05);
+  box-shadow:
+    0 0 0 7px #0a0d12,
+    0 0 0 9px #5a6678;
+}
 
 @keyframes rt-pulse {
   0%, 100% {
     box-shadow:
-      0 0 0 4px #0a0d12,
-      0 0 0 0 rgba(226, 75, 74, .55);
+      0 0 0 7px #0a0d12,
+      0 0 0 0 var(--node-glow);
   }
   50% {
     box-shadow:
-      0 0 0 4px #0a0d12,
-      0 0 0 7px rgba(226, 75, 74, 0);
+      0 0 0 7px #0a0d12,
+      0 0 0 10px transparent;
   }
 }
 
@@ -192,6 +254,30 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* Short initiative ID chip — sits at the head of the title row so the
+ * operator can refer to "I18", "I19" by sight when reading chat. Chat
+ * convention (Standard §22): mentions of initiatives use `#<id>`. */
+.rt-id {
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  background: #161b24;
+  color: #aeb6c2;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid #232a35;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+.rt-story.is-active   .rt-id { color: #7dd3fc; border-color: #0ea5e955; }
+.rt-story.is-running  .rt-id { color: #f9a8d4; border-color: #ec489955; background: #ec48990d; }
+.rt-story.is-next     .rt-id { color: #fcd34d; border-color: #f59e0b55; }
+.rt-story.is-done     .rt-id { color: #c4b5fd; border-color: #a78bfa3a; }
+.rt-story.is-backlog  .rt-id { color: #6b7280; }
+
 .rt-title {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   font-size: 15px;
@@ -202,6 +288,7 @@
 }
 .rt-story.is-backlog .rt-title { color: #cdd2d8; }
 
+/* Status label — colour matches the per-status node hue. */
 .rt-statlabel {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 10px;
@@ -209,11 +296,11 @@
   letter-spacing: .04em;
   text-transform: uppercase;
 }
-.rt-statlabel.is-active  { color: #7ee29a; }
-.rt-statlabel.is-next    { color: #f0c478; }
-.rt-statlabel.is-running { color: #f09595; }
+.rt-statlabel.is-active  { color: #38bdf8; }
+.rt-statlabel.is-running { color: #f472b6; }
+.rt-statlabel.is-next    { color: #fbbf24; }
+.rt-statlabel.is-done    { color: #c4b5fd; }
 .rt-statlabel.is-backlog { color: #6b7280; }
-.rt-statlabel.is-done    { color: #7ee29a; }
 
 .rt-archived-tag {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -270,23 +357,17 @@
 }
 .rt-badge-tasks .rt-progress-fill {
   height: 100%;
-  background: #3fb950;
+  background: #0ea5e9;
   border-radius: 2px;
   transition: width .35s ease;
 }
-.rt-story.is-running .rt-badge-tasks .rt-progress-fill { background: #e24b4a; }
-.rt-story.is-next    .rt-badge-tasks .rt-progress-fill { background: #d99a2b; }
-.rt-story.is-done    .rt-badge-tasks .rt-progress-fill { background: #5cb87a; }
-.rt-story.is-backlog .rt-badge-tasks .rt-progress-fill { background: #3a4048; }
+.rt-story.is-running .rt-badge-tasks .rt-progress-fill { background: #ec4899; }
+.rt-story.is-next    .rt-badge-tasks .rt-progress-fill { background: #f59e0b; }
+.rt-story.is-done    .rt-badge-tasks .rt-progress-fill { background: #a78bfa; }
+.rt-story.is-backlog .rt-badge-tasks .rt-progress-fill { background: #475569; }
 
 .rt-badge-modules { color: #8a93a0; }
 .rt-badge-modules .rt-badge-dot { background: #6b7fb3; }
-
-.rt-meta-id {
-  font-size: 10px;
-  color: #4d545e;
-  margin-left: auto;
-}
 
 .rt-desc {
   margin-top: 6px;

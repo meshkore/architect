@@ -181,10 +181,12 @@ export default function InitiativeCard(props: {
         #{String(props.index).padStart(2, '0')}
       </span>
 
-      {/* Node = play/stop control */}
+      {/* Node = play/stop control. `--progress` drives the conic-gradient
+       *  ring around the circle (0..1 fraction of tasks done). */}
       <button
         type="button"
         class={`rt-node is-${vstate()}`}
+        style={{ '--progress': String(progressPct() / 100) }}
         onClick={onNodeClick}
         disabled={!isWorking() && otherActivityLive()}
         title={nodeTitle()}
@@ -229,6 +231,11 @@ export default function InitiativeCard(props: {
 
       <div class="rt-row">
         <div class="rt-title-row">
+          <Show when={props.initiative.id}>
+            <span class="rt-id" aria-label={`initiative id ${props.initiative.id}`}>
+              #{props.initiative.id}
+            </span>
+          </Show>
           <h3 class="rt-title">{props.initiative.title}</h3>
           <span class={`rt-statlabel is-${vstate()}`}>{statusLabel()}</span>
           <Show when={isArchived()}>
@@ -256,9 +263,6 @@ export default function InitiativeCard(props: {
                 <span style={{ opacity: .55 }}> module{moduleCount() === 1 ? '' : 's'}</span>
               </span>
             </span>
-          </Show>
-          <Show when={props.initiative.id}>
-            <span class="rt-meta-id">{props.initiative.id}</span>
           </Show>
         </div>
 
