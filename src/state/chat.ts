@@ -1039,6 +1039,34 @@ function hydrateFromSnapshot(snap: ChatSnapshotResponse): void {
   setState('archivedConvs', nextArchived);
   setState('convsHydratedAt', snap.generated_at ?? new Date().toISOString());
   saveConvMeta();
+  // 2026-06-10 operator field report: a cluster with a live conv but no
+  // recent assistant.delta (e.g. a stuck `chat_sessions` slot on the
+  // daemon — IKA had its master conv pinned live for 2.5 days because a
+  // crashed subprocess never reported final) showed IDLE in the project
+  // rail, even though the conv view said "STOP". Iron principle from the
+  // operator: "nunca debe existir un instante en el que un agente está
+  // trabajando y no se refleja en todas partes."
+  //
+  // Fix: seed `clusterActivity[active].workingConvs` from the snapshot.
+  // The rail's busy indicator now reflects ANY conv the daemon says is
+  // live or coordinating, even before the first delta streams (or when
+  // no delta ever will — like a stuck conv that needs a STOP). The
+  // workingConvs set is the union of (a) live/coordinating convs from
+  // the snapshot and (b) any deltas seen since hydration (preserved).
+  const activeId = activeClusterId();
+  if (activeId) {
+    const fromSnapshot = new Set(
+      snap.convs.filter((c) => c.live || c.coordinating).map((c) => c.conv),
+    );
+    setState('clusterActivity', activeId, (prev) => {
+      const merged = new Set([...(prev?.workingConvs ?? []), ...fromSnapshot]);
+      return {
+        lastEventAt: prev?.lastEventAt ?? Date.now(),
+        lastReadAt: prev?.lastReadAt ?? 0,
+        workingConvs: [...merged],
+      };
+    });
+  }
   log.debug('chat.snapshot.v1 hydrated', {
     convs: snap.convs.length,
     live: snap.convs.filter((c) => c.live).length,
@@ -1170,6 +1198,24 @@ function ingestConvEvent(ev: DaemonEvent): void {
       created_at: prev?.created_at ?? (typeof ev.ts === 'string' ? ev.ts : ''),
       msg_count: prev?.msg_count ?? 0,
     }));
+    // Keep `clusterActivity.workingConvs` in lockstep with `conv.live`
+    // so the project rail reflects daemon state immediately — not only
+    // after the first assistant.delta lands. Pair of [[hydrateFromSnapshot]]
+    // which seeds the set on cluster bind.
+    const activeId2 = activeClusterId();
+    const isLive = ev.live === true || ev.coordinating === true;
+    if (activeId2) {
+      setState('clusterActivity', activeId2, (prev) => {
+        const working = new Set(prev?.workingConvs ?? []);
+        if (isLive) working.add(conv);
+        else working.delete(conv);
+        return {
+          lastEventAt: Date.now(),
+          lastReadAt: prev?.lastReadAt ?? 0,
+          workingConvs: [...working],
+        };
+      });
+    }
   }
 }
 
