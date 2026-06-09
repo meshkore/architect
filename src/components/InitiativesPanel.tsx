@@ -201,7 +201,7 @@ export default function InitiativesPanel() {
     <section class="initiatives-section min-w-0 p-4">
       <Show when={!isProjectEmpty()} fallback={<EmptyOnboardingPanel />}>
         <div class="rt-wrap">
-          <header class="rt-header">
+          <header class="initiatives-header rt-header">
             <span class="rt-h-title">Initiatives</span>
             <div class="initiatives-filters flex items-center gap-1 flex-shrink-0">
               <For each={VISIBILITY_FILTERS}>

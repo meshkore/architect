@@ -60,6 +60,20 @@ export default function InitiativeCard(props: {
   const isComplete = createMemo(
     () => props.tasks.length > 0 && done() === props.tasks.length,
   );
+  /** Distinct module count across this initiative's tasks (Standard §4
+   *  requires task.category = module). Empty categories ignored. */
+  const moduleCount = createMemo(() => {
+    const set = new Set<string>();
+    for (const t of props.tasks) {
+      const m = (t.category || '').trim();
+      if (m) set.add(m);
+    }
+    return set.size;
+  });
+  const progressPct = createMemo(() => {
+    if (props.tasks.length === 0) return 0;
+    return Math.round((done() / props.tasks.length) * 100);
+  });
 
   const isArchived = () =>
     viewStore.isInitiativeArchived(props.initiative.id) &&
@@ -223,10 +237,28 @@ export default function InitiativeCard(props: {
         </div>
 
         <div class="rt-meta">
-          {props.tasks.length > 0 ? `${done()}/${props.tasks.length}` : '0 tasks'}
+          <span class="rt-badge rt-badge-tasks" title={`${done()} of ${props.tasks.length} tasks done`}>
+            <Show when={props.tasks.length > 0} fallback={<span class="rt-badge-dot" />}>
+              <span class="rt-progress" aria-hidden="true">
+                <span class="rt-progress-fill" style={{ width: `${progressPct()}%` }} />
+              </span>
+            </Show>
+            <span>
+              {props.tasks.length > 0 ? `${done()}/${props.tasks.length}` : '0'}
+              <span style={{ opacity: .55 }}> tasks</span>
+            </span>
+          </span>
+          <Show when={moduleCount() > 0}>
+            <span class="rt-badge rt-badge-modules" title={`${moduleCount()} module${moduleCount() === 1 ? '' : 's'} touched`}>
+              <span class="rt-badge-dot" />
+              <span>
+                {moduleCount()}
+                <span style={{ opacity: .55 }}> module{moduleCount() === 1 ? '' : 's'}</span>
+              </span>
+            </span>
+          </Show>
           <Show when={props.initiative.id}>
-            <span> · </span>
-            <span>{props.initiative.id}</span>
+            <span class="rt-meta-id">{props.initiative.id}</span>
           </Show>
         </div>
 
