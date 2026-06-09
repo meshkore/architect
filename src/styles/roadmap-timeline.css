@@ -21,9 +21,14 @@
  * own padding-left:44px, and the line + node live inside that
  * padding. This is critical: the parent panel wraps each story in an
  * `overflow:hidden` div for height transitions, which would clip any
- * negative-x absolute children. Keeping everything positive ⇒ visible. */
+ * negative-x absolute children. Keeping everything positive ⇒ visible.
+ *
+ * `padding-top: 8px` gives the first node ~6 px of breathing room
+ * below the header (operator field report 2026-06-10: "el primero
+ * estaba muy pegado arriba"). */
 .rt-timeline {
   position: relative;
+  padding-top: 8px;
 }
 /* Reset the default <ul> padding so .rt-stories doesn't add a phantom
  * 40px offset between the line and the content. */
@@ -154,7 +159,7 @@
   border-radius: 50%;
   background: conic-gradient(
     var(--node-ring, var(--node-color)) calc(var(--progress, 0) * 360deg),
-    rgba(255, 255, 255, .07) 0
+    rgba(255, 255, 255, .18) 0
   );
   /* `closest-side` is critical: without it the radial-gradient defaults to
    * farthest-corner (≈26 px on a 38×38 box), so percentages land OUTSIDE
@@ -186,17 +191,24 @@
  * "filled vs hollow" feel comes from the inner icon (play / stop /
  * check) + the conic progress ring + (for running) the pulse animation. */
 
+/* Per-status palette. Border is the saturated -500 tone, ring is the
+ * -400 step lighter — still inside the same hue family so the
+ * progress arc reads as "this status, but softer" rather than a
+ * second competing color. 2026-06-10 operator nudge: -300 was too
+ * washed-out, the ring was getting lost. -400 keeps the contrast
+ * vs the panel-bg without fighting the -500 border. */
+
 /* ACTIVE — sky blue. Ring invites the click. */
 .rt-node.is-active {
   --node-color: #0ea5e9;        /* sky-500 inner border */
-  --node-ring:  #7dd3fc;        /* sky-300 progress ring (lighter / softer) */
+  --node-ring:  #38bdf8;        /* sky-400 progress ring */
   --node-glow: rgba(14, 165, 233, .5);
 }
 
 /* RUNNING — fuchsia, with a pulse. Demands attention. */
 .rt-node.is-running {
   --node-color: #ec4899;        /* pink-500 */
-  --node-ring:  #f9a8d4;        /* pink-300 */
+  --node-ring:  #f472b6;        /* pink-400 */
   --node-glow: rgba(236, 72, 153, .6);
   animation: rt-pulse 1.6s ease-in-out infinite;
 }
@@ -204,14 +216,14 @@
 /* NEXT — amber. Warm anticipation. */
 .rt-node.is-next {
   --node-color: #f59e0b;        /* amber-500 */
-  --node-ring:  #fcd34d;        /* amber-300 */
+  --node-ring:  #fbbf24;        /* amber-400 */
   --node-glow: rgba(245, 158, 11, .45);
 }
 
 /* DONE — violet. Sealed; slightly faded ring. */
 .rt-node.is-done {
   --node-color: #a78bfa;        /* violet-400 */
-  --node-ring:  #ddd6fe;        /* violet-200 */
+  --node-ring:  #c4b5fd;        /* violet-300 */
   --node-glow: rgba(167, 139, 250, .4);
   border-color: #6d57b8;
 }
