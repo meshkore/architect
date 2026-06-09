@@ -180,6 +180,10 @@ export default function InitiativesPanel() {
     for (const c of Object.values(chatStore.state.convs)) {
       if (!c.live && !c.coordinating) continue;
       if (c.conv === archConv) continue;
+      // Operator-opened convs (master, custom user chats) have no
+      // parent_conv. They shouldn't block a roadmap dispatch — only
+      // SUBAGENT convs (work-*, deploy-*, …) count as "a story is live".
+      if (!c.parent_conv) continue;
       return true;
     }
     return false;

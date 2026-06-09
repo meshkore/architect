@@ -153,8 +153,13 @@
     var(--node-color) calc(var(--progress, 0) * 360deg),
     rgba(255, 255, 255, .14) 0
   );
-  -webkit-mask: radial-gradient(circle, transparent 78%, #000 80%);
-          mask: radial-gradient(circle, transparent 78%, #000 80%);
+  /* `closest-side` is critical: without it the radial-gradient defaults to
+   * farthest-corner (≈28 px from center in a 40×40 box), so 78% lands at
+   * ~22 px — OUTSIDE the visible circle — and the entire ring gets masked
+   * away. closest-side anchors the gradient to 20 px (half the side), so
+   * 78%-80% means radius 15.6-16 px → the ring shows in the 16-20 band. */
+  -webkit-mask: radial-gradient(circle closest-side, transparent 78%, #000 80%);
+          mask: radial-gradient(circle closest-side, transparent 78%, #000 80%);
   z-index: -1;
   pointer-events: none;
   transition: background .35s ease;

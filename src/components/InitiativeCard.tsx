@@ -44,13 +44,20 @@ export default function InitiativeCard(props: {
   );
   const isWorking = (): boolean => liveAgentsHere().length > 0;
 
-  /** Other activity = anything live in this cluster not on this
+  /** Other activity = a SUBAGENT live in this cluster not on this
    *  initiative. Used to disable the run button so we never spawn a
-   *  second architect over a busy roadmap. */
+   *  second architect over a busy roadmap.
+   *
+   *  A subagent has `parent_conv` set (it was spawned by another conv).
+   *  Operator-opened convs (master, custom user chats) do NOT have
+   *  `parent_conv` — including them in this check would make every
+   *  play button disabled while the operator is mid-chat with master,
+   *  which the operator reported 2026-06-10 as a regression. */
   const otherActivityLive = createMemo<boolean>(() => {
     for (const c of Object.values(chatStore.state.convs)) {
       if (!c.live && !c.coordinating) continue;
       if (c.initiative_id === props.initiative.id) continue;
+      if (!c.parent_conv) continue;
       return true;
     }
     return false;
