@@ -5,6 +5,7 @@
 @import './styles/projects-rail.css';
 @import './styles/offline-panel.css';
 @import './styles/rail-empty-panel.css';
+@import './styles/roadmap-timeline.css';
 
 @tailwind base;
 @tailwind components;
