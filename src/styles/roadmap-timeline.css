@@ -108,12 +108,16 @@
   align-items: center;
   justify-content: center;
   border: 2px solid var(--node-color);
-  background: transparent;
+  /* Solid panel-bg fill: the line passes through the node lane (x=14..16)
+   * so the node MUST be opaque or the line bleeds through transparent
+   * areas. #0a0d12 = .rt-wrap bg ⇒ visually invisible inside the circle. */
+  background: #0a0d12;
   color: var(--node-color);
   cursor: pointer;
   box-shadow:
-    0 0 0 7px #0a0d12,           /* knockout disc — kills the line for 7px past the node edge */
-    0 1px 3px rgba(0, 0, 0, .45);
+    0 0 0 7px #0a0d12,           /* outer knockout — kills the line for 7px past the node edge */
+    0 0 0 8px rgba(15, 18, 24, .6), /* faint inner halo so the node "lifts" off the line */
+    0 1px 3px rgba(0, 0, 0, .55);
   transition:
     color .15s ease,
     background .15s ease,
@@ -145,7 +149,7 @@
   transform: scale(1.08);
   box-shadow:
     0 0 0 7px #0a0d12,
-    0 0 0 9px var(--node-color),
+    0 0 0 10px var(--node-color),
     0 2px 5px rgba(0, 0, 0, .55);
 }
 .rt-node:focus-visible {
@@ -161,37 +165,37 @@
 
 /* ── Per-status: color + fill mode. ─────────────────────────────── */
 
-/* ACTIVE — sky blue, hollow. The bright ring says "click to play". */
+/* All states share the opaque #0a0d12 fill defined on .rt-node. The
+ * "filled vs hollow" feel comes from the inner icon (play / stop /
+ * check) + the conic progress ring + (for running) the pulse animation. */
+
+/* ACTIVE — sky blue. Ring invites the click. */
 .rt-node.is-active {
   --node-color: #0ea5e9;
-  --node-glow: rgba(14, 165, 233, .45);
-  background: transparent;
+  --node-glow: rgba(14, 165, 233, .5);
 }
 
-/* RUNNING — fuchsia, FILLED, with a pulse. Demands attention. */
+/* RUNNING — fuchsia, with a pulse. Demands attention. */
 .rt-node.is-running {
   --node-color: #ec4899;
-  --node-glow: rgba(236, 72, 153, .55);
-  background: #ec48991f;
+  --node-glow: rgba(236, 72, 153, .6);
   animation: rt-pulse 1.6s ease-in-out infinite;
 }
 
-/* NEXT — amber, hollow. Warm anticipation. */
+/* NEXT — amber. Warm anticipation. */
 .rt-node.is-next {
   --node-color: #f59e0b;
-  --node-glow: rgba(245, 158, 11, .4);
-  background: transparent;
+  --node-glow: rgba(245, 158, 11, .45);
 }
 
-/* DONE — violet, FILLED with check. Sealed. Slightly faded ring. */
+/* DONE — violet. Sealed; slightly faded ring. */
 .rt-node.is-done {
   --node-color: #a78bfa;
-  --node-glow: rgba(167, 139, 250, .35);
-  background: #a78bfa16;
+  --node-glow: rgba(167, 139, 250, .4);
   border-color: #6d57b8;
 }
 
-/* BACKLOG — slate, smaller, hollow, no progress ring. */
+/* BACKLOG — slate, smaller, no progress ring. */
 .rt-node.is-backlog {
   --node-color: #475569;
   left: 5px;
@@ -199,27 +203,30 @@
   width: 20px;
   height: 20px;
   border: 2px solid var(--node-color);
-  background: transparent;
-  box-shadow: 0 0 0 7px #0a0d12;
 }
 .rt-node.is-backlog::before { display: none; }
 .rt-node.is-backlog:hover {
   transform: scale(1.05);
   box-shadow:
     0 0 0 7px #0a0d12,
-    0 0 0 9px #5a6678;
+    0 0 0 10px #5a6678,
+    0 1px 3px rgba(0, 0, 0, .55);
 }
 
 @keyframes rt-pulse {
   0%, 100% {
     box-shadow:
       0 0 0 7px #0a0d12,
-      0 0 0 0 var(--node-glow);
+      0 0 0 8px rgba(15, 18, 24, .6),
+      0 0 0 8px var(--node-glow),
+      0 1px 3px rgba(0, 0, 0, .55);
   }
   50% {
     box-shadow:
       0 0 0 7px #0a0d12,
-      0 0 0 10px transparent;
+      0 0 0 8px rgba(15, 18, 24, .6),
+      0 0 0 12px transparent,
+      0 1px 3px rgba(0, 0, 0, .55);
   }
 }
 
@@ -395,12 +402,13 @@
   padding: 0;
   cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-size: 10.5px;
+  font-weight: 500;
   letter-spacing: .04em;
   text-transform: uppercase;
-  color: rgba(126, 226, 154, 0.72);
+  color: #7dd3fc;          /* sky-300 — matches the active node hue, brighter than the old faded green */
 }
-.rt-toggle-more:hover { color: #7ee29a; }
+.rt-toggle-more:hover { color: #bae6fd; }
 
 /* Body — collapsible (accordion) */
 .rt-body {
@@ -448,7 +456,7 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 10px;
   background: #161b24;
-  color: #8a93a0;
+  color: #b1bac6;
   border-radius: 3px;
   padding: 2px 6px;
   min-width: 42px;
@@ -458,8 +466,8 @@
 
 .rt-task-text {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-  font-size: 12px;
-  color: #aab2bd;
+  font-size: 12.5px;
+  color: #d4dae3;          /* brighter than the old #aab2bd — close to title-bright without competing */
   min-width: 0;
   flex: 1;
   overflow: hidden;
@@ -469,17 +477,18 @@
 
 .rt-task-status {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 9px;
-  letter-spacing: .04em;
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: .05em;
   text-transform: uppercase;
-  color: #4d545e;
+  color: #6b7280;
   flex-shrink: 0;
 }
-.rt-task-status.is-done { color: #7ee29a; }
+.rt-task-status.is-done { color: #c4b5fd; }
 .rt-task-status.is-active,
-.rt-task-status.is-in_progress { color: #7ee29a; }
-.rt-task-status.is-next { color: #f0c478; }
-.rt-task-status.is-blocked { color: #f09595; }
+.rt-task-status.is-in_progress { color: #38bdf8; }
+.rt-task-status.is-next { color: #fbbf24; }
+.rt-task-status.is-blocked { color: #f472b6; }
 
 /* Right-hand secondary control for an initiative (archive toggle).
  * Subtle, only the operator's hover reveals it. */
