@@ -13,16 +13,25 @@
   padding: 20px 18px 24px;
 }
 
-/* Padding-left = 44px → enough room for a 28px node sitting on a line
- * at x=14px (the line's left edge is at 14px, centered at 15px). The
- * line ends up roughly aligned with the "Initiatives" header label. */
+/* Timeline has NO left padding — instead, each .rt-story owns its
+ * own padding-left:44px, and the line + node live inside that
+ * padding. This is critical: the parent panel wraps each story in an
+ * `overflow:hidden` div for height transitions, which would clip any
+ * negative-x absolute children. Keeping everything positive ⇒ visible. */
 .rt-timeline {
   position: relative;
-  padding-left: 44px;
+}
+/* Reset the default <ul> padding so .rt-stories doesn't add a phantom
+ * 40px offset between the line and the content. */
+.rt-stories {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 /* Vertical line — neutral steel-gray gradient. Colour lives on the
- * status NODES, not on the line. */
+ * status NODES, not on the line. Drawn inside the timeline at x=14
+ * (i.e. the center column of each story's 28-px node lane). */
 .rt-line {
   position: absolute;
   left: 14px;
@@ -38,12 +47,13 @@
   pointer-events: none;
 }
 
-/* Each story (initiative row) — more vertical breathing room so the
- * temporal thread reads clearly. */
+/* Each story (initiative row) — its own left padding hosts the node;
+ * the visible content starts at x=44px. Generous bottom margin so the
+ * temporal thread reads as a real timeline, not a stack. */
 .rt-story {
   position: relative;
-  margin-bottom: 22px;
-  padding: 2px 0 4px 0;
+  margin-bottom: 32px;
+  padding: 2px 0 4px 44px;
   cursor: pointer;
   transition: opacity .25s ease, margin-bottom .25s ease;
 }
@@ -51,7 +61,7 @@
 
 .rt-story.dim { opacity: .42; }
 .rt-story.dim .rt-meta { opacity: 0; }
-.rt-story.open { margin-bottom: 30px; }
+.rt-story.open { margin-bottom: 40px; }
 
 /* Story number — keep in the markup for assistive tech, but hide
  * visually. The timeline order already implies sequence. */
@@ -64,12 +74,14 @@
   white-space: nowrap;
 }
 
-/* Node geometry: line lives at timeline-x = 14px → story-x = 14 - 44
- * = -30px. A 28px node centered on the line ⇒ left edge at -30 - 14 =
- * -44px. Same math for the 20px backlog variant (-30 - 10 = -40px). */
+/* Node geometry: the story's padding-left = 44px hosts the node, so
+ * the node lives at POSITIVE story-x (not negative). Line center =
+ * x=15. A 28-px node centered on the line ⇒ left edge at x=1. The
+ * 20-px backlog variant ⇒ left at x=5. Critical: positive coords
+ * avoid the parent wrapper's `overflow:hidden` clip. */
 .rt-node {
   position: absolute;
-  left: -44px;
+  left: 1px;
   top: 0;
   width: 28px;
   height: 28px;
@@ -125,7 +137,7 @@
   border-color: #2a5a3a;
 }
 .rt-node.is-backlog {
-  left: -40px;
+  left: 5px;
   top: 4px;
   width: 20px;
   height: 20px;
