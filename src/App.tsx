@@ -280,10 +280,28 @@ export default function App() {
 // the Architect Agent (the always-on fallback).
 function pickDefaultConv(): string {
   const meta = chatStore.state.convMeta;
+  const convs = chatStore.state.convs;
   const archived = chatStore.state.archivedConvs;
   const clusterId = daemonStore.state.health?.cluster_id ?? null;
   const saved = loadLastActiveConv(clusterId);
-  if (saved && meta[saved] && !archived[saved]) return saved;
+  // V107.42 — Sticky-restore. Pre-fix we required `meta[saved]` to be
+  // populated, but `convMeta` only hydrates AFTER `chatSnapshot`
+  // lands — which arrives later than `/state` (the gate this fn runs
+  // behind). For non-Master saved convs (any sub-agent, work-*,
+  // deploy-*, etc.) the gate flunked and we fell through to the
+  // "most recent by ts" fallback → operator landed on whichever conv
+  // happened to be top-of-rail instead of the one they had open.
+  //
+  // The saved slug is enough. It came from setActiveConv at some
+  // earlier point; if the conv is now gone or archived, the
+  // downstream ChatThread render handles it gracefully. We just
+  // need to NOT block on metadata we haven't fetched yet.
+  if (saved && !archived[saved]) {
+    // Soft sanity: the slug isn't empty and isn't the local-archived
+    // shadow. If `convs[saved]?.archived` is true (daemon-archived),
+    // skip; otherwise honor it even when meta hasn't landed yet.
+    if (!convs[saved]?.archived) return saved;
+  }
   const candidates = Object.keys(meta).filter((c) => !archived[c]);
   if (candidates.length > 0) {
     const byTs = candidates
