@@ -141,7 +141,9 @@ export default function ChatThread(props: {
           : null}
       </For>
       <Show when={props.stream.live}>
-        <MessageBubble msg={props.stream.live!} />
+        <div data-live-bubble="1">
+          <MessageBubble msg={props.stream.live!} />
+        </div>
       </Show>
       <Show when={preparingAt()}>
         {(ts) => <PreparingBubble dispatchedAt={ts()} />}

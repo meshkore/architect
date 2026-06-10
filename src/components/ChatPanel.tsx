@@ -44,10 +44,45 @@ export default function ChatPanel() {
   });
   const isRunning = () => stream().live !== null;
 
+  // 2026-06-10 — operator field report: when the agent starts a new
+  // reply, scroll the LIVE bubble's TOP into view (not the bottom).
+  // That way the operator can read the message from the start,
+  // instead of seeing only its tail growing off the viewport.
+  //
+  // Algorithm:
+  //  • Track the live bubble's `stream_id` across ticks.
+  //  • On transition (null → id, or id → other-id), find the
+  //    `[data-live-bubble="1"]` element and `scrollIntoView({block: 'start'})`.
+  //  • While the same bubble keeps streaming, hold position — don't
+  //    yank back to bottom on each delta (operator wants to READ).
+  //  • When no live bubble exists (idle conv), snap to bottom so any
+  //    new operator input lands at the visible end of the thread.
+  let lastLiveStreamId: string | null = null;
   createEffect(() => {
-    void stream();
+    const s = stream();
+    void s;
+    const live = s.live;
+    const liveId = live?.stream_id ?? (live?.ts ?? null) ?? null;
     queueMicrotask(() => {
-      if (threadEl && !historyOpen()) threadEl.scrollTop = threadEl.scrollHeight;
+      if (!threadEl || historyOpen()) return;
+      if (liveId && liveId !== lastLiveStreamId) {
+        // New live bubble appeared (or the previous one was replaced
+        // by a different stream id). Anchor its top.
+        const target = threadEl.querySelector<HTMLElement>('[data-live-bubble="1"]');
+        if (target) {
+          target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        } else {
+          // Fallback: live attribute not in DOM yet, ride to bottom for
+          // this tick so deltas remain visible.
+          threadEl.scrollTop = threadEl.scrollHeight;
+        }
+      } else if (!liveId) {
+        // No live bubble — keep the tail visible so user input lands
+        // at the bottom of the rendered thread.
+        threadEl.scrollTop = threadEl.scrollHeight;
+      }
+      // Same liveId across ticks → no scroll (operator reading the reply).
+      lastLiveStreamId = liveId;
     });
   });
   createEffect(() => { void conv(); setHistoryOpen(false); });
