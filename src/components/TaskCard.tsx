@@ -104,18 +104,25 @@ export default function TaskCard(props: { task: ServerTask }) {
   const toggle = (): void => viewStore.toggleTask(props.task.id);
 
   // V107.22 — Fetch the markdown file ONLY when the row is first
-  // expanded. createResource keyed on (client, path, expanded gate).
+  // expanded. createResource keyed on (expanded gate, path).
   // Returns null until expanded; serves the parsed body afterwards.
   // V107.23 — Hits `taskBodyCache` first; only round-trips on first
   // open per file. Survives For-loop remounts.
+  // 2026-06-11 — Source no longer includes `daemonStore.state.client`.
+  // On project switch the client flips before `<For>` re-renders;
+  // if the client were a source dep, the resource would re-fire with
+  // (newClient, oldPath) and 404 against the wrong daemon. Read the
+  // client inside the fetcher only — see InitiativeCard for the
+  // matching note.
   const [bodyRes] = createResource(
-    () => (expanded() ? { client: daemonStore.state.client, path: props.task.path } : null),
-    async (input) => {
-      if (!input || !input.client || !input.path) return null;
-      const cacheKey = input.client.transport.httpBase + ':' + input.path;
+    () => (expanded() && props.task.path ? props.task.path : null),
+    async (path) => {
+      const client = daemonStore.state.client;
+      if (!client || !path) return null;
+      const cacheKey = client.transport.httpBase + ':' + path;
       const cached = taskBodyCache.get(cacheKey);
       if (cached !== undefined) return cached;
-      const r = await input.client.readMarkdownFile(input.path);
+      const r = await client.readMarkdownFile(path);
       if (!r.ok) return null;
       taskBodyCache.set(cacheKey, r.body);
       return r.body;

@@ -101,11 +101,19 @@ export default function InitiativeCard(props: {
   });
 
   // ── Description (lazy fetch + parse — same plumbing as legacy) ──
+  // 2026-06-11 — Source intentionally depends ONLY on the initiative
+  // path, NOT on `daemonStore.state.client`. On project switch the
+  // active client flips BEFORE the parent `<For>` re-renders with the
+  // new snapshot — if we made the client part of the source, the
+  // resource would re-fire with (newClient, oldPath) and 404 against
+  // the new cluster's daemon. By reading the client inside the fetcher
+  // only, the resource fires once at mount with the matching client,
+  // and the card unmounts cleanly on switch. New cluster → new card →
+  // new fetch.
   const [bodyRes] = createResource<string, { path: string }>(
     () => {
-      const client = daemonStore.state.client;
       const path = props.initiative.path;
-      if (!client || !path) return null;
+      if (!path) return null;
       return { path };
     },
     async (input) => {
