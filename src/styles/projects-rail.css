@@ -101,7 +101,10 @@ body.col-reordering .projects-rail-resize {
   display: flex;
   flex-direction: column;
   width: 100%; min-width: 0;
-  border-radius: 8px;
+  /* Operator 2026-06-10: "los quiero todos igual en este UI,
+     rectangulares, sin roundness" — was 8 px. Tabs match the rest
+     of the rectangular language now (column panels, agent rows). */
+  border-radius: 0;
   overflow: hidden;
   transition: background 160ms;
 }
@@ -168,14 +171,14 @@ body.col-reordering .projects-rail-resize {
 .proj-row.is-working .proj-working-bar {
   border-left: none;
   background: rgba(148, 163, 184, 0.15);
-  border-radius: 1px;
+  border-radius: 0;
 }
 .proj-row.is-working .proj-working-bar::before {
   content: '';
   position: absolute;
   left: 0; right: 0;
   height: 5px;
-  border-radius: 1px;
+  border-radius: 0;
   background: #cbd5e1;
   animation: proj-bar-bounce 1.8s ease-in-out infinite;
 }
@@ -197,7 +200,7 @@ body.col-reordering .projects-rail-resize {
 .proj-row.is-architect-active:not(.is-working) .proj-working-bar {
   border-left: none;
   background: rgba(52, 211, 153, 0.12);
-  border-radius: 1px;
+  border-radius: 0;
   animation: proj-bar-arch-pulse 2.2s ease-in-out infinite;
 }
 .proj-row.is-architect-active.active:not(.is-working) .proj-working-bar {
