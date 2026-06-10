@@ -11,7 +11,7 @@
  * store.events() entries into the message stream by ts.
  */
 
-import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from 'solid-js';
+import { Show, For, createEffect, createSignal, onCleanup, onMount, type JSX } from 'solid-js';
 import { chatStore, ONBOARDING_CONV_ID, type ChatMsg } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
 import { ensureMarked } from '~/lib/cdn-loaders';
@@ -392,6 +392,76 @@ export function UserBubble(props: { msg: ChatMsg; prepend?: boolean }) {
       } ${props.prepend ? 'text-amber-200/95' : 'text-gray-200'}`}>
         <CollapsibleText text={props.msg.text} />
       </div>
+      {/* py-1.12.21 — image / file thumbnails persisted by the daemon. */}
+      <Show when={props.msg.attachments && props.msg.attachments.length > 0}>
+        <AttachmentGrid msg={props.msg} align={sys() ? 'left' : 'right'} />
+      </Show>
+    </div>
+  );
+}
+
+/**
+ * AttachmentGrid — renders the persisted attachments from
+ * `chat.user.attachments`. Images become clickable thumbnails (open
+ * full-size in a new tab); non-image files render as a small chip with
+ * the filename and a tap target. Daemon URLs are daemon-relative;
+ * resolved against the active daemon's `httpBase`.
+ */
+function AttachmentGrid(props: { msg: ChatMsg; align: 'left' | 'right' }) {
+  const base = (): string => {
+    const t = daemonStore.state.client?.transport;
+    return t?.httpBase ?? '';
+  };
+  const resolve = (url: string): string => {
+    if (!url) return url;
+    if (/^https?:\/\//.test(url)) return url;
+    const b = base();
+    if (!b) return url;
+    return b.replace(/\/+$/, '') + url;
+  };
+  const list = (): NonNullable<ChatMsg['attachments']> => props.msg.attachments ?? [];
+  return (
+    <div
+      class={`mt-1 flex flex-wrap gap-1.5 max-w-[85%] ${
+        props.align === 'right' ? 'justify-end pr-2' : 'justify-start pl-2'
+      }`}
+    >
+      <For each={list()}>
+        {(a) => {
+          const href = resolve(a.url);
+          const isImg = a.kind === 'image' || a.media_type.startsWith('image/');
+          if (isImg) {
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer noopener"
+                class="block w-20 h-20 rounded overflow-hidden border border-gray-800 hover:border-gray-600 transition-colors bg-gray-900"
+                title={a.filename ?? 'image'}
+              >
+                <img
+                  src={href}
+                  alt={a.filename ?? 'attached image'}
+                  loading="lazy"
+                  style={{ width: '100%', height: '100%', 'object-fit': 'cover' }}
+                />
+              </a>
+            );
+          }
+          return (
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer noopener"
+              class="inline-flex items-center gap-1.5 px-2 py-1 rounded border border-gray-800 hover:border-gray-600 bg-gray-900 text-[11px] text-gray-300 transition-colors"
+              title={a.filename ?? 'file'}
+            >
+              <span aria-hidden="true">📎</span>
+              <span class="font-mono truncate max-w-[160px]">{a.filename ?? a.media_type}</span>
+            </a>
+          );
+        }}
+      </For>
     </div>
   );
 }

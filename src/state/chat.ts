@@ -52,6 +52,17 @@ export interface ConvMeta {
  *  Computed by `ChatRail.statusOf` from `chatStore.state.convs`. */
 export type AgentStatusKind = 'idle' | 'thinking' | 'working';
 
+/** Chat attachment served by the daemon. The `url` is daemon-relative
+ *  (e.g. `/chat/uploads/2026-06-10/abc.png`); resolve against the
+ *  active daemon's httpBase to display. */
+export interface ChatAttachment {
+  kind: 'image' | 'file';
+  media_type: string;
+  url: string;
+  size_bytes?: number;
+  filename?: string;
+}
+
 export interface ChatMsg {
   /**
    * 'user'      — operator-typed message (and its echoes from the daemon).
@@ -73,6 +84,11 @@ export interface ChatMsg {
   /** Set on client-side 'system' messages so renderers can pick the
    *  right severity styling. */
   system_kind?: 'error' | 'warning' | 'info';
+  /** py-1.12.21 — chat attachments persisted by the daemon. Each entry
+   *  carries a `url` that resolves to `GET /chat/uploads/<bucket>/<file>`
+   *  on the daemon. Currently emitted only for `kind: 'user'` events
+   *  whose dispatch carried images / docs. */
+  attachments?: ChatAttachment[];
   /** V89.2 — Ephemeral flag set when the cockpit witnesses
    *  `chat.assistant.final` LIVE (not during a timeline rehydrate).
    *  Causes the bubble to auto-expand on arrival so the operator
@@ -438,6 +454,30 @@ function clearClusterChat(clusterId: string): void {
  * Active-cluster events still flow through `ingestEvent` (above),
  * which uses setState so the UI updates in real time.
  */
+/** Validate + normalise the daemon's `chat.user.attachments` field.
+ *  Returns undefined if no valid entries; the caller treats undefined
+ *  the same as "no attachments". */
+function parseAttachments(raw: unknown): ChatAttachment[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const out: ChatAttachment[] = [];
+  for (const e of raw) {
+    if (!e || typeof e !== 'object') continue;
+    const rec = e as Record<string, unknown>;
+    const url = typeof rec.url === 'string' ? rec.url : '';
+    const media_type = typeof rec.media_type === 'string' ? rec.media_type : '';
+    if (!url || !media_type) continue;
+    const kind = rec.kind === 'image' ? 'image' : 'file';
+    out.push({
+      kind,
+      media_type,
+      url,
+      size_bytes: typeof rec.size_bytes === 'number' ? rec.size_bytes : undefined,
+      filename: typeof rec.filename === 'string' ? rec.filename : undefined,
+    });
+  }
+  return out.length ? out : undefined;
+}
+
 function ingestEventForCluster(clusterKey: string, ev: DaemonEvent): void {
   // MP5 — always record activity (regardless of active/inactive)
   // so the rail's working slug and unread dot react to events on
@@ -465,17 +505,33 @@ function ingestEventForCluster(clusterKey: string, ev: DaemonEvent): void {
   if (ev.type === 'chat.user') {
     const text = typeof ev.text === 'string' ? ev.text : '';
     const author = typeof ev.author === 'string' ? ev.author : undefined;
+    const attachments = parseAttachments(ev.attachments);
     const phIdx = arr.findIndex(
       (m) => m.kind === 'user' && m._placeholder_user && m.text === text && (!author || m.author === author),
     );
     if (phIdx >= 0) {
       const next = arr.slice();
       const prev = next[phIdx]!;
-      next[phIdx] = { ...prev, author, ts: typeof ev.ts === 'string' ? ev.ts : undefined, _placeholder_user: undefined };
+      next[phIdx] = {
+        ...prev,
+        author,
+        ts: typeof ev.ts === 'string' ? ev.ts : undefined,
+        attachments,
+        _placeholder_user: undefined,
+      };
       slice.convMap[conv] = next;
       return;
     }
-    slice.convMap[conv] = [...arr, { kind: 'user', text, author, ts: typeof ev.ts === 'string' ? ev.ts : undefined }];
+    slice.convMap[conv] = [
+      ...arr,
+      {
+        kind: 'user',
+        text,
+        author,
+        ts: typeof ev.ts === 'string' ? ev.ts : undefined,
+        attachments,
+      },
+    ];
     return;
   }
   if (ev.type === 'chat.assistant.delta') {
@@ -776,6 +832,7 @@ function ingestEvent(ev: DaemonEvent): void {
   if (ev.type === 'chat.user') {
     const text = typeof ev.text === 'string' ? ev.text : '';
     const author = typeof ev.author === 'string' ? ev.author : undefined;
+    const attachments = parseAttachments(ev.attachments);
     // Replace any optimistic placeholder with the canonical echo so the
     // bubble isn't duplicated (timestamps differ between client + daemon).
     const phIdx = arr.findIndex(
@@ -785,13 +842,14 @@ function ingestEvent(ev: DaemonEvent): void {
       setState('convMap', conv, phIdx, {
         author,
         ts: typeof ev.ts === 'string' ? ev.ts : undefined,
+        attachments,
         _placeholder_user: undefined,
       });
       return;
     }
     setState('convMap', conv, [
       ...arr,
-      { kind: 'user', text, author, ts: typeof ev.ts === 'string' ? ev.ts : undefined },
+      { kind: 'user', text, author, ts: typeof ev.ts === 'string' ? ev.ts : undefined, attachments },
     ]);
     return;
   }
