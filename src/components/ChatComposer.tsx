@@ -139,9 +139,12 @@ export default function ChatComposer(props: {
     () => isConvWorking() || queueItems().length > 0,
   );
 
-  // Enqueue: same content-validation as send, but POSTs to the queue
-  // endpoint and clears the textarea without consuming the dispatch
-  // slot.
+  // Enqueue: appends the operator's text to a SINGLE queued item per
+  // conv. If a queued head already exists, the text is concatenated
+  // into it (with a `\n\n` separator) — operator field report
+  // 2026-06-10: "Only enqueue there 1 message, so i can be writting
+  // as much as I want while waiting." If no queued item exists yet,
+  // we create one.
   const enqueue = async (): Promise<void> => {
     const text = draft().trim();
     if (sending() || !text) return;
@@ -149,7 +152,14 @@ export default function ChatComposer(props: {
     if (!cli) return;
     setSending(true);
     setDraft(''); setImgs([]); setDocs([]); grow();
-    const res = await cli.queueEnqueue(props.conv, text);
+    const head = queueItems()[0];
+    let res;
+    if (head) {
+      const merged = `${head.text}\n\n${text}`;
+      res = await cli.queueEdit(props.conv, head.id, merged);
+    } else {
+      res = await cli.queueEnqueue(props.conv, text);
+    }
     setSending(false);
     if (!res.ok) {
       // Restore the draft on failure so the operator doesn't lose it.
@@ -158,8 +168,8 @@ export default function ChatComposer(props: {
       if (res.status === 401) props.onTokenRejected?.(text);
     } else {
       taEl?.focus();
-      // The daemon will broadcast queue.item.added, ingest will land it
-      // in the store. No optimistic insert needed.
+      // The daemon broadcasts queue.item.added/updated; ingest lands
+      // the change in the store. No optimistic insert needed.
     }
   };
   const editQueued = async (id: string, text: string): Promise<void> => {
@@ -200,6 +210,17 @@ export default function ChatComposer(props: {
     if (daemonStore.state.outdated) { props.onDaemonOutdated?.(); return; }
     const cli = daemonStore.state.client;
     if (!cli) return;
+    // Operator field report 2026-06-10: when the conv is busy, Enter
+    // should ROUTE to enqueue() (which merges into the head item) so
+    // the operator gets a single accumulating queue entry instead of
+    // N separate "QUEUED" bubbles. Image / doc attachments still go
+    // through dispatch (queue is text-only per Standard v16); if the
+    // operator attached files while busy, we fall through to the
+    // normal dispatch path which the daemon auto-queues.
+    if (isConvWorking() && imgs().length === 0 && docs().length === 0) {
+      await enqueue();
+      return;
+    }
     setSending(true);
     const sentImgs = imgs();
     const sentDocs = docs();
