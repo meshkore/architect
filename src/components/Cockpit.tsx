@@ -217,6 +217,10 @@ function NavColumn(props: {
   selectedModule: string | null;
   onSelectModule: (id: string | null) => void;
 }) {
+  // ModulesTree owns the `col-header-row` (38 px) and now prepends
+  // its own <ColumnDragGrip panelId="nav" /> inside it, so we just
+  // mount ModulesTree directly. Keeps the grip aligned with the WS
+  // subtab-bar's grip vertically.
   return (
     <aside
       data-panel-id="nav"
@@ -237,31 +241,6 @@ function NavColumn(props: {
           </button>
         }
       >
-        {/* Drag grip lives at the head of the column so the operator
-         *  has a stable target regardless of which slot the column
-         *  currently occupies. */}
-        <div
-          class="col-header-row"
-          style={{
-            display: 'flex',
-            'align-items': 'center',
-            padding: '6px 10px 0',
-          }}
-        >
-          <ColumnDragGrip panelId="nav" />
-          <span
-            style={{
-              'font-family':
-                "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-              'font-size': '12px',
-              color: '#6b7280',
-              'letter-spacing': '.06em',
-              'text-transform': 'uppercase',
-            }}
-          >
-            Modules
-          </span>
-        </div>
         <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
       </Show>
     </aside>
@@ -318,31 +297,16 @@ function WorkspaceColumn(props: {
 }
 
 function ChatColumn(props: { selectedModule: string | null }) {
+  // The chat column never had its own header bar in the legacy
+  // layout — the operator just sees the agent-rail's "Agents"
+  // header on the left and the thread on the right. We add a 38-px
+  // `.col-header-row` matching the other two columns so the drag
+  // grip aligns with theirs. No "Chat" label inside — the column's
+  // identity is obvious from its content, no need to duplicate.
   return (
     <div data-panel-id="chat" class="center-col col" id="chat-col">
-      {/* Tiny header strip just to host the grip — the chat's real
-       *  content (rail + thread) keeps its existing chrome below. */}
-      <div
-        class="col-header-row"
-        style={{
-          display: 'flex',
-          'align-items': 'center',
-          padding: '6px 10px 0',
-        }}
-      >
+      <div class="col-header-row" style={{ 'justify-content': 'flex-start' }}>
         <ColumnDragGrip panelId="chat" />
-        <span
-          style={{
-            'font-family':
-              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-            'font-size': '12px',
-            color: '#6b7280',
-            'letter-spacing': '.06em',
-            'text-transform': 'uppercase',
-          }}
-        >
-          Chat
-        </span>
       </div>
       <div class="chat-body flex-1 flex min-h-0">
         <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />

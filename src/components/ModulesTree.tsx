@@ -3,6 +3,7 @@ import { allModules, allTasks } from '~/state/server';
 import { uiStore, type ModulesPill } from '~/state/ui';
 import { viewStore } from '~/state/view';
 import ModuleNode from './ModuleNode';
+import ColumnDragGrip from './ColumnDragGrip';
 import { buildModuleTree, modulePasses } from './modules-tree/tree-build';
 import { projectDocs } from './modules-tree/doc-index';
 
@@ -37,14 +38,17 @@ export default function ModulesTree(props: { selected: string | null; onSelect: 
           como las letras tienen su padding arriba, izquierda,
           derecha, abajo." */}
       <div class="col-header-row" style={{ 'justify-content': 'space-between', gap: '8px' }}>
-        <button
-          type="button"
-          onClick={() => uiStore.toggleModulesCollapsed()}
-          title="Collapse modules column"
-          class="text-xs font-mono uppercase tracking-wider text-gray-500 hover:text-emerald-300 transition-colors bg-transparent border-0 p-0 cursor-pointer"
-        >
-          Modules
-        </button>
+        <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
+          <ColumnDragGrip panelId="nav" />
+          <button
+            type="button"
+            onClick={() => uiStore.toggleModulesCollapsed()}
+            title="Collapse modules column"
+            class="text-xs font-mono uppercase tracking-wider text-gray-500 hover:text-emerald-300 transition-colors bg-transparent border-0 p-0 cursor-pointer"
+          >
+            Modules
+          </button>
+        </div>
         {/* RJJ: filter pills (all / work / stb) hidden for now — de momento
             esto no lo filtramos. Code preserved below, gated by a Show that
             never renders, so it can be re-enabled by flipping the flag. */}
