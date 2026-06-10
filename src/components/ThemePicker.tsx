@@ -70,7 +70,20 @@ export default function ThemePicker() {
         onClick={toggle}
         title="Theme & sizes"
         aria-label="Open theme picker"
-        class="inline-flex items-center justify-center w-7 h-7 rounded border border-transparent hover:border-gray-700 text-gray-400 hover:text-gray-200 transition-colors"
+        aria-expanded={open()}
+        class="inline-flex items-center justify-center w-7 h-7 rounded border transition-colors"
+        style={
+          open()
+            ? {
+                color: 'var(--theme-accent-bright, #34d399)',
+                'border-color': 'var(--theme-accent-bright, #34d399)',
+                background: 'color-mix(in srgb, var(--theme-accent-bright) 12%, transparent)',
+              }
+            : {
+                color: '#9ca3af',
+                'border-color': 'transparent',
+              }
+        }
       >
         <svg
           width="14"
@@ -93,21 +106,37 @@ export default function ThemePicker() {
 
       <Show when={open()}>
         <div
-          class="absolute right-0 top-full mt-2 z-50 rounded-lg shadow-xl"
+          class="absolute right-0 top-full mt-2 z-50 rounded-lg"
           style={{
             width: '360px',
-            background: 'rgba(10, 13, 18, 0.98)',
-            border: '1px solid rgba(120, 130, 150, 0.30)',
-            'backdrop-filter': 'blur(6px)',
+            background: '#080c12',
+            border: '1px solid rgba(120, 130, 150, 0.45)',
+            'backdrop-filter': 'blur(12px)',
+            /* Strong drop shadow so the panel reads CLEARLY above the
+             * dim cockpit background. Operator field report 2026-06-10:
+             * the prior popover blended with the page. */
+            'box-shadow':
+              '0 24px 48px -8px rgba(0, 0, 0, 0.75), 0 8px 16px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 0 48px -4px color-mix(in srgb, var(--theme-accent-bright) 18%, transparent)',
           }}
           role="dialog"
           aria-label="Theme & sizes"
         >
-          {/* Tab bar */}
-          <div class="flex border-b border-gray-800/70" role="tablist">
+          {/* Tab bar + close button */}
+          <div class="flex items-stretch border-b border-gray-800/80" role="tablist">
             <TabButton id="theme" active={tab() === 'theme'} onClick={() => setTab('theme')}>Theme</TabButton>
             <TabButton id="colours" active={tab() === 'colours'} onClick={() => setTab('colours')}>Colours</TabButton>
             <TabButton id="sizes" active={tab() === 'sizes'} onClick={() => setTab('sizes')}>Sizes</TabButton>
+            <button
+              type="button"
+              onClick={close}
+              title="Close theme picker (Esc)"
+              aria-label="Close"
+              class="inline-flex items-center justify-center w-9 border-l border-gray-800/80 text-gray-500 hover:text-gray-100 transition-colors"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
           </div>
 
           <Show when={tab() === 'theme'}>
