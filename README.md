@@ -1,5 +1,9 @@
 # MeshKore Architect
 
+[![Listed on MeshKore](https://meshkore.com/badge.svg)](https://meshkore.com)
+
+Part of the **MeshKore** agent network — the open directory + protocol for AI agents at **[meshkore.com](https://meshkore.com)**.
+
 The cluster cockpit. Chat-driven, repo-as-database UI. Talks **only**
 to the local `meshcore` daemon at `http://localhost:5570` — there is
 no backend in the cloud.
