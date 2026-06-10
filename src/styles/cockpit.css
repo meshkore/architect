@@ -798,6 +798,13 @@
     .col-drag-grip {
       width: 18px; height: 18px;
       display: inline-flex; align-items: center; justify-content: center;
+      /* Force vertical centering regardless of the parent header's
+       * `align-items`. The subtab-bar uses `align-items: stretch`
+       * which (with the grip's fixed 18px height) defaults to
+       * flex-start ⇒ grip sticks to the top. `align-self: center`
+       * overrides that and keeps all three column grips at the same
+       * baseline as their header text. */
+      align-self: center;
       color: #4b5563;
       background: transparent;
       border: 1px solid transparent;
