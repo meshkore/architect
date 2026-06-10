@@ -390,6 +390,7 @@ function QueuePanel(props: {
   const [editingId, setEditingId] = createSignal<string | null>(null);
   const [editValue, setEditValue] = createSignal('');
   const [dragId, setDragId] = createSignal<string | null>(null);
+  const [collapsed, setCollapsed] = createSignal<boolean>(true);
 
   const beginEdit = (it: ChatQueueItem): void => {
     setEditingId(it.id);
@@ -428,18 +429,39 @@ function QueuePanel(props: {
   };
 
   return (
-    <div
-      class="border border-gray-800/70 bg-gray-950/40 rounded-md overflow-y-auto"
-      style={{ 'max-height': '30vh' }}
-    >
-      <div class="flex items-center gap-2 px-3 py-1.5 border-b border-gray-800/60 text-[10px] font-mono uppercase tracking-wider text-sky-300/80">
+    <div class="border border-gray-800/70 bg-gray-950/40 rounded-md flex flex-col" style={{ 'max-height': '40vh' }}>
+      {/* Header sits at top with the live count + chevron. List grows
+       *  downward toward the textarea; because the whole panel is
+       *  anchored above the input, the panel as a whole expands UPWARD
+       *  into the chat area as items accumulate (max-height 40vh caps it). */}
+      <div
+        class={`flex-shrink-0 flex items-center gap-2 px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider text-sky-300/80 ${collapsed() ? '' : 'border-b border-gray-800/60'}`}
+      >
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
           <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" stroke-linecap="round" />
         </svg>
-        Queue · {props.items.length} waiting
-        <span class="text-gray-500 normal-case tracking-normal font-sans">— runs after the current turn</span>
+        <span>Queue · {props.items.length} waiting</span>
+        <Show when={!collapsed()}>
+          <span class="text-gray-500 normal-case tracking-normal font-sans">— runs after the current turn</span>
+        </Show>
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          class="ml-auto text-gray-500 hover:text-sky-300 px-1.5 py-0.5 leading-none rounded hover:bg-gray-900/60"
+          title={collapsed() ? 'Expand queue' : 'Collapse queue'}
+          aria-label={collapsed() ? 'expand queue' : 'collapse queue'}
+          aria-expanded={!collapsed()}
+        >
+          {/* ▾ collapsed → click to expand (chevron points down toward list)
+           *  ▴ expanded  → click to collapse (chevron points up away from list) */}
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+            <Show when={collapsed()} fallback={<path d="M6 15l6-6 6 6" />}>
+              <path d="M6 9l6 6 6-6" />
+            </Show>
+          </svg>
+        </button>
       </div>
-      <ul class="divide-y divide-gray-800/40">
+      <ul class={`divide-y divide-gray-800/40 overflow-y-auto ${collapsed() ? 'hidden' : ''}`}>
         <For each={props.items}>
           {(it, i) => (
             <li
