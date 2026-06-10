@@ -41,11 +41,13 @@ import DiaryPanel from '~/components/zones/DiaryPanel';
 // card's Activity tab. A floating sticky banner duplicates that
 // signal and steals attention.
 import Splitter from '~/components/Splitter';
+import ColumnDragGrip from '~/components/ColumnDragGrip';
 import { openNewAgentWizard } from '~/components/modals/NewAgentWizard';
 import { daemonStore } from '~/state/daemon';
 import { serverStore } from '~/state/server';
 import { nav } from '~/state/nav';
 import { uiStore, type Zone } from '~/state/ui';
+import { layoutStore, type ColumnId } from '~/state/layout';
 
 type Tab = 'roadmap' | 'tasks' | 'context' | 'diagrams';
 
@@ -121,78 +123,26 @@ export default function Cockpit(props: {
                   when={zone() === 'architect'}
                   fallback={<MigratedZoneHost zone={zone()} />}
                 >
-                  <aside class={`nav-col col${uiStore.state.modulesCollapsed ? ' collapsed' : ''}`}>
-                    <Show
-                      when={!uiStore.state.modulesCollapsed}
-                      fallback={
-                        <button
-                          type="button"
-                          class="nav-rail"
-                          onClick={() => uiStore.toggleModulesCollapsed()}
-                          title="Expand modules"
-                          aria-label="Expand modules column"
-                          style={{ display: 'flex', background: 'transparent', border: 'none' }}
-                        >
-                          Modules
-                        </button>
-                      }
-                    >
-                      <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
-                    </Show>
-                  </aside>
-
+                  {/* Three columns rendered dynamically by layoutStore
+                   *  (nav/ws/chat → any order). Splitters stay
+                   *  positional: col-nav resizes slot-0, col-chat
+                   *  resizes slot-2, middle (slot-1) is always 1fr.
+                   *  See `state/layout.ts` + `ColumnDragGrip.tsx`. */}
+                  <Slot id={layoutStore.order()[0] ?? 'nav'}
+                    selectedModule={props.selectedModule}
+                    onSelectModule={props.onSelectModule}
+                    tab={tab} setTab={setTab} />
                   <Splitter resize="col-nav" />
-
-                  <aside class="left-col col">
-                    <div class="subtab-bar">
-                      <SubTab id="roadmap"  label="Roadmap"  active={tab() === 'roadmap'}  onSelect={setTab} global />
-                      <span class="subtab-divider" aria-hidden="true">›</span>
-                      <SubTab id="tasks"    label="Tasks"    active={tab() === 'tasks'}    onSelect={setTab} />
-                      <SubTab id="context"  label="Context"  active={tab() === 'context'}  onSelect={setTab} />
-                      <SubTab id="diagrams" label="Diagrams" active={tab() === 'diagrams'} onSelect={setTab} />
-                      <div class="flex-1" />
-                      <div class="flex items-center gap-1 pr-2 self-center">
-                        <button type="button" title="New task" class="text-gray-500 hover:text-emerald-400 transition px-1 py-0.5 rounded hover:bg-emerald-500/10">
-                          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path d="M12 4v16M4 12h16" /></svg>
-                        </button>
-                        <button type="button" title="Reload state" class="text-gray-500 hover:text-emerald-400 transition px-1 py-0.5 rounded hover:bg-emerald-500/10"
-                          onClick={() => {
-                            const c = daemonStore.state.client;
-                            const id = daemonStore.state.activeId;
-                            if (c && id) void serverStore.refreshNow(c, id);
-                          }}>
-                          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 4v6h6M20 20v-6h-6M5 13a8 8 0 1014.5-3.5M19 11a8 8 0 00-14.5 3.5" /></svg>
-                        </button>
-                      </div>
-                    </div>
-                    <Switch>
-                      <Match when={tab() === 'roadmap'}>
-                        <div class="ws-panel"><InitiativesPanel /></div>
-                      </Match>
-                      <Match when={tab() === 'tasks'}>
-                        <div class="ws-panel"><RoadmapList moduleId={props.selectedModule} onSelectModule={props.onSelectModule} /></div>
-                      </Match>
-                      <Match when={tab() === 'context'}>
-                        <div class="ws-panel"><ContextPanel moduleId={props.selectedModule} /></div>
-                      </Match>
-                      <Match when={tab() === 'diagrams'}>
-                        <div class="ws-panel"><DiagramsPanel moduleId={props.selectedModule} /></div>
-                      </Match>
-                    </Switch>
-                  </aside>
+                  <Slot id={layoutStore.order()[1] ?? 'ws'}
+                    selectedModule={props.selectedModule}
+                    onSelectModule={props.onSelectModule}
+                    tab={tab} setTab={setTab} />
+                  <Splitter resize="col-chat" />
+                  <Slot id={layoutStore.order()[2] ?? 'chat'}
+                    selectedModule={props.selectedModule}
+                    onSelectModule={props.onSelectModule}
+                    tab={tab} setTab={setTab} />
                 </Show>
-
-                <Splitter resize="col-chat" />
-
-                <div class="center-col col" id="chat-col">
-                  <div class="chat-body flex-1 flex min-h-0">
-                    <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />
-                    <Splitter resize="chat-rail" title="Drag to resize agent rail" />
-                    <div class="chat-main flex-1 flex flex-col min-h-0">
-                      <ChatPanel />
-                    </div>
-                  </div>
-                </div>
               </section>
             </Show>
             </Show>
@@ -214,6 +164,193 @@ function MigratedZoneHost(props: { zone: Zone }) {
   return (
     <div class="zone-host col" style={{ 'grid-column': '1 / 4' }}>
       <ZoneView zone={props.zone} />
+    </div>
+  );
+}
+
+/**
+ * Slot — picks the column renderer for a given panel id. Used by the
+ * column-reorder system (layoutStore + ColumnDragGrip). Each branch
+ * carries `data-panel-id` on its outer element so the drag handler
+ * can identify the drop target via `elementFromPoint`.
+ *
+ * The middle slot (slot-1 in the grid) absorbs the `1fr` flex space;
+ * the side slots (0, 2) take their width from `--col-nav` / `--col-chat`.
+ * Whatever panel happens to be in the middle slot gets the wide
+ * stretch — same behavior as the pre-Solid monolith.
+ */
+type SlotProps = {
+  id: ColumnId;
+  selectedModule: string | null;
+  onSelectModule: (id: string | null) => void;
+  tab: () => Tab;
+  setTab: (t: Tab) => void;
+};
+
+function Slot(props: SlotProps) {
+  return (
+    <Switch>
+      <Match when={props.id === 'nav'}>
+        <NavColumn
+          collapsed={uiStore.state.modulesCollapsed}
+          selectedModule={props.selectedModule}
+          onSelectModule={props.onSelectModule}
+        />
+      </Match>
+      <Match when={props.id === 'ws'}>
+        <WorkspaceColumn
+          selectedModule={props.selectedModule}
+          onSelectModule={props.onSelectModule}
+          tab={props.tab}
+          setTab={props.setTab}
+        />
+      </Match>
+      <Match when={props.id === 'chat'}>
+        <ChatColumn selectedModule={props.selectedModule} />
+      </Match>
+    </Switch>
+  );
+}
+
+function NavColumn(props: {
+  collapsed: boolean;
+  selectedModule: string | null;
+  onSelectModule: (id: string | null) => void;
+}) {
+  return (
+    <aside
+      data-panel-id="nav"
+      class={`nav-col col${props.collapsed ? ' collapsed' : ''}`}
+    >
+      <Show
+        when={!props.collapsed}
+        fallback={
+          <button
+            type="button"
+            class="nav-rail"
+            onClick={() => uiStore.toggleModulesCollapsed()}
+            title="Expand modules"
+            aria-label="Expand modules column"
+            style={{ display: 'flex', background: 'transparent', border: 'none' }}
+          >
+            Modules
+          </button>
+        }
+      >
+        {/* Drag grip lives at the head of the column so the operator
+         *  has a stable target regardless of which slot the column
+         *  currently occupies. */}
+        <div
+          class="col-header-row"
+          style={{
+            display: 'flex',
+            'align-items': 'center',
+            padding: '6px 10px 0',
+          }}
+        >
+          <ColumnDragGrip panelId="nav" />
+          <span
+            style={{
+              'font-family':
+                "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              'font-size': '12px',
+              color: '#6b7280',
+              'letter-spacing': '.06em',
+              'text-transform': 'uppercase',
+            }}
+          >
+            Modules
+          </span>
+        </div>
+        <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
+      </Show>
+    </aside>
+  );
+}
+
+function WorkspaceColumn(props: {
+  selectedModule: string | null;
+  onSelectModule: (id: string | null) => void;
+  tab: () => Tab;
+  setTab: (t: Tab) => void;
+}) {
+  const { tab, setTab } = props;
+  return (
+    <aside data-panel-id="ws" class="left-col col">
+      <div class="subtab-bar">
+        <ColumnDragGrip panelId="ws" />
+        <SubTab id="roadmap"  label="Roadmap"  active={tab() === 'roadmap'}  onSelect={setTab} global />
+        <span class="subtab-divider" aria-hidden="true">›</span>
+        <SubTab id="tasks"    label="Tasks"    active={tab() === 'tasks'}    onSelect={setTab} />
+        <SubTab id="context"  label="Context"  active={tab() === 'context'}  onSelect={setTab} />
+        <SubTab id="diagrams" label="Diagrams" active={tab() === 'diagrams'} onSelect={setTab} />
+        <div class="flex-1" />
+        <div class="flex items-center gap-1 pr-2 self-center">
+          <button type="button" title="New task" class="text-gray-500 hover:text-emerald-400 transition px-1 py-0.5 rounded hover:bg-emerald-500/10">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path d="M12 4v16M4 12h16" /></svg>
+          </button>
+          <button type="button" title="Reload state" class="text-gray-500 hover:text-emerald-400 transition px-1 py-0.5 rounded hover:bg-emerald-500/10"
+            onClick={() => {
+              const c = daemonStore.state.client;
+              const id = daemonStore.state.activeId;
+              if (c && id) void serverStore.refreshNow(c, id);
+            }}>
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 4v6h6M20 20v-6h-6M5 13a8 8 0 1014.5-3.5M19 11a8 8 0 00-14.5 3.5" /></svg>
+          </button>
+        </div>
+      </div>
+      <Switch>
+        <Match when={tab() === 'roadmap'}>
+          <div class="ws-panel"><InitiativesPanel /></div>
+        </Match>
+        <Match when={tab() === 'tasks'}>
+          <div class="ws-panel"><RoadmapList moduleId={props.selectedModule} onSelectModule={props.onSelectModule} /></div>
+        </Match>
+        <Match when={tab() === 'context'}>
+          <div class="ws-panel"><ContextPanel moduleId={props.selectedModule} /></div>
+        </Match>
+        <Match when={tab() === 'diagrams'}>
+          <div class="ws-panel"><DiagramsPanel moduleId={props.selectedModule} /></div>
+        </Match>
+      </Switch>
+    </aside>
+  );
+}
+
+function ChatColumn(props: { selectedModule: string | null }) {
+  return (
+    <div data-panel-id="chat" class="center-col col" id="chat-col">
+      {/* Tiny header strip just to host the grip — the chat's real
+       *  content (rail + thread) keeps its existing chrome below. */}
+      <div
+        class="col-header-row"
+        style={{
+          display: 'flex',
+          'align-items': 'center',
+          padding: '6px 10px 0',
+        }}
+      >
+        <ColumnDragGrip panelId="chat" />
+        <span
+          style={{
+            'font-family':
+              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+            'font-size': '12px',
+            color: '#6b7280',
+            'letter-spacing': '.06em',
+            'text-transform': 'uppercase',
+          }}
+        >
+          Chat
+        </span>
+      </div>
+      <div class="chat-body flex-1 flex min-h-0">
+        <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />
+        <Splitter resize="chat-rail" title="Drag to resize agent rail" />
+        <div class="chat-main flex-1 flex flex-col min-h-0">
+          <ChatPanel />
+        </div>
+      </div>
     </div>
   );
 }
