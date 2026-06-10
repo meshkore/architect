@@ -267,26 +267,31 @@ function BubbleHeader(props: {
    *  the composer. */
   onStop?: () => void;
 }) {
-  // 2026-06-10 — operator field report: the "USER" label + its fade
-  // line used emerald, identical to the agent's emerald — both sides
-  // read as the same speaker. Operator side switches to sky-blue so
-  // agent (emerald) vs operator (sky) are visually unambiguous.
-  const nameColor = (): string => {
-    if (props.tone === 'cancelled') return 'text-red-300';
-    if (props.tone === 'operator') return 'text-sky-300';
-    return 'text-gray-100';
+  // 2026-06-10 — byline colours now read from CSS theme variables
+  // (initiative `cockpit-themes`, THM-06). Switching the theme preset
+  // OR the per-variable `--theme-byline-user` override via the header
+  // ThemePicker retones operator-vs-agent without code changes.
+  // Cancelled stays red (literal — it's a hard-error state, not a
+  // themable tone).
+  const nameStyle = (): Record<string, string> => {
+    if (props.tone === 'cancelled') return { color: '#fca5a5' /* red-300 */ };
+    if (props.tone === 'operator') return { color: 'var(--theme-byline-user)' };
+    return { color: 'var(--theme-byline-agent)' };
   };
-  const fadeClasses = (): string => {
-    // The gradient starts from the side ADJACENT to the byline
-    // (where the chip + name sit) and fades toward the opposite edge.
-    // For an agent (align=left), the line extends rightward;
-    // for the operator (align=right), it extends leftward.
-    const direction = props.align === 'right' ? 'bg-gradient-to-l' : 'bg-gradient-to-r';
-    const tint =
-      props.tone === 'cancelled' ? 'from-red-400/40'
-      : props.tone === 'operator' ? 'from-sky-400/45'
-      : 'from-emerald-400/35';
-    return `${direction} ${tint} to-transparent`;
+  const fadeStyle = (): Record<string, string> => {
+    // Gradient fades from the side ADJACENT to the byline toward
+    // the opposite edge. Direction depends on `align`. The starting
+    // colour follows the same tone as the name.
+    const dir = props.align === 'right' ? 'to left' : 'to right';
+    let from: string;
+    if (props.tone === 'cancelled') from = 'rgba(248, 113, 113, 0.40)';
+    else if (props.tone === 'operator')
+      from = 'color-mix(in srgb, var(--theme-byline-user) 50%, transparent)';
+    else
+      from = 'color-mix(in srgb, var(--theme-byline-agent) 35%, transparent)';
+    return {
+      background: `linear-gradient(${dir}, ${from}, transparent)`,
+    };
   };
   return (
     <div class={`flex items-center gap-2 text-[11px] w-full ${props.align === 'right' ? 'flex-row-reverse' : ''}`}>
@@ -295,7 +300,7 @@ function BubbleHeader(props: {
           {props.id}
         </span>
       </Show>
-      <span class={`font-semibold flex-shrink-0 ${nameColor()}`}>{props.primary}</span>
+      <span class="font-semibold flex-shrink-0" style={nameStyle()}>{props.primary}</span>
       <Show when={props.ts}>
         <span class="font-mono text-[10px] text-gray-600 flex-shrink-0">
           <time dateTime={props.ts}>{formatBubbleTs(props.ts!)}</time>
@@ -311,7 +316,7 @@ function BubbleHeader(props: {
       {/* V86y — fading separator. Fills remaining width so each turn
           carries a soft tinted underline that telegraphs which side
           owns the row at a glance, beyond just the alignment. */}
-      <span aria-hidden="true" class={`flex-1 h-px min-w-[12px] ${fadeClasses()}`} />
+      <span aria-hidden="true" class="flex-1 h-px min-w-[12px]" style={fadeStyle()} />
       <Show when={props.onStop}>
         <button
           type="button"

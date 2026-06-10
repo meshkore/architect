@@ -14,6 +14,43 @@
          desk is clearly brighter than the objects sitting on it: cards
          and panels read as distinct shapes. Panels also nudged up a
          hair so their borders catch light without becoming flat. */
+      /* ─── Theme palette (2026-06-10) ───────────────────────────────
+         Themable colour hotspots. `state/theme.ts` writes these on
+         the html element at runtime; the defaults below are the
+         Emerald preset (current product). Initiative
+         `cockpit-themes`, task THM-01.
+
+         Schema groups:
+           --theme-accent-*      project chrome (active row,
+                                 daemon-live chip, primary CTAs)
+           --theme-status-*      roadmap node hues per status
+           --theme-byline-*      chat byline (agent vs operator)
+      */
+      --theme-accent:               #10b981;
+      --theme-accent-bright:        #34d399;
+      --theme-accent-glow:          rgba(52, 211, 153, .45);
+      --theme-accent-soft-bg:       rgba(52, 211, 153, .06);
+      --theme-accent-soft-border:   rgba(52, 211, 153, .30);
+
+      --theme-status-active:        #0ea5e9;
+      --theme-status-active-ring:   #bae6fd;
+      --theme-status-active-glow:   rgba(14, 165, 233, .5);
+
+      --theme-status-running:       #ec4899;
+      --theme-status-running-ring:  #fbcfe8;
+      --theme-status-running-glow:  rgba(236, 72, 153, .6);
+
+      --theme-status-next:          #f59e0b;
+      --theme-status-next-ring:     #fde68a;
+      --theme-status-next-glow:     rgba(245, 158, 11, .45);
+
+      --theme-status-done:          #a78bfa;
+      --theme-status-done-ring:     #ddd6fe;
+      --theme-status-done-glow:     rgba(167, 139, 250, .4);
+
+      --theme-byline-agent:         #f3f4f6;
+      --theme-byline-user:          #7dd3fc;
+
       --bg-canvas:      #1f2a3d;          /* V107.1 lifted — gaps between columns now clearly brighter than panels */
       --bg-page:        #1f2a3d;          /* alias */
       --bg-panel:       #0a0f17;          /* column panels — dark, sits below the canvas */

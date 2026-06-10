@@ -212,34 +212,39 @@
  * inner-circle + outer-arc read as two distinct visual layers
  * rather than a double-saturated halo. */
 
-/* ACTIVE — sky blue. Ring invites the click. */
+/* Per-status palette — 2026-06-10 migration. Each status reads from
+ * the global theme variables defined in `cockpit.css :root` (group
+ * `--theme-status-*`). Switching the active theme via the picker
+ * retones the four roadmap nodes automatically. Initiative
+ * `cockpit-themes`, task THM-05. */
+
+/* ACTIVE — invites the click. */
 .rt-node.is-active {
-  --node-color: #0ea5e9;        /* sky-500  inner border */
-  --node-ring:  #bae6fd;        /* sky-200  progress ring */
-  --node-glow: rgba(14, 165, 233, .5);
+  --node-color: var(--theme-status-active);
+  --node-ring:  var(--theme-status-active-ring);
+  --node-glow:  var(--theme-status-active-glow);
 }
 
-/* RUNNING — fuchsia, with a pulse. Demands attention. */
+/* RUNNING — pulsing, demands attention. */
 .rt-node.is-running {
-  --node-color: #ec4899;        /* pink-500 */
-  --node-ring:  #fbcfe8;        /* pink-200 */
-  --node-glow: rgba(236, 72, 153, .6);
+  --node-color: var(--theme-status-running);
+  --node-ring:  var(--theme-status-running-ring);
+  --node-glow:  var(--theme-status-running-glow);
   animation: rt-pulse 1.6s ease-in-out infinite;
 }
 
-/* NEXT — amber. Warm anticipation. */
+/* NEXT — warm anticipation. */
 .rt-node.is-next {
-  --node-color: #f59e0b;        /* amber-500 */
-  --node-ring:  #fde68a;        /* amber-200 */
-  --node-glow: rgba(245, 158, 11, .45);
+  --node-color: var(--theme-status-next);
+  --node-ring:  var(--theme-status-next-ring);
+  --node-glow:  var(--theme-status-next-glow);
 }
 
-/* DONE — violet. Sealed; pastel ring. */
+/* DONE — sealed; pastel ring. */
 .rt-node.is-done {
-  --node-color: #a78bfa;        /* violet-400 */
-  --node-ring:  #ddd6fe;        /* violet-200 */
-  --node-glow: rgba(167, 139, 250, .4);
-  border-color: #6d57b8;
+  --node-color: var(--theme-status-done);
+  --node-ring:  var(--theme-status-done-ring);
+  --node-glow:  var(--theme-status-done-glow);
 }
 
 /* BACKLOG — slate, smaller. No progress ring (the work hasn't even

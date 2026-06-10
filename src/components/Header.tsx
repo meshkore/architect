@@ -6,6 +6,7 @@ import { activeProject } from '~/state/projects';
 import { uiStore, type Zone } from '~/state/ui';
 import { mcModal } from '~/lib/modal';
 import { useTlsDaemon, LOOPBACK_HOSTNAME } from '~/lib/transport';
+import ThemePicker from '~/components/ThemePicker';
 
 const BUILD_VERSION = (import.meta.env.VITE_BUILD_VERSION as string | undefined) ?? 'dev';
 const BUILD_COMMIT  = (import.meta.env.VITE_BUILD_COMMIT  as string | undefined) ?? '';
@@ -133,10 +134,11 @@ export default function Header() {
 
         <div class="flex-1" />
 
-        {/* RIGHT — communications status pills (read-only). */}
+        {/* RIGHT — communications status pills (read-only) + theme picker. */}
         <div class="flex items-center gap-1.5 flex-shrink-0">
           <DaemonPill />
           <ClusterPill />
+          <ThemePicker />
         </div>
       </div>
     </header>
