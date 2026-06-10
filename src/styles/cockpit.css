@@ -1062,9 +1062,10 @@
       min-height: 0;
     }
     /* 2026-06-10 operator: subtle horizontal separator between agent
-       rows in the rail. `.chat-rail-list` is the wrapper added in
-       ChatRail; only the rows under it get the divider, leaving the
-       header bar untouched. */
+       rows. Two short hair-lines anchored to each side with a gap in
+       the middle (one linear-gradient where the centre is transparent).
+       Sits in the 5-px gap between cards so the layout doesn't grow.
+       `.chat-rail-list` is the wrapper added in ChatRail. */
     .chat-rail-list > * + * {
       position: relative;
     }
@@ -1075,8 +1076,16 @@
       left: 8px;
       right: 8px;
       height: 1px;
-      background: rgba(75, 85, 99, 0.30);
       pointer-events: none;
+      background: linear-gradient(
+        90deg,
+        rgba(75, 85, 99, 0.36) 0%,
+        rgba(75, 85, 99, 0.36) 32%,
+        transparent 44%,
+        transparent 56%,
+        rgba(75, 85, 99, 0.36) 68%,
+        rgba(75, 85, 99, 0.36) 100%
+      );
     }
     .chat-rail-pinned::-webkit-scrollbar,
     .chat-rail-services::-webkit-scrollbar { width: 0; }

@@ -80,23 +80,20 @@ export default function AgentCard(props: AgentCardProps) {
         'group relative w-full text-left',
         'transition-colors cursor-grab active:cursor-grabbing',
         'flex items-center justify-center',
-        'rounded tracking-tight select-none',
-        // 2026-06-10 operator: narrow rail keeps the SAME font-size as
-        // the expanded layout (the previous build blew the letters up
-        // to fill the column). 5 px padding gives the row breathing
-        // room without looking cramped.
-        'py-1 px-1',
+        'tracking-tight select-none',
+        'border-l-[3px]',
+        'py-1 px-2',
       ];
       if (props.dragging) base.push('opacity-35');
-      if (props.dragOver) base.push('ring-1 ring-cyan-400/70');
-      if (props.active) base.push('text-gray-50 font-semibold bg-emerald-500/[0.10]');
-      else if (props.pendingReview) base.push('text-amber-200 bg-amber-400/[0.06]');
-      else if (props.status === 'working') base.push('text-emerald-100 bg-emerald-500/10 animate-pulse-soft');
-      else base.push('text-gray-200 hover:bg-gray-800/40');
+      if (props.dragOver) base.push('border-l-cyan-400 bg-cyan-500/5');
+      else if (props.pendingReview) base.push('border-l-amber-400 text-amber-200');
+      else if (props.active) base.push('border-l-emerald-400 text-gray-50 font-semibold');
+      else if (props.status === 'working') base.push('border-l-emerald-500/70 text-emerald-100 animate-pulse-soft');
+      else base.push('border-l-transparent text-gray-200 hover:text-gray-50');
       return base.join(' ');
     }
     const base = [
-      'group relative w-full text-left rounded px-2.5 py-1.5',
+      'group relative w-full text-left px-2.5 py-1.5',
       'transition-colors flex flex-col gap-1 cursor-grab active:cursor-grabbing',
       'border-l-[3px]',
     ];
@@ -104,13 +101,18 @@ export default function AgentCard(props: AgentCardProps) {
     if (props.dragOver) {
       base.push('border-l-cyan-400 bg-cyan-500/5');
     } else if (props.pendingReview) {
-      base.push('border-l-amber-400 bg-amber-400/[0.05]');
+      base.push('border-l-amber-400');
     } else if (props.active) {
-      base.push('border-l-emerald-400 bg-emerald-500/[0.07]');
+      /* Operator 2026-06-10: selected row has NO background, NO
+       * roundness. Just a bright left bar + brighter text/borders
+       * (handled in the inline styles below). Elegant, clean. */
+      base.push('border-l-emerald-400');
     } else if (props.status === 'working') {
-      base.push('border-l-emerald-500/70 bg-transparent animate-pulse-soft');
+      base.push('border-l-emerald-500/70 animate-pulse-soft');
     } else {
-      base.push('border-l-transparent hover:bg-gray-800/30');
+      /* Subtle hover — text lift only, no full-width bg wash.
+       * Operator: "no dejar huecos hacia derecha izquierda". */
+      base.push('border-l-transparent');
     }
     return base.join(' ');
   };
@@ -190,46 +192,55 @@ export default function AgentCard(props: AgentCardProps) {
           </Show>
         </span>
 
-        {/* ROW 2 — metadata pills (subtle thin borders): type letter ·
-         *  ID · local/remote. Operator 2026-06-10: "puedes poner
-         *  cuadros o bordes al id, tipo, local/remoto, pero sutil y
-         *  fino." Inline-flex tiny pills with `border-gray-800/60`
-         *  give the eye an anchor without competing with the name. */}
-        <span class="flex items-center gap-1 font-mono"
-          style={{ 'font-size': 'var(--fs-meta, 10px)' }}
-        >
-          <span
-            class="inline-flex items-center justify-center flex-shrink-0 px-1.5 py-px rounded border"
-            style={{
-              color: typeInfo().color,
-              'border-color': 'rgba(75, 85, 99, 0.45)',
-              'min-width': '16px',
-            }}
-            title={`Agent type: ${typeInfo().label}`}
-          >
-            {typeInitials()}
-          </span>
-          <span
-            class="inline-flex items-center px-1.5 py-px rounded border text-gray-400 truncate"
-            style={{ 'border-color': 'rgba(75, 85, 99, 0.45)' }}
-            title={`Agent id ${props.meta.agentId ?? '?'}`}
-          >
-            {props.meta.agentId ?? '?'}
-          </span>
-          <Show when={!props.medium}>
-            <span
-              class="inline-flex items-center gap-1 px-1.5 py-px rounded border flex-shrink-0"
-              style={{
-                color: isRemote() ? '#7dd3fc' : '#9ca3af',
-                'border-color': 'rgba(75, 85, 99, 0.45)',
-              }}
-              title={isRemote() ? 'remote' : 'local'}
+        {/* ROW 2 — metadata pills (subtle borders, brighten when the
+         *  card is selected). Type letter · ID · local/remote.
+         *  Operator 2026-06-10: borders + text more vivid when active,
+         *  elegant but clearly visible. */}
+        {(() => {
+          const pillBorder = props.active
+            ? 'rgba(170, 180, 200, 0.65)'
+            : 'rgba(75, 85, 99, 0.45)';
+          const idColor = props.active ? '#e5e7eb' : '#9ca3af';
+          return (
+            <span class="flex items-center gap-1 font-mono"
+              style={{ 'font-size': 'var(--fs-meta, 10px)' }}
             >
-              <span aria-hidden="true">{isRemote() ? '○' : '•'}</span>
-              {isRemote() ? 'remote' : 'local'}
+              <span
+                class="inline-flex items-center justify-center flex-shrink-0 px-1.5 py-px rounded border"
+                style={{
+                  color: typeInfo().color,
+                  'border-color': pillBorder,
+                  'min-width': '16px',
+                }}
+                title={`Agent type: ${typeInfo().label}`}
+              >
+                {typeInitials()}
+              </span>
+              <span
+                class="inline-flex items-center px-1.5 py-px rounded border truncate"
+                style={{ 'border-color': pillBorder, color: idColor }}
+                title={`Agent id ${props.meta.agentId ?? '?'}`}
+              >
+                {props.meta.agentId ?? '?'}
+              </span>
+              <Show when={!props.medium}>
+                <span
+                  class="inline-flex items-center gap-1 px-1.5 py-px rounded border flex-shrink-0"
+                  style={{
+                    color: isRemote()
+                      ? '#7dd3fc'
+                      : (props.active ? '#cbd5e1' : '#9ca3af'),
+                    'border-color': pillBorder,
+                  }}
+                  title={isRemote() ? 'remote' : 'local'}
+                >
+                  <span aria-hidden="true">{isRemote() ? '○' : '•'}</span>
+                  {isRemote() ? 'remote' : 'local'}
+                </span>
+              </Show>
             </span>
-          </Show>
-        </span>
+          );
+        })()}
       </Show>
     </button>
   );
