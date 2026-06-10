@@ -18,7 +18,7 @@ export function buildStream(conv: string, msgs: ChatMsg[]): {
     .filter((e) => String(e['conv'] ?? '') === conv);
 
   const pre: StreamItem[] = [];
-  const queued: StreamItem[] = [];
+  let queued: StreamItem[] = [];
 
   msgs.forEach((m, i) => {
     if (i === liveIdx) return;
@@ -32,6 +32,29 @@ export function buildStream(conv: string, msgs: ChatMsg[]): {
       pre.push(item);
     }
   });
+
+  // 2026-06-10 case 1 — collapse multiple QUEUED user bubbles into a
+  // single growing bubble whose text is the concatenation (`\n\n` separator).
+  // Mirrors the daemon-side merge-on-arrival in `ChatSessions.queue`
+  // (py-1.12.20): the agent sees one continuous message, the operator
+  // sees one growing bubble. Operator: "Si mandamos otro mientras hay
+  // uno en espera, añadimos el texto, con una linea en medio, para que
+  // se vea que es otro párrafo."
+  if (queued.length > 1 && queued.every((x) => x.kind === 'msg' && x.msg.kind === 'user')) {
+    const first = queued[0]!;
+    if (first.kind === 'msg') {
+      const mergedText = queued
+        .map((x) => (x.kind === 'msg' ? (x.msg.text ?? '') : ''))
+        .filter((t) => t.length > 0)
+        .join('\n\n');
+      queued = [{
+        kind: 'msg',
+        ts: first.ts,
+        prepend: true,
+        msg: { ...first.msg, text: mergedText },
+      }];
+    }
+  }
 
   for (const e of events) {
     const t = String(e.type);

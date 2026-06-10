@@ -139,12 +139,12 @@ export default function ChatComposer(props: {
     () => isConvWorking() || queueItems().length > 0,
   );
 
-  // Enqueue: appends the operator's text to a SINGLE queued item per
-  // conv. If a queued head already exists, the text is concatenated
-  // into it (with a `\n\n` separator) — operator field report
-  // 2026-06-10: "Only enqueue there 1 message, so i can be writting
-  // as much as I want while waiting." If no queued item exists yet,
-  // we create one.
+  // Clock-icon enqueue = POST-WIP queue. Each click creates a NEW
+  // separate item that will run AFTER the current turn finishes
+  // (sequenced behind any items already in the queue). Items are
+  // independent — operator can edit, delete, or move each one.
+  // 2026-06-10 operator clarification: "se coloca como otra tarea
+  // independiente en esa post queue."
   const enqueue = async (): Promise<void> => {
     const text = draft().trim();
     if (sending() || !text) return;
@@ -152,24 +152,15 @@ export default function ChatComposer(props: {
     if (!cli) return;
     setSending(true);
     setDraft(''); setImgs([]); setDocs([]); grow();
-    const head = queueItems()[0];
-    let res;
-    if (head) {
-      const merged = `${head.text}\n\n${text}`;
-      res = await cli.queueEdit(props.conv, head.id, merged);
-    } else {
-      res = await cli.queueEnqueue(props.conv, text);
-    }
+    const res = await cli.queueEnqueue(props.conv, text);
     setSending(false);
     if (!res.ok) {
-      // Restore the draft on failure so the operator doesn't lose it.
       setDraft(text); grow();
       log.warn('queue enqueue failed', { status: res.status });
       if (res.status === 401) props.onTokenRejected?.(text);
     } else {
       taEl?.focus();
-      // The daemon broadcasts queue.item.added/updated; ingest lands
-      // the change in the store. No optimistic insert needed.
+      // Daemon broadcasts queue.item.added; ingestQueueEvent lands it.
     }
   };
   const editQueued = async (id: string, text: string): Promise<void> => {
@@ -210,17 +201,12 @@ export default function ChatComposer(props: {
     if (daemonStore.state.outdated) { props.onDaemonOutdated?.(); return; }
     const cli = daemonStore.state.client;
     if (!cli) return;
-    // Operator field report 2026-06-10: when the conv is busy, Enter
-    // should ROUTE to enqueue() (which merges into the head item) so
-    // the operator gets a single accumulating queue entry instead of
-    // N separate "QUEUED" bubbles. Image / doc attachments still go
-    // through dispatch (queue is text-only per Standard v16); if the
-    // operator attached files while busy, we fall through to the
-    // normal dispatch path which the daemon auto-queues.
-    if (isConvWorking() && imgs().length === 0 && docs().length === 0) {
-      await enqueue();
-      return;
-    }
+    // Enter / play always goes through /chat/dispatch. When the conv
+    // is live the daemon takes the busy-branch and appends to the
+    // IN-TASK pending list (chat_sessions.queue) — that merges into
+    // the current turn's continuation, not into the separate disk
+    // queue. The clock-icon button is for the post-WIP disk queue
+    // (case 2) instead. Operator clarification 2026-06-10.
     setSending(true);
     const sentImgs = imgs();
     const sentDocs = docs();
@@ -498,13 +484,61 @@ function QueuePanel(props: {
               <Show when={it.status === 'failed'}>
                 <span class="text-[10px] font-mono text-red-300 flex-shrink-0 mt-1" title={it.failed_reason ?? 'dispatch failed'}>failed</span>
               </Show>
-              <button
-                type="button"
-                onClick={() => props.onDelete(it.id)}
-                class="flex-shrink-0 text-gray-600 hover:text-red-300 px-1 py-0.5 leading-none text-[12px] opacity-60 group-hover:opacity-100 transition-opacity"
-                title="Remove from queue"
-                aria-label="delete"
-              >✕</button>
+              {/* 2026-06-10 case 2 — explicit per-item controls. The
+               *  drag handle on the left still works for power users;
+               *  the up/down arrows give a discoverable click target.
+               *  Pencil opens the inline textarea editor; ✕ removes. */}
+              <div
+                class="flex items-center gap-0.5 flex-shrink-0 ml-1 opacity-60 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  onClick={() => props.onMove(it.id, Math.max(0, i() - 1))}
+                  disabled={i() === 0}
+                  class="text-gray-500 hover:text-sky-300 disabled:opacity-30 disabled:cursor-not-allowed px-1 py-0.5 leading-none"
+                  title="Move up"
+                  aria-label="move up"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 19V5M5 12l7-7 7 7" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => props.onMove(it.id, Math.min(props.items.length - 1, i() + 1))}
+                  disabled={i() === props.items.length - 1}
+                  class="text-gray-500 hover:text-sky-300 disabled:opacity-30 disabled:cursor-not-allowed px-1 py-0.5 leading-none"
+                  title="Move down"
+                  aria-label="move down"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 5v14M5 12l7 7 7-7" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => beginEdit(it)}
+                  class="text-gray-500 hover:text-amber-300 px-1 py-0.5 leading-none"
+                  title="Edit"
+                  aria-label="edit"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 20h9M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => props.onDelete(it.id)}
+                  class="text-gray-500 hover:text-red-300 px-1 py-0.5 leading-none"
+                  title="Remove from queue"
+                  aria-label="delete"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </li>
           )}
         </For>
