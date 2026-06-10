@@ -77,7 +77,11 @@ export default function ChatComposer(props: {
   const grow = () => {
     if (!taEl) return;
     taEl.style.height = 'auto';
-    taEl.style.height = Math.min(taEl.scrollHeight, 180) + 'px';
+    // 2026-06-10 — operator field report: 180 px (≈3 lines) was too
+    // tight while the agent is mid-stream. Bumped to 300 px (≈5-6
+    // lines) so the operator can read what they're typing without
+    // scrolling. Beyond that height the textarea overflows internally.
+    taEl.style.height = Math.min(taEl.scrollHeight, 300) + 'px';
   };
 
   // V107.31 — On conv switch: snapshot outgoing → restore incoming.
@@ -309,7 +313,7 @@ export default function ChatComposer(props: {
           so the operator can actually see where the box ends. */}
       <div class="flex gap-2 items-stretch">
         <textarea
-          ref={taEl} value={draft()} rows="2" disabled={sending()}
+          ref={taEl} value={draft()} rows="3" disabled={sending()}
           placeholder={props.placeholder ?? 'Reply…'}
           onInput={(e) => { setDraft(e.currentTarget.value); grow(); }}
           onKeyDown={onKey} onPaste={onPaste}
