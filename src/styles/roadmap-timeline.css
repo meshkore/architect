@@ -314,11 +314,14 @@
 .rt-row {
   padding: 0 0 4px 0;
 }
+/* 2026-06-10 — inline flow (not flex) so ACTIVE / ARCHIVED tags
+ * trail the LAST line of the title instead of breaking onto their own
+ * row when the title wraps. Flex-wrap was promoting `<h3>` to its own
+ * flex line, costing a whole row every time the title spanned two
+ * lines. Inline flow lets the chip sit right next to the last word. */
 .rt-row .rt-title-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex-wrap: wrap;
+  display: block;
+  line-height: 1.35;
 }
 
 /* Short initiative ID chip — sits at the head of the title row so the
@@ -337,6 +340,8 @@
   border: 1px solid #232a35;
   line-height: 1.45;
   white-space: nowrap;
+  vertical-align: baseline;
+  margin-right: 8px;
 }
 .rt-story.is-active   .rt-id { color: #7dd3fc; border-color: #0ea5e955; }
 .rt-story.is-running  .rt-id { color: #f9a8d4; border-color: #ec489955; background: #ec48990d; }
@@ -345,6 +350,10 @@
 .rt-story.is-backlog  .rt-id { color: #6b7280; }
 
 .rt-title {
+  /* Inline so the trailing status chip flows next to the last word of
+   * the title (see comment on .rt-title-row). `<h3>` defaults to block,
+   * which would force ACTIVE onto its own line whenever the title wraps. */
+  display: inline;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   font-size: 15px;
   font-weight: 500;
@@ -361,6 +370,9 @@
   font-weight: 500;
   letter-spacing: .04em;
   text-transform: uppercase;
+  margin-left: 8px;
+  vertical-align: baseline;
+  white-space: nowrap;
 }
 .rt-statlabel.is-active  { color: #38bdf8; }
 .rt-statlabel.is-running { color: #f472b6; }
@@ -374,6 +386,9 @@
   letter-spacing: .04em;
   text-transform: uppercase;
   color: #b39064;
+  margin-left: 8px;
+  vertical-align: baseline;
+  white-space: nowrap;
 }
 
 .rt-meta {
