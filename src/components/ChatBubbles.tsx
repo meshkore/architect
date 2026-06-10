@@ -183,9 +183,64 @@ function CollapsibleText(props: {
 }
 
 export function MessageBubble(props: { msg: ChatMsg; prepend?: boolean }) {
-  return props.msg.kind === 'user'
-    ? <UserBubble msg={props.msg} prepend={props.prepend} />
-    : <AssistantBubble msg={props.msg} />;
+  if (props.msg.kind === 'user') return <UserBubble msg={props.msg} prepend={props.prepend} />;
+  if (props.msg.kind === 'system') return <SystemBubble msg={props.msg} />;
+  return <AssistantBubble msg={props.msg} />;
+}
+
+/**
+ * 2026-06-10 — client-only system notice (dispatch errors, transient
+ * warnings). Distinct from operator and agent bubbles: dimmer chrome,
+ * status-tinted left edge, no header. Never persisted by the daemon
+ * — these messages live only in the cockpit's in-memory convMap and
+ * disappear on cluster swap / page reload.
+ */
+export function SystemBubble(props: { msg: ChatMsg }) {
+  const sev = () => props.msg.system_kind ?? 'info';
+  const tint = () => {
+    if (sev() === 'error') return { border: '#ef4444', dot: '#f87171', text: '#fecaca' };
+    if (sev() === 'warning') return { border: '#f59e0b', dot: '#fbbf24', text: '#fde68a' };
+    return { border: '#6b7280', dot: '#9ca3af', text: '#d1d5db' };
+  };
+  const t = tint();
+  const ts = () => {
+    const v = props.msg.ts;
+    if (!v) return '';
+    const d = new Date(v);
+    return Number.isFinite(d.getTime())
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : '';
+  };
+  return (
+    <div
+      role="alert"
+      class="flex items-start gap-2 mx-2 my-1 px-3 py-2 rounded text-[12.5px] leading-relaxed"
+      style={{
+        background: 'rgba(120, 27, 30, 0.08)',
+        'border-left': `3px solid ${t.border}`,
+        color: t.text,
+      }}
+    >
+      <span
+        aria-hidden="true"
+        class="flex-shrink-0 mt-1"
+        style={{
+          width: '6px', height: '6px',
+          'border-radius': '50%',
+          background: t.dot,
+        }}
+      />
+      <div class="flex-1 min-w-0">
+        <div class="font-mono text-[10px] uppercase tracking-wider opacity-60 mb-0.5">
+          {sev() === 'error' ? 'error' : sev() === 'warning' ? 'warning' : 'system'}
+          <Show when={ts()}><span class="ml-2 normal-case opacity-80">{ts()}</span></Show>
+        </div>
+        <div style={{ 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>
+          {props.msg.text}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /**

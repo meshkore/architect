@@ -53,13 +53,26 @@ export interface ConvMeta {
 export type AgentStatusKind = 'idle' | 'thinking' | 'working';
 
 export interface ChatMsg {
-  kind: 'user' | 'assistant';
+  /**
+   * 'user'      — operator-typed message (and its echoes from the daemon).
+   * 'assistant' — agent reply (deltas + final).
+   * 'system'    — CLIENT-ONLY notice. Used to surface dispatch errors
+   *               and other in-band warnings the operator should see in
+   *               the chat thread instead of buried in console logs.
+   *               Never broadcast over WS, never persisted by the daemon.
+   *               2026-06-10 operator request: "si hay un error lo
+   *               deberíamos poner ahí" (in the chat).
+   */
+  kind: 'user' | 'assistant' | 'system';
   text: string;
   author?: string;
   ts?: string;
   streaming?: boolean;
   stream_id?: string;
   cancelled?: boolean;
+  /** Set on client-side 'system' messages so renderers can pick the
+   *  right severity styling. */
+  system_kind?: 'error' | 'warning' | 'info';
   /** V89.2 — Ephemeral flag set when the cockpit witnesses
    *  `chat.assistant.final` LIVE (not during a timeline rehydrate).
    *  Causes the bubble to auto-expand on arrival so the operator
@@ -951,6 +964,47 @@ async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promis
     // Roll back the optimistic pending flag if the dispatch failed.
     clearPendingReply(conv);
     log.warn('chat dispatch failed', res.status, res.body);
+    // 2026-06-10 operator request: surface dispatch errors INSIDE the
+    // chat thread, not just in the console. Distinguish two regimes:
+    //   • 4xx           → prompt-side error (validation, auth, etc.).
+    //                     Push a system bubble explaining the problem
+    //                     so the operator can fix the input and resend.
+    //   • status === 0  → transport failure (daemon offline, network).
+    //                     The central OfflinePanel handles this case —
+    //                     suppressing the in-chat bubble here so we
+    //                     don't double-surface the same problem.
+    //   • 5xx           → daemon crashed mid-dispatch. The OfflinePanel
+    //                     will catch it on the next health probe;
+    //                     surface a brief notice in-chat too so the
+    //                     operator has immediate feedback.
+    if (res.status !== 0) {
+      const errBody = (res.body || '').toString();
+      let humanMsg = '';
+      try {
+        const parsed = JSON.parse(errBody) as { error?: string };
+        if (parsed && typeof parsed.error === 'string') humanMsg = parsed.error;
+      } catch {
+        humanMsg = errBody;
+      }
+      const verb = res.status === 401
+        ? 'Unauthorized — token rejected. Re-unlock and retry.'
+        : res.status === 413
+        ? 'Payload too large — attachment exceeds the daemon limit.'
+        : res.status >= 500
+        ? 'Daemon error — the request reached the daemon but it failed mid-handling.'
+        : 'Dispatch refused';
+      const detail = humanMsg && humanMsg !== verb ? ` (${humanMsg})` : '';
+      const currentList = state.convMap[conv] ?? [];
+      setState('convMap', conv, [
+        ...currentList,
+        {
+          kind: 'system',
+          system_kind: 'error',
+          text: `${verb}${detail}`,
+          ts: new Date().toISOString(),
+        },
+      ]);
+    }
     return { ok: false, status: res.status, error: res.body };
   }
   if (!state.activeConv) setState('activeConv', res.data.conv ?? conv);
