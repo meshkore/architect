@@ -15,7 +15,12 @@ import { loadRailOrder, saveRailOrder } from './chat/rail-order';
 // Both thresholds were picked by visual inspection on the actual
 // layout: at < 80 px even a 5-char monospace name barely fits with
 // the row padding; at < 160 px the location chip wraps + jitters.
-const NARROW_THRESHOLD_PX = 80;
+// 2026-06-10 — narrow threshold lowered to 60 px (was 80). The new
+// narrow layout renders the name at the SAME font-size as expanded
+// (just truncated to 3 chars + 5 px breathing padding), so we can
+// stay in the rich layout for longer before snapping to the
+// name-letters-only fallback.
+const NARROW_THRESHOLD_PX = 60;
 const MEDIUM_THRESHOLD_PX = 160;
 // V107.38 — `isService` / `isServiceType` no longer used. The rail's
 // ordering algorithm is now agent-type-agnostic (only Master + primary
@@ -164,7 +169,7 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
           title="New agent / conversation"
         >＋</button>
       </div>
-      <div class="flex-1 min-h-0 overflow-y-auto chat-rail-pinned">
+      <div class="flex-1 min-h-0 overflow-y-auto chat-rail-pinned chat-rail-list">
         <For each={orderedConvs()}>
           {(c) => {
             const meta = () => chatStore.ensureConvMeta(c);

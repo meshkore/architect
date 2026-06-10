@@ -58,10 +58,20 @@ export default function AgentCard(props: AgentCardProps) {
   // regardless of stored agent_type.
   const typeInfo = () => agentVisualInfo(props.conv, props.meta);
 
-  const narrowChars = (): string => {
-    const t = title().trim();
-    // Drop any "A001" prefix accidentally embedded in the title.
-    return t.slice(0, 5);
+  const narrowChars = (): string => title().trim().slice(0, 3);
+
+  /** 1-2 character abbreviation derived from the agent type's
+   *  `shortLabel` (or `label`). Replaces the emoji in the metadata
+   *  row — operator field report 2026-06-10: "el icono amarillo,
+   *  rosita de la barra no me gusta nada, usa una letra o 2."
+   *  Rule: ≤2-char labels (e.g. "DB") kept verbatim and uppercased;
+   *  longer labels collapse to their first letter uppercased.
+   *  Single letters are easier to scan than emojis at this size. */
+  const typeInitials = (): string => {
+    const src = (typeInfo().shortLabel ?? typeInfo().label).trim();
+    if (!src) return '·';
+    if (src.length <= 2) return src.toUpperCase();
+    return src[0]!.toUpperCase();
   };
 
   const cardClasses = (): string => {
@@ -70,20 +80,24 @@ export default function AgentCard(props: AgentCardProps) {
         'group relative w-full text-left',
         'transition-colors cursor-grab active:cursor-grabbing',
         'flex items-center justify-center',
-        'rounded font-semibold tracking-tight select-none',
-        'py-1.5',
+        'rounded tracking-tight select-none',
+        // 2026-06-10 operator: narrow rail keeps the SAME font-size as
+        // the expanded layout (the previous build blew the letters up
+        // to fill the column). 5 px padding gives the row breathing
+        // room without looking cramped.
+        'py-1 px-1',
       ];
       if (props.dragging) base.push('opacity-35');
       if (props.dragOver) base.push('ring-1 ring-cyan-400/70');
-      if (props.active) base.push('bg-amber-600/85 text-amber-50');
+      if (props.active) base.push('text-gray-50 font-semibold bg-emerald-500/[0.10]');
       else if (props.pendingReview) base.push('text-amber-200 bg-amber-400/[0.06]');
       else if (props.status === 'working') base.push('text-emerald-100 bg-emerald-500/10 animate-pulse-soft');
-      else base.push('text-gray-200 hover:bg-gray-800/50');
+      else base.push('text-gray-200 hover:bg-gray-800/40');
       return base.join(' ');
     }
     const base = [
       'group relative w-full text-left rounded px-2.5 py-1.5',
-      'transition-colors flex flex-col gap-0.5 cursor-grab active:cursor-grabbing',
+      'transition-colors flex flex-col gap-1 cursor-grab active:cursor-grabbing',
       'border-l-[3px]',
     ];
     if (props.dragging) base.push('opacity-35');
@@ -134,14 +148,27 @@ export default function AgentCard(props: AgentCardProps) {
     >
       <Show
         when={!props.compact}
-        fallback={<span aria-label={`${title()} ${props.status}`}>{narrowChars()}</span>}
+        fallback={
+          /* Narrow: 3-char truncation of the NAME at the SAME font-size
+           * as the expanded body — operator 2026-06-10: "la columna de
+           * agentes debe seguir con la mismo tamaño de fuente al
+           * reducirse. Dejemos 3 letras minimo." */
+          <span
+            aria-label={`${title()} ${props.status}`}
+            style={{ 'font-size': 'var(--fs-body, 13px)' }}
+            class="leading-tight"
+          >
+            {narrowChars()}
+          </span>
+        }
       >
         {/* ROW 1 — name (primary anchor) + status indicator */}
         <span class="flex items-center gap-2 min-w-0">
           <span
-            class={`flex-1 min-w-0 text-[13px] leading-tight truncate ${
+            class={`flex-1 min-w-0 leading-tight truncate ${
               props.active ? 'text-gray-50 font-semibold' : 'text-gray-200'
             }`}
+            style={{ 'font-size': 'var(--fs-body, 13px)' }}
           >
             {title()}
           </span>
@@ -149,7 +176,7 @@ export default function AgentCard(props: AgentCardProps) {
             when={props.status === 'working'}
             fallback={
               <Show when={props.active}>
-                <span class="text-[9px] font-mono text-gray-600 flex-shrink-0">idle</span>
+                <span class="font-mono text-gray-600 flex-shrink-0" style={{ 'font-size': '9px' }}>idle</span>
               </Show>
             }
           >
@@ -163,29 +190,43 @@ export default function AgentCard(props: AgentCardProps) {
           </Show>
         </span>
 
-        {/* ROW 2 — metadata: type(1 char) · ID dim · local/remote dot.
-            In medium mode (rail < 160 px) the location dot is dropped. */}
-        <span class="flex items-center gap-1.5 text-[10px] font-mono text-gray-500">
+        {/* ROW 2 — metadata pills (subtle thin borders): type letter ·
+         *  ID · local/remote. Operator 2026-06-10: "puedes poner
+         *  cuadros o bordes al id, tipo, local/remoto, pero sutil y
+         *  fino." Inline-flex tiny pills with `border-gray-800/60`
+         *  give the eye an anchor without competing with the name. */}
+        <span class="flex items-center gap-1 font-mono"
+          style={{ 'font-size': 'var(--fs-meta, 10px)' }}
+        >
           <span
-            aria-hidden="true"
-            class="flex-shrink-0"
-            style={{ color: typeInfo().color }}
+            class="inline-flex items-center justify-center flex-shrink-0 px-1.5 py-px rounded border"
+            style={{
+              color: typeInfo().color,
+              'border-color': 'rgba(75, 85, 99, 0.45)',
+              'min-width': '16px',
+            }}
             title={`Agent type: ${typeInfo().label}`}
           >
-            {typeInfo().emoji}
+            {typeInitials()}
           </span>
-          <span class="text-gray-600">·</span>
-          <span class="text-gray-500 truncate" title={`Agent id ${props.meta.agentId ?? '?'}`}>
+          <span
+            class="inline-flex items-center px-1.5 py-px rounded border text-gray-400 truncate"
+            style={{ 'border-color': 'rgba(75, 85, 99, 0.45)' }}
+            title={`Agent id ${props.meta.agentId ?? '?'}`}
+          >
             {props.meta.agentId ?? '?'}
           </span>
           <Show when={!props.medium}>
-            <span class="text-gray-700">·</span>
             <span
-              class="flex-shrink-0"
+              class="inline-flex items-center gap-1 px-1.5 py-px rounded border flex-shrink-0"
+              style={{
+                color: isRemote() ? '#7dd3fc' : '#9ca3af',
+                'border-color': 'rgba(75, 85, 99, 0.45)',
+              }}
               title={isRemote() ? 'remote' : 'local'}
-              style={{ color: isRemote() ? '#7dd3fc' : '#9ca3af' }}
             >
-              {isRemote() ? '○' : '•'} {isRemote() ? 'remote' : 'local'}
+              <span aria-hidden="true">{isRemote() ? '○' : '•'}</span>
+              {isRemote() ? 'remote' : 'local'}
             </span>
           </Show>
         </span>
