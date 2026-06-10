@@ -267,12 +267,13 @@ function BubbleHeader(props: {
    *  the composer. */
   onStop?: () => void;
 }) {
-  // V86y — color stops for the fade line. Picked per tone so the
-  // line reads as "this is the same speaker's territory" without
-  // having to chase the byline text colour exactly.
+  // 2026-06-10 — operator field report: the "USER" label + its fade
+  // line used emerald, identical to the agent's emerald — both sides
+  // read as the same speaker. Operator side switches to sky-blue so
+  // agent (emerald) vs operator (sky) are visually unambiguous.
   const nameColor = (): string => {
     if (props.tone === 'cancelled') return 'text-red-300';
-    if (props.tone === 'operator') return 'text-emerald-300';
+    if (props.tone === 'operator') return 'text-sky-300';
     return 'text-gray-100';
   };
   const fadeClasses = (): string => {
@@ -283,7 +284,7 @@ function BubbleHeader(props: {
     const direction = props.align === 'right' ? 'bg-gradient-to-l' : 'bg-gradient-to-r';
     const tint =
       props.tone === 'cancelled' ? 'from-red-400/40'
-      : props.tone === 'operator' ? 'from-emerald-400/45'
+      : props.tone === 'operator' ? 'from-sky-400/45'
       : 'from-emerald-400/35';
     return `${direction} ${tint} to-transparent`;
   };
