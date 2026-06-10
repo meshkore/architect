@@ -38,6 +38,23 @@ export type Result<T> =
 
 // ─── Response shapes ────────────────────────────────────────────────
 
+/** Standard v22 `GET /storage/usage` response. */
+export interface StorageBucket {
+  name: string;
+  bytes: number;
+  files: number;
+  exists: boolean;
+  retention_days?: number;
+}
+export interface StorageUsageResponse {
+  root: string;
+  total_bytes: number;
+  total_files: number;
+  buckets: StorageBucket[];
+  generated_at: string;
+  cache_ttl_secs: number;
+}
+
 export interface HealthResponse {
   ok: boolean;
   identity: string;
@@ -458,6 +475,13 @@ export class DaemonClient {
 
   async stateSubset(name: string, signal?: AbortSignal): Promise<Result<unknown>> {
     return this.request<unknown>('GET', `/state/${encodeURIComponent(name)}`, undefined, signal);
+  }
+
+  /** Standard v22 — `GET /storage/usage`. Returns the per-bucket
+   *  disk-usage breakdown of `.meshkore/`. Cached by the daemon
+   *  (`cache_ttl_secs`, default 5) so polling is cheap. */
+  async storageUsage(signal?: AbortSignal): Promise<Result<StorageUsageResponse>> {
+    return this.request<StorageUsageResponse>('GET', '/storage/usage', undefined, signal, /*requireAuth*/ false);
   }
 
   async info(signal?: AbortSignal): Promise<Result<InfoResponse>> {

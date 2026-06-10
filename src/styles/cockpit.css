@@ -51,6 +51,29 @@
       --theme-byline-agent:         #f3f4f6;
       --theme-byline-user:          #7dd3fc;
 
+      /* Surface tint — subtle accents on panel borders + headers.
+         The theme stays dark; surface tones only nudge the chrome. */
+      --theme-surface-tint:         rgba(120, 130, 150, .22);
+
+      /* Text scale (Tier 1 ~ Tier 4).
+         Tier 1: primary content / titles.
+         Tier 2: secondary content / buttons.
+         Tier 3: dim metadata.
+         Tier 4: deep dim — uppercase mono section labels. */
+      --theme-text-primary:         #e5e7eb;
+      --theme-text-secondary:       #cbd5e1;
+      --theme-text-dim:             #9ca3af;
+      --theme-text-quiet:           #6b7280;
+
+      /* Font-size tokens — driven by the size-map preset (Compact /
+         Default / Large). Cockpit components opt in via
+         `font-size: var(--fs-…)`. Tokens kept few on purpose. */
+      --fs-title:    11px;   /* section labels (UPPERCASE mono)            */
+      --fs-button:   12px;   /* zone buttons + general CTAs                */
+      --fs-body:     13px;   /* primary content text                       */
+      --fs-meta:     10px;   /* IDs, badges, mono dim                      */
+      --fs-chat:     13.5px; /* chat bubble body                           */
+
       --bg-canvas:      #1f2a3d;          /* V107.1 lifted — gaps between columns now clearly brighter than panels */
       --bg-page:        #1f2a3d;          /* alias */
       --bg-panel:       #0a0f17;          /* column panels — dark, sits below the canvas */
@@ -1070,7 +1093,7 @@
     }
     .chat-rail-header-label {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
+      font-size: var(--fs-title, 10px);
       letter-spacing: 0.18em;
       text-transform: uppercase;
       color: #9ca3af;
@@ -1439,7 +1462,7 @@
     }
 
     .subtab-bar      { display: flex; align-items: stretch; border-bottom: 1px solid var(--border-bar); padding: 0 var(--col-pad-x); flex-shrink: 0; height: 38px; background: var(--bg-bar); box-shadow: var(--shadow-bar); position: relative; z-index: 2; }
-    .subtab          { position: relative; display: flex; align-items: center; padding: 0 14px; font-size: 12.5px; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; transition: color 120ms, background 120ms; }
+    .subtab          { position: relative; display: flex; align-items: center; padding: 0 14px; font-size: var(--fs-button, 12.5px); color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; transition: color 120ms, background 120ms; }
     .subtab:hover    { color: #f3f4f6; }
 
     /* V41 — Bump readability of small uppercase section labels across

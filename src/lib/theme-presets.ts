@@ -1,24 +1,35 @@
 /**
- * theme-presets.ts — the 4 shipping theme palettes for the cockpit.
+ * theme-presets.ts — cockpit theme + size presets.
  *
- * Each preset is a complete `{cssVar → value}` record covering the
- * schema declared in `cockpit.css :root` under the `--theme-*` block.
- * `state/theme.ts` reads from here and writes the merged map (preset
- * + per-variable overrides) onto `document.documentElement.style`.
+ * Themes  → palette of colour CSS variables. Operator picks one of
+ *           four; can override individual variables on top.
+ * Sizes   → font-size scale. Three presets (compact / default / large)
+ *           drive the `--fs-*` token set used across the cockpit chrome
+ *           (titles, buttons, body, meta, chat).
  *
- * Adding a new preset = a new entry in `THEMES` + a label/swatch in
- * `THEME_OPTIONS`. No other code needs to change.
+ * Each preset is a complete `{cssVar → value}` record covering its
+ * group's schema declared in `cockpit.css :root`. Adding a new preset
+ * is one entry in the relevant map + one entry in the matching options
+ * list — no further code changes needed.
  *
- * Initiative `cockpit-themes`, task THM-02.
+ * Initiative `cockpit-themes`, expanded 2026-06-10 to cover text,
+ * surface, and font-size tokens.
  */
 
 export type ThemeId = 'emerald' | 'indigo' | 'amber' | 'slate';
+export type SizeId = 'compact' | 'default' | 'large';
 
 export interface ThemeMeta {
   id: ThemeId;
   label: string;
   /** Three swatches shown in the picker (accent, secondary, tertiary). */
   swatches: readonly [string, string, string];
+}
+
+export interface SizeMeta {
+  id: SizeId;
+  label: string;
+  hint: string;
 }
 
 export const THEME_OPTIONS: readonly ThemeMeta[] = [
@@ -28,10 +39,43 @@ export const THEME_OPTIONS: readonly ThemeMeta[] = [
   { id: 'slate',   label: 'Mono',    swatches: ['#94a3b8', '#7dd3fc', '#a3a3a3'] },
 ];
 
-export const THEMES: Record<ThemeId, Record<string, string>> = {
-  /* Emerald — current product. Same values as the cockpit.css
-   * defaults; here so a forced setTheme('emerald') after an override
-   * reverts cleanly. */
+export const SIZE_OPTIONS: readonly SizeMeta[] = [
+  { id: 'compact', label: 'Compact', hint: 'Dense — more content per screen' },
+  { id: 'default', label: 'Default', hint: 'Original cockpit spacing' },
+  { id: 'large',   label: 'Large',   hint: 'Bigger text + buttons' },
+];
+
+/** Full theme schema. Every preset MUST cover every key. */
+export const THEME_VAR_NAMES = [
+  '--theme-accent',
+  '--theme-accent-bright',
+  '--theme-accent-glow',
+  '--theme-accent-soft-bg',
+  '--theme-accent-soft-border',
+  '--theme-status-active',
+  '--theme-status-active-ring',
+  '--theme-status-active-glow',
+  '--theme-status-running',
+  '--theme-status-running-ring',
+  '--theme-status-running-glow',
+  '--theme-status-next',
+  '--theme-status-next-ring',
+  '--theme-status-next-glow',
+  '--theme-status-done',
+  '--theme-status-done-ring',
+  '--theme-status-done-glow',
+  '--theme-byline-agent',
+  '--theme-byline-user',
+  '--theme-surface-tint',
+  '--theme-text-primary',
+  '--theme-text-secondary',
+  '--theme-text-dim',
+  '--theme-text-quiet',
+] as const;
+
+export type ThemeVar = (typeof THEME_VAR_NAMES)[number];
+
+export const THEMES: Record<ThemeId, Record<ThemeVar, string>> = {
   emerald: {
     '--theme-accent': '#10b981',
     '--theme-accent-bright': '#34d399',
@@ -52,11 +96,12 @@ export const THEMES: Record<ThemeId, Record<string, string>> = {
     '--theme-status-done-glow': 'rgba(167, 139, 250, 0.4)',
     '--theme-byline-agent': '#f3f4f6',
     '--theme-byline-user': '#7dd3fc',
+    '--theme-surface-tint': 'rgba(120, 130, 150, 0.22)',
+    '--theme-text-primary': '#e5e7eb',
+    '--theme-text-secondary': '#cbd5e1',
+    '--theme-text-dim': '#9ca3af',
+    '--theme-text-quiet': '#6b7280',
   },
-
-  /* Indigo — cool / "no green" preset. Accent shifts to indigo-500,
-   * the running hue moves to rose so it still pops against the
-   * indigo accent. */
   indigo: {
     '--theme-accent': '#6366f1',
     '--theme-accent-bright': '#818cf8',
@@ -77,9 +122,12 @@ export const THEMES: Record<ThemeId, Record<string, string>> = {
     '--theme-status-done-glow': 'rgba(167, 139, 250, 0.40)',
     '--theme-byline-agent': '#f3f4f6',
     '--theme-byline-user': '#fbcfe8',
+    '--theme-surface-tint': 'rgba(129, 140, 248, 0.22)',
+    '--theme-text-primary': '#eef2ff',
+    '--theme-text-secondary': '#c7d2fe',
+    '--theme-text-dim': '#9ca3af',
+    '--theme-text-quiet': '#6b7280',
   },
-
-  /* Amber — warm preset. All accents shifted toward warm hues. */
   amber: {
     '--theme-accent': '#f59e0b',
     '--theme-accent-bright': '#fbbf24',
@@ -98,13 +146,14 @@ export const THEMES: Record<ThemeId, Record<string, string>> = {
     '--theme-status-done': '#fb923c',
     '--theme-status-done-ring': '#fed7aa',
     '--theme-status-done-glow': 'rgba(251, 146, 60, 0.45)',
-    '--theme-byline-agent': '#f3f4f6',
+    '--theme-byline-agent': '#fef3c7',
     '--theme-byline-user': '#fde68a',
+    '--theme-surface-tint': 'rgba(251, 191, 36, 0.22)',
+    '--theme-text-primary': '#fef3c7',
+    '--theme-text-secondary': '#fde68a',
+    '--theme-text-dim': '#d1d5db',
+    '--theme-text-quiet': '#9ca3af',
   },
-
-  /* Slate — low-chroma / mono preset. The accent + chrome go
-   * neutral; the roadmap status palette stays tinted (otherwise
-   * roadmap legibility collapses) but at lower saturation. */
   slate: {
     '--theme-accent': '#94a3b8',
     '--theme-accent-bright': '#cbd5e1',
@@ -123,8 +172,48 @@ export const THEMES: Record<ThemeId, Record<string, string>> = {
     '--theme-status-done': '#c4b5fd',
     '--theme-status-done-ring': '#ede9fe',
     '--theme-status-done-glow': 'rgba(196, 181, 253, 0.35)',
-    '--theme-byline-agent': '#f3f4f6',
+    '--theme-byline-agent': '#e5e7eb',
     '--theme-byline-user': '#cbd5e1',
+    '--theme-surface-tint': 'rgba(148, 163, 184, 0.22)',
+    '--theme-text-primary': '#e5e7eb',
+    '--theme-text-secondary': '#cbd5e1',
+    '--theme-text-dim': '#94a3b8',
+    '--theme-text-quiet': '#64748b',
+  },
+};
+
+/** Font-size schema. */
+export const SIZE_VAR_NAMES = [
+  '--fs-title',
+  '--fs-button',
+  '--fs-body',
+  '--fs-meta',
+  '--fs-chat',
+] as const;
+
+export type SizeVar = (typeof SIZE_VAR_NAMES)[number];
+
+export const SIZE_PRESETS: Record<SizeId, Record<SizeVar, string>> = {
+  compact: {
+    '--fs-title':  '10px',
+    '--fs-button': '11px',
+    '--fs-body':   '12px',
+    '--fs-meta':   '9.5px',
+    '--fs-chat':   '12.5px',
+  },
+  default: {
+    '--fs-title':  '11px',
+    '--fs-button': '12px',
+    '--fs-body':   '13px',
+    '--fs-meta':   '10px',
+    '--fs-chat':   '13.5px',
+  },
+  large: {
+    '--fs-title':  '13px',
+    '--fs-button': '14px',
+    '--fs-body':   '15px',
+    '--fs-meta':   '11px',
+    '--fs-chat':   '15.5px',
   },
 };
 

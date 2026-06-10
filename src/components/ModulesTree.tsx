@@ -44,7 +44,8 @@ export default function ModulesTree(props: { selected: string | null; onSelect: 
             type="button"
             onClick={() => uiStore.toggleModulesCollapsed()}
             title="Collapse modules column"
-            class="text-xs font-mono uppercase tracking-wider text-gray-500 hover:text-emerald-300 transition-colors bg-transparent border-0 p-0 cursor-pointer"
+            style={{ 'font-size': 'var(--fs-title, 11px)' }}
+            class="font-mono uppercase tracking-wider text-gray-500 hover:text-emerald-300 transition-colors bg-transparent border-0 p-0 cursor-pointer"
           >
             Modules
           </button>
