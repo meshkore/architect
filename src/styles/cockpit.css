@@ -916,13 +916,16 @@
          .context-mode   → temporary chat-collapse driven by Context/Diagrams
                           (doesn't touch the persisted chat preference)
        Layouts override grid-template-columns to swap the affected col
-       for a 36px rail; the splitters between collapsed cols also
-       become 0 width so the rail sits flush with its neighbour. */
+       for a 36 px rail; the matching splitter stays at its normal
+       `--splitter-w` width so the rail keeps its right-edge gap from
+       the neighbour (operator field report 2026-06-10: "al comprimir
+       en una vertical la columna de modulos quiero que mantenga su
+       margen derecho"). */
     .three-col.chat-collapsed,
-    .three-col.context-mode { grid-template-columns: var(--col-nav) var(--splitter-w, 8px) 1fr 0 36px; }
-    .three-col.nav-collapsed { grid-template-columns: 36px 0 1fr var(--splitter-w, 8px) var(--col-chat); }
+    .three-col.context-mode { grid-template-columns: var(--col-nav) var(--splitter-w, 8px) 1fr var(--splitter-w, 8px) 36px; }
+    .three-col.nav-collapsed { grid-template-columns: 36px var(--splitter-w, 8px) 1fr var(--splitter-w, 8px) var(--col-chat); }
     .three-col.nav-collapsed.chat-collapsed,
-    .three-col.nav-collapsed.context-mode { grid-template-columns: 36px 0 1fr 0 36px; }
+    .three-col.nav-collapsed.context-mode { grid-template-columns: 36px var(--splitter-w, 8px) 1fr var(--splitter-w, 8px) 36px; }
     /* When a splitter's grid track shrinks to 0, prevent its 4px CSS
        width from leaking out of the cell. min-width:0 lets the grid
        constrain it; overflow:hidden hides any internal background.
