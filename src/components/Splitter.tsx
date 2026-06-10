@@ -16,6 +16,7 @@
 
 import { onMount, onCleanup } from 'solid-js';
 import { uiStore } from '~/state/ui';
+import { layoutStore } from '~/state/layout';
 
 const VAR: Record<string, string> = {
   'col-nav': '--col-nav',
@@ -142,6 +143,15 @@ export default function Splitter(props: { resize: 'col-nav' | 'col-chat' | 'chat
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         saveLayout(layout);
+        // 2026-06-10 — record the new width against the PANEL that
+        // currently occupies the edge slot, not the slot itself. So
+        // when the operator drags Modules to the right and drops it
+        // on the chat slot, Modules keeps its narrow width instead
+        // of being inflated to the chat-slot's stored value. The
+        // store separately syncs `--col-nav` / `--col-chat` on swap.
+        if (props.resize === 'col-nav' || props.resize === 'col-chat') {
+          layoutStore.recordSlotWidth(props.resize, layout[props.resize]!);
+        }
       };
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);

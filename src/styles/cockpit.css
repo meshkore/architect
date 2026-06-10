@@ -824,12 +824,46 @@
     .col-drag-grip:active { cursor: grabbing; color: #34d399; }
     body.col-reordering,
     body.col-reordering * { cursor: grabbing !important; user-select: none; }
-    [data-panel-id].col-dragging { opacity: 0.55; transition: opacity 120ms; }
-    [data-panel-id].col-drop-target {
-      box-shadow: inset 0 0 0 2px rgba(52,211,153,0.55),
-                  0 0 24px rgba(52,211,153,0.25);
-      background-color: rgba(52,211,153,0.06);
-      transition: box-shadow 120ms, background-color 120ms;
+    [data-panel-id].col-dragging { opacity: 0.35; transition: opacity 120ms; }
+
+    /* 2026-06-10 — drag-with-preview UX. The legacy ".col-drop-target"
+       (full-column emerald wash) is replaced by a vertical
+       drop-indicator line at the insertion gap + a floating ghost
+       chip that follows the cursor with the source panel's label. */
+    .col-drag-ghost {
+      position: fixed;
+      top: 0; left: 0;
+      pointer-events: none;
+      z-index: 9999;
+      padding: 6px 12px;
+      border-radius: 6px;
+      background: rgba(20, 24, 31, 0.92);
+      border: 1px solid rgba(52, 211, 153, 0.45);
+      color: #34d399;
+      font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, .45);
+      will-change: transform;
+    }
+    .col-drop-indicator {
+      position: fixed;
+      top: 0; left: 0;
+      width: 4px;
+      pointer-events: none;
+      z-index: 9998;
+      background: linear-gradient(
+        180deg,
+        rgba(52, 211, 153, 0)   0%,
+        rgba(52, 211, 153, .85) 12%,
+        rgba(52, 211, 153, .85) 88%,
+        rgba(52, 211, 153, 0)   100%
+      );
+      box-shadow: 0 0 12px rgba(52, 211, 153, .55);
+      border-radius: 2px;
+      transition: left 80ms ease, height 80ms ease, top 80ms ease;
     }
 
     .col { overflow: hidden; padding: 0; display: flex; flex-direction: column; min-height: 0; }
@@ -1995,16 +2029,10 @@
       background: rgba(52,211,153,0.10);
       border-color: rgba(52,211,153,0.30);
     }
-    .col-drag-grip:active { cursor: grabbing; color: #34d399; }
-    body.col-reordering,
-    body.col-reordering * { cursor: grabbing !important; user-select: none; }
-    [data-panel-id].col-dragging { opacity: 0.55; transition: opacity 120ms; }
-    [data-panel-id].col-drop-target {
-      box-shadow: inset 0 0 0 2px rgba(52,211,153,0.55),
-                  0 0 24px rgba(52,211,153,0.25);
-      background-color: rgba(52,211,153,0.06);
-      transition: box-shadow 120ms, background-color 120ms;
-    }
+    /* (duplicate column-reorder rules removed 2026-06-10 — the
+       canonical set lives ~1100 lines up, next to .col-drag-grip;
+       this stub stays as a marker so a future grep finds the
+       location where the legacy duplicate was deleted.) */
 
     /* PendingBubble — self-contained loader inserted at the bottom of
        #chat-msgs from the moment Send is clicked until the first real
