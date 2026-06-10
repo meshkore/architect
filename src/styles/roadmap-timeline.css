@@ -28,7 +28,10 @@
  * estaba muy pegado arriba"). */
 .rt-timeline {
   position: relative;
-  padding-top: 8px;
+  /* 12 px top padding (was 8) gives the first node's halo + hover-scale
+   * a comfortable cushion above; the wrapper's `overflow: visible`
+   * means the halo can still expand freely on hover. */
+  padding-top: 12px;
 }
 /* Reset the default <ul> padding so .rt-stories doesn't add a phantom
  * 40px offset between the line and the content. */
@@ -141,32 +144,40 @@
 }
 
 /* ── Progress ring (::before) ───────────────────────────────────
- * Conic sweep from 12 o'clock clockwise, `--node-ring` from 0 to
- * (progress × 360°), faint white for the remainder. The ring uses
- * a LIGHTER variant of the node color (the "-300" tint) so it
- * complements the saturated inner border instead of duplicating it.
+ * 2026-06-10 geometry recalc — operator asked for precision + 1-2 px
+ * gap. With the wrapper now using `overflow: visible` (see
+ * InitiativesPanel.tsx), the halo + hover-scale extend freely past
+ * the story's box, so no risk of clipping.
  *
- * Geometry: box inset:-5 → radius 19 (was 20). Mask transparent up
- * to 75% (=14.25), fading to opaque at 80% (=15.2). Visible band
- * radius 15.2 → 19 (≈3.8 px wide). Gap between node border (r=14)
- * and ring inner = ≈1 px (was 2). Ring paints in step 2 of the
- * stacking order (z:-1) → over the box-shadow panel-bg knockout in
- * its own band, with the wider knockout still visible OUTSIDE. */
+ *   Node:    radius 14  (28 px diameter, 2 px border)
+ *   Gap:     2.2 px     → ring inner at radius 16.2
+ *   Ring:    3.8 px     → ring outer at radius 20
+ *
+ * Implementation:
+ *   - Box `inset: -6px` → 40×40 box, half-side radius = 20.
+ *   - Mask `closest-side, transparent 80%, #000 81%`
+ *     • transparent for radius < 16 px (= 80% × 20)
+ *     • opaque for radius > 16.2 px (= 81% × 20)
+ *     → visible ring band 16.2 → 20.
+ *
+ * `closest-side` is critical: without it the gradient defaults to
+ * farthest-corner (≈28 px on a 40×40 box), the percentages land
+ * outside the visible circle and the ring masks away entirely.
+ *
+ * Palette: ring uses the `-200` step (pastel variant of the same
+ * hue family as the saturated `-500` border) so it complements
+ * instead of fighting. */
 .rt-node::before {
   content: "";
   position: absolute;
-  inset: -5px;
+  inset: -6px;
   border-radius: 50%;
   background: conic-gradient(
     var(--node-ring, var(--node-color)) calc(var(--progress, 0) * 360deg),
-    rgba(255, 255, 255, .18) 0
+    rgba(255, 255, 255, .14) 0
   );
-  /* `closest-side` is critical: without it the radial-gradient defaults to
-   * farthest-corner (≈26 px on a 38×38 box), so percentages land OUTSIDE
-   * the visible circle and the ring gets masked away. closest-side
-   * anchors the gradient to the half-side. */
-  -webkit-mask: radial-gradient(circle closest-side, transparent 75%, #000 80%);
-          mask: radial-gradient(circle closest-side, transparent 75%, #000 80%);
+  -webkit-mask: radial-gradient(circle closest-side, transparent 80%, #000 81%);
+          mask: radial-gradient(circle closest-side, transparent 80%, #000 81%);
   z-index: -1;
   pointer-events: none;
   transition: background .35s ease;
@@ -191,24 +202,27 @@
  * "filled vs hollow" feel comes from the inner icon (play / stop /
  * check) + the conic progress ring + (for running) the pulse animation. */
 
-/* Per-status palette. Border is the saturated -500 tone, ring is the
- * -400 step lighter — still inside the same hue family so the
- * progress arc reads as "this status, but softer" rather than a
- * second competing color. 2026-06-10 operator nudge: -300 was too
- * washed-out, the ring was getting lost. -400 keeps the contrast
- * vs the panel-bg without fighting the -500 border. */
+/* Per-status palette (2026-06-10 revision).
+ *
+ * Border = the saturated `-500` tone (state color).
+ * Ring   = the pastel `-200` tone (same hue family, much lighter).
+ *
+ * The -200 step gives the ring real contrast against the panel-bg
+ * dark and a clear tonal break from the saturated border, so the
+ * inner-circle + outer-arc read as two distinct visual layers
+ * rather than a double-saturated halo. */
 
 /* ACTIVE — sky blue. Ring invites the click. */
 .rt-node.is-active {
-  --node-color: #0ea5e9;        /* sky-500 inner border */
-  --node-ring:  #38bdf8;        /* sky-400 progress ring */
+  --node-color: #0ea5e9;        /* sky-500  inner border */
+  --node-ring:  #bae6fd;        /* sky-200  progress ring */
   --node-glow: rgba(14, 165, 233, .5);
 }
 
 /* RUNNING — fuchsia, with a pulse. Demands attention. */
 .rt-node.is-running {
   --node-color: #ec4899;        /* pink-500 */
-  --node-ring:  #f472b6;        /* pink-400 */
+  --node-ring:  #fbcfe8;        /* pink-200 */
   --node-glow: rgba(236, 72, 153, .6);
   animation: rt-pulse 1.6s ease-in-out infinite;
 }
@@ -216,14 +230,14 @@
 /* NEXT — amber. Warm anticipation. */
 .rt-node.is-next {
   --node-color: #f59e0b;        /* amber-500 */
-  --node-ring:  #fbbf24;        /* amber-400 */
+  --node-ring:  #fde68a;        /* amber-200 */
   --node-glow: rgba(245, 158, 11, .45);
 }
 
-/* DONE — violet. Sealed; slightly faded ring. */
+/* DONE — violet. Sealed; pastel ring. */
 .rt-node.is-done {
   --node-color: #a78bfa;        /* violet-400 */
-  --node-ring:  #c4b5fd;        /* violet-300 */
+  --node-ring:  #ddd6fe;        /* violet-200 */
   --node-glow: rgba(167, 139, 250, .4);
   border-color: #6d57b8;
 }

@@ -456,7 +456,7 @@
     .proj-row {
       display: flex; align-items: center; gap: 8px;
       padding: 7px 10px 7px 16px;
-      border-radius: 8px;
+      border-radius: 0;            /* operator 2026-06-10: rectangular, no rounded corners */
       border: none;
       background: transparent;
       cursor: pointer;
@@ -517,14 +517,14 @@
     .proj-row.is-working .proj-working-bar {
       border-left: none;
       background: rgba(148,163,184,0.15);
-      border-radius: 1px;
+      border-radius: 0;        /* operator 2026-06-10: rectangular bar */
     }
     .proj-row.is-working .proj-working-bar::before {
       content: '';
       position: absolute;
       left: 0; right: 0;
       height: 5px;
-      border-radius: 1px;
+      border-radius: 0;        /* idem */
       background: #cbd5e1;
       animation: proj-bar-bounce 1.8s ease-in-out infinite;
     }

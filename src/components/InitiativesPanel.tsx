@@ -294,7 +294,12 @@ export default function InitiativesPanel() {
                           'transition-duration': `${EXIT_ANIM_MS}ms`,
                           'max-height': isExitingNow() ? '0px' : '6000px',
                           opacity: isExitingNow() ? '0' : '1',
-                          overflow: 'hidden',
+                          // Operator 2026-06-10: when the wrapper is just
+                          // hosting a visible card, let the node's halo +
+                          // hover scale extend freely (`visible`). Only
+                          // clip during the EXIT animation so the
+                          // max-height transition reads cleanly.
+                          overflow: isExitingNow() ? 'hidden' : 'visible',
                           transition: 'all .35s ease',
                         }}
                       >
