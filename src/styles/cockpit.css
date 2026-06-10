@@ -941,15 +941,12 @@
     .nav-col    { display: flex; flex-direction: column; min-width: 0; }
     .left-col   { display: flex; flex-direction: column; min-width: 0; }
     .center-col { display: flex; flex-direction: column; min-width: 0; }
-    /* Operator field report 2026-06-10: the collapsed nav/chat rails
-       (36 px wide) inherited the full 12-px panel-radius from the
-       expanded shape — the rounding looked oversized against such a
-       narrow strip. Drop to 5 px when collapsed so the corners stay
-       proportional to the rail width. */
-    .nav-col.collapsed,
-    .center-col.collapsed {
-      border-radius: 5px;
-    }
+    /* 2026-06-10 — operator follow-up: "todos los bordes iguales, sin
+       importar el ancho de cada columna." The previous override that
+       dropped the collapsed rails to 5 px while expanded panels stayed
+       at 12 px is GONE. Every column — wide or collapsed — now reads
+       from `--panel-radius` so the visual identity is one shape, just
+       at different sizes. */
     /* Splitters get their own breathing room and become transparent so
        they look like gutters instead of seams. The 4px width still works
        as a drag handle; we just hide its visual stripe. */
