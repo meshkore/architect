@@ -5,11 +5,18 @@ import { agentVisualColor } from '~/lib/agent-types';
 import { uiStore } from '~/state/ui';
 import { loadRailOrder, saveRailOrder } from './chat/rail-order';
 
-// V86o — when the rail is narrower than this, AgentCard switches to its
-// compact layout: only the id chip + a status dot, no chips / no title.
-// 130 was picked by visual inspection — narrower than that and the
-// id-chip + agent-type chip + location chip overflow on one line.
-const COMPACT_THRESHOLD_PX = 130;
+// 2026-06-10 — three responsive layouts (operator request:
+// "3 responsive widths con 3 formatos distintos"):
+//
+//   wide   ≥ NARROW + MEDIUM thresholds → full layout
+//   medium between the two              → drop the location chip
+//   narrow < NARROW threshold           → first 4-5 letters of name only
+//
+// Both thresholds were picked by visual inspection on the actual
+// layout: at < 80 px even a 5-char monospace name barely fits with
+// the row padding; at < 160 px the location chip wraps + jitters.
+const NARROW_THRESHOLD_PX = 80;
+const MEDIUM_THRESHOLD_PX = 160;
 // V107.38 — `isService` / `isServiceType` no longer used. The rail's
 // ordering algorithm is now agent-type-agnostic (only Master + primary
 // architect are special-cased in the head; everything else uses a
@@ -134,7 +141,13 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
     saveRailOrder(current);
   };
 
-  const compact = () => uiStore.state.chatRailWidth < COMPACT_THRESHOLD_PX;
+  const narrow = () => uiStore.state.chatRailWidth < NARROW_THRESHOLD_PX;
+  const medium = () =>
+    uiStore.state.chatRailWidth >= NARROW_THRESHOLD_PX &&
+    uiStore.state.chatRailWidth < MEDIUM_THRESHOLD_PX;
+  // Kept under the legacy name so `chat-rail-stack.compact` CSS still
+  // matches when the rail is at its narrowest (name-only) layout.
+  const compact = narrow;
 
   return (
     <aside class={`chat-rail-stack ${compact() ? 'compact' : ''}`}>
@@ -164,6 +177,7 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
                 pendingReview={false}
                 stripe={agentVisualColor(c, meta())}
                 compact={compact()}
+                medium={medium()}
                 onSelect={chatStore.setActiveConv}
                 onDragStart={(id) => setDragSrc(id)}
                 onDragEnd={() => { setDragSrc(null); setDragTgt(null); }}

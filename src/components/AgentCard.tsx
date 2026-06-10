@@ -1,22 +1,27 @@
 /**
  * AgentCard — single row in the ChatRail.
  *
- * V86n — switched to a border state-machine. Removed the V80 left
- * stripe (the 3px coloured bar on the left edge) because:
- *   - It ate horizontal room from the title.
- *   - The agent-type colour is already visible on the inline chip.
- *   - State signalling now uses the WHOLE border so the eye picks up
- *     selected / working / review / drag-over at a glance.
+ * 2026-06-10 operator rewrite ("los quiero más limpios, menos
+ * bordes, menos datos, al final me suelo guiar por el nombre"):
  *
- * Border states (uniform 1px around, no left stripe):
- *   idle         · gray-800 solid                          · neutral
- *   selected     · emerald-500 solid + bg emerald-500/8    · primary
- *   working      · emerald solid + soft animated halo glow · activity
- *   review       · amber-400 1.5px dashed + bg amber/5     · attention
- *   drag-over    · cyan-400 1.5px dashed + bg cyan-500/5   · transient
+ *   - Three responsive layouts based on the rail's chatRailWidth:
+ *       wide   (≥160 px): name + status spinner on row 1,
+ *                         metadata `type · A001 · • local` on row 2
+ *       medium (80-159 px): name + status, metadata `type · A001`
+ *       narrow (<80 px):    first 5 chars of the NAME only, big
+ *   - Borders are dropped for idle cards. State signalling now uses
+ *     a coloured left edge (3 px) + a faint background tint when
+ *     selected / review / working — never an outline that competes
+ *     with the column's own panel border.
+ *   - Type compresses to a single char (the emoji `agentVisualInfo`
+ *     already supplies — Coder 🧠, Master 👑, Deploy 🚀, etc.).
+ *   - Local vs remote becomes a single character (• filled = local,
+ *     ○ open = remote) inline in the metadata row.
+ *   - ID `A001` lives only in the metadata row, dim and tiny — the
+ *     operator's primary handle is the name.
  *
- * Review wins over selected (the operator needs to act on it more than
- * they need the active marker); drag-over wins over all (transient).
+ * Selection wins over working; review (pending) wins over both;
+ * drag-over wins over everything (transient).
  */
 
 import { Show } from 'solid-js';
@@ -30,10 +35,11 @@ export interface AgentCardProps {
   status: AgentStatusKind;
   pendingReview: boolean;
   stripe: string;
-  /** V86o — When true, drop the chips + title and render a compact
-   *  pill (id + status dot only). Used when the rail width is below
-   *  130 px so the card stays readable. */
+  /** When true (rail < 80 px wide), render the name-letters-only layout. */
   compact?: boolean;
+  /** When true (rail < 160 px but ≥ 80 px), drop the location chip and
+   *  use a tighter metadata row. */
+  medium?: boolean;
   onSelect: (conv: string) => void;
   onDragStart: (conv: string) => void;
   onDragEnd: () => void;
@@ -47,66 +53,67 @@ export interface AgentCardProps {
 export default function AgentCard(props: AgentCardProps) {
   const isRemote = () => props.meta.location?.type === 'remote';
   const title = () => props.meta.title || props.conv;
-  // V86 — the agent-type chip used to live in the chat header. Moved
-  // here so the rail card is the canonical place to learn "what kind
-  // of agent this is", and the chat header stays compact for the
-  // name + actions.
-  // py-1.10.24 — Visual-only resolution. The conv id outranks the
-  // stored type so A001 (`_onboarding_v1`) shows as Master Architect
-  // even though its daemon-side agent_type is still `custom`, and
-  // a roadmap-architect slug always renders as Architect regardless
-  // of what conv_meta drift may say.
+  // Resolve the visual info (emoji + colour + label) from the conv
+  // slug + meta; for `_onboarding_v1` this resolves to Master Architect
+  // regardless of stored agent_type.
   const typeInfo = () => agentVisualInfo(props.conv, props.meta);
 
-  // V86n — border state-machine. Precedence (highest first):
-  //   drag-over  → dashed cyan-400 1.5px + bg cyan-500/5
-  //   review     → dashed amber-400 1.5px + bg amber-400/5
-  //   selected   → solid emerald-500 + bg emerald-500/10
-  //   working    → same border as selected/idle + animated halo
-  //   idle       → solid gray-800/70
-  // The card is always 1.5px on the border to keep the layout stable
-  // when state flips between solid / dashed; idle just uses a duller
-  // colour so the eye still distinguishes it from active.
+  const narrowChars = (): string => {
+    const t = title().trim();
+    // Drop any "A001" prefix accidentally embedded in the title.
+    return t.slice(0, 5);
+  };
+
   const cardClasses = (): string => {
-    // V95 — In compact mode the card chrome (border + padding + halo)
-    // is dropped entirely. The chip itself becomes the visual state
-    // indicator: solid amber square when selected, thin emerald
-    // border when idle. This frees the few pixels we need to render
-    // the 4-char id (A001) cleanly at column widths down to ~50 px.
     if (props.compact) {
       const base = [
         'group relative w-full text-left',
         'transition-colors cursor-grab active:cursor-grabbing',
         'flex items-center justify-center',
-        'p-0',
+        'rounded font-semibold tracking-tight select-none',
+        'py-1.5',
       ];
       if (props.dragging) base.push('opacity-35');
-      if (props.dragOver) base.push('rounded-md ring-1 ring-cyan-400/70');
+      if (props.dragOver) base.push('ring-1 ring-cyan-400/70');
+      if (props.active) base.push('bg-amber-600/85 text-amber-50');
+      else if (props.pendingReview) base.push('text-amber-200 bg-amber-400/[0.06]');
+      else if (props.status === 'working') base.push('text-emerald-100 bg-emerald-500/10 animate-pulse-soft');
+      else base.push('text-gray-200 hover:bg-gray-800/50');
       return base.join(' ');
     }
     const base = [
-      // V107.10 — tighter vertical rhythm (py-1.5 + gap-0.5 vs py-2 +
-      // gap-1) since the status row is gone. Each card now occupies
-      // ~50 px instead of ~70 px.
-      'group relative w-full text-left rounded-md px-2.5 py-1.5',
+      'group relative w-full text-left rounded px-2.5 py-1.5',
       'transition-colors flex flex-col gap-0.5 cursor-grab active:cursor-grabbing',
-      'border-[1.5px]',
+      'border-l-[3px]',
     ];
     if (props.dragging) base.push('opacity-35');
     if (props.dragOver) {
-      base.push('border-cyan-400/70 bg-cyan-500/5 border-dashed');
+      base.push('border-l-cyan-400 bg-cyan-500/5');
     } else if (props.pendingReview) {
-      base.push('border-amber-400/75 bg-amber-400/[0.04] border-dashed');
+      base.push('border-l-amber-400 bg-amber-400/[0.05]');
     } else if (props.active) {
-      base.push('border-emerald-500/60 bg-emerald-500/10');
+      base.push('border-l-emerald-400 bg-emerald-500/[0.07]');
+    } else if (props.status === 'working') {
+      base.push('border-l-emerald-500/70 bg-transparent animate-pulse-soft');
     } else {
-      base.push('border-gray-800/70 bg-gray-950/60 hover:border-gray-700');
-    }
-    // Working halo overlays any non-transient state.
-    if (props.status === 'working' && !props.dragOver && !props.pendingReview) {
-      base.push('shadow-[0_0_0_1px_rgba(52,211,153,0.20),0_0_18px_-4px_rgba(52,211,153,0.55)] animate-pulse-soft');
+      base.push('border-l-transparent hover:bg-gray-800/30');
     }
     return base.join(' ');
+  };
+
+  const onClickRow = (): void => props.onSelect(props.conv);
+  const onDragStartRow = (e: DragEvent): void => {
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+    props.onDragStart(props.conv);
+  };
+  const onDragOverRow = (e: DragEvent): void => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    props.onDragOver(props.conv, e);
+  };
+  const onDropRow = (e: DragEvent): void => {
+    e.preventDefault();
+    props.onDrop(props.conv, e);
   };
 
   return (
@@ -114,165 +121,75 @@ export default function AgentCard(props: AgentCardProps) {
       type="button"
       draggable={true}
       data-conv={props.conv}
-      onClick={() => props.onSelect(props.conv)}
-      onDragStart={(e) => {
-        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-        props.onDragStart(props.conv);
-      }}
+      onClick={onClickRow}
+      onDragStart={onDragStartRow}
       onDragEnd={() => props.onDragEnd()}
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-        props.onDragOver(props.conv, e);
-      }}
+      onDragOver={onDragOverRow}
       onDragLeave={() => props.onDragLeave(props.conv)}
-      onDrop={(e) => {
-        e.preventDefault();
-        props.onDrop(props.conv, e);
-      }}
-      title={`${title()} · ${props.meta.agentId} · ${props.meta.location?.type ?? 'local'}${props.pendingReview ? ' · review pending' : ''}`}
+      onDrop={onDropRow}
+      title={`${title()} · ${props.meta.agentId} · ${typeInfo().label} · ${
+        isRemote() ? 'remote' : 'local'
+      }${props.pendingReview ? ' · review pending' : ''}`}
       class={cardClasses()}
     >
-      <Show when={!props.compact} fallback={
-        <CompactBody
-          agentId={props.meta.agentId ?? '?'}
-          stripe={props.stripe}
-          status={props.status}
-          active={props.active}
-          pendingReview={props.pendingReview}
-        />
-      }>
-        {/* V107.11 — Operator-driven rewrite. Title was visually
-            misaligned with the chip row because the chips had inner
-            padding and the title didn't. Now the layout puts the
-            primary info (id + title) on row 1 with the working-status
-            pegged right, and the secondary metadata (type + location)
-            on row 2. Type label shortened (shortLabel: 'Coder', 'DB',
-            'Tests', 'Architect') so it fits with the location pill. */}
-        <span class="flex items-baseline gap-2 min-w-0">
+      <Show
+        when={!props.compact}
+        fallback={<span aria-label={`${title()} ${props.status}`}>{narrowChars()}</span>}
+      >
+        {/* ROW 1 — name (primary anchor) + status indicator */}
+        <span class="flex items-center gap-2 min-w-0">
           <span
-            class={`flex-shrink-0 self-center px-1.5 py-0.5 rounded text-[10px] font-mono text-gray-200 ${props.status === 'working' ? 'animate-pulse-soft' : ''}`}
-            style={{ background: 'rgba(17,24,39,0.7)', border: `1px solid ${props.stripe}55` }}
+            class={`flex-1 min-w-0 text-[13px] leading-tight truncate ${
+              props.active ? 'text-gray-50 font-semibold' : 'text-gray-200'
+            }`}
           >
-            {props.meta.agentId}
-          </span>
-          <span class={`flex-1 min-w-0 text-[12px] leading-tight truncate ${props.active ? 'text-gray-100' : 'text-gray-300'}`}>
             {title()}
-            <Show when={props.meta.model && props.meta.model !== 'auto'}>
-              <span class="text-gray-600 font-mono text-[10px]"> · {props.meta.model}</span>
-            </Show>
           </span>
           <Show
             when={props.status === 'working'}
-            fallback={<span class="text-[9px] font-mono text-gray-600 flex-shrink-0">idle</span>}
+            fallback={
+              <Show when={props.active}>
+                <span class="text-[9px] font-mono text-gray-600 flex-shrink-0">idle</span>
+              </Show>
+            }
           >
             <span
-              class="inline-flex items-center gap-0.5 flex-shrink-0 self-center"
+              class="inline-flex items-center flex-shrink-0"
               aria-label="working"
               title="working"
             >
-              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft" />
-              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:150ms]" />
-              <span class="w-1 h-1 rounded-full bg-emerald-400 animate-pulse-soft [animation-delay:300ms]" />
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft" />
             </span>
           </Show>
         </span>
-        <span class="flex items-center gap-1.5 text-[9px] font-mono">
+
+        {/* ROW 2 — metadata: type(1 char) · ID dim · local/remote dot.
+            In medium mode (rail < 160 px) the location dot is dropped. */}
+        <span class="flex items-center gap-1.5 text-[10px] font-mono text-gray-500">
           <span
-            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded min-w-0 truncate"
-            style={{
-              color: typeInfo().color,
-              'border': `1px solid ${typeInfo().color}44`,
-              background: `${typeInfo().color}10`,
-            }}
+            aria-hidden="true"
+            class="flex-shrink-0"
+            style={{ color: typeInfo().color }}
             title={`Agent type: ${typeInfo().label}`}
           >
-            <span aria-hidden="true">{typeInfo().emoji}</span>
-            <span class="truncate">{typeInfo().shortLabel ?? typeInfo().label}</span>
+            {typeInfo().emoji}
           </span>
-          <span
-            class={[
-              'inline-flex items-center gap-1 px-1.5 py-0.5 rounded border flex-shrink-0',
-              isRemote()
-                ? 'text-blue-300 border-blue-300/35'
-                : 'text-gray-400 border-gray-500/30',
-            ].join(' ')}
-          >
-            <span class="w-1 h-1 rounded-full bg-current" />
-            {isRemote() ? 'remote' : 'local'}
+          <span class="text-gray-600">·</span>
+          <span class="text-gray-500 truncate" title={`Agent id ${props.meta.agentId ?? '?'}`}>
+            {props.meta.agentId ?? '?'}
           </span>
+          <Show when={!props.medium}>
+            <span class="text-gray-700">·</span>
+            <span
+              class="flex-shrink-0"
+              title={isRemote() ? 'remote' : 'local'}
+              style={{ color: isRemote() ? '#7dd3fc' : '#9ca3af' }}
+            >
+              {isRemote() ? '○' : '•'} {isRemote() ? 'remote' : 'local'}
+            </span>
+          </Show>
         </span>
       </Show>
     </button>
-  );
-}
-
-/**
- * V86o — Slim layout for the collapsed rail (<130 px wide). Drops the
- * full info chips + title and shows only the id pill + a status dot
- * to its right. The card's border state-machine still conveys
- * selected / review / drag-over visually, so the operator doesn't
- * lose context. Hovering the row surfaces the full title via the
- * parent button's `title` attribute.
- */
-function CompactBody(props: {
-  agentId: string;
-  stripe: string;
-  status: AgentStatusKind;
-  active: boolean;
-  pendingReview: boolean;
-}) {
-  // V95 — Chip-only layout for the squeezed agents column. The chip
-  // is the WHOLE control: no outer card border, no separate status
-  // dot (no room at 50 px). Three visual modes:
-  //
-  //   selected → solid amber-600 bg + amber-50 text (bold). Matches
-  //              the operator's request for a "yellow square" instead
-  //              of the green halo when the agent is active in the
-  //              chat panel. Read instantly at a glance.
-  //   working  → emerald border + animated pulse on the whole chip,
-  //              so the chip itself signals activity (the legacy
-  //              status dot is gone in compact mode).
-  //   review   → dashed amber-400 border + amber-100 text.
-  //   idle     → thin gray border + emerald-200 text.
-  //
-  // Geometry: width=100% of the (paddingless) compact card → ~42 px
-  // at column=50 px. py-1 + px-1 internal padding leaves ~32 px for
-  // the 4-char monospace id — fits A001 / A010 / A100 cleanly.
-  const cls = (): string => {
-    const base = [
-      'inline-flex items-center justify-center w-full',
-      'rounded font-mono text-[11px] font-bold tracking-tight',
-      'px-1 py-1',
-      'transition-colors select-none',
-    ];
-    if (props.active) {
-      // V107.36 — Pulse ONLY when the selected agent is also doing
-      // real work. Pre-V107.36 (V107.32) every selected agent pulsed
-      // forever which the operator read as "stuck working" — confusing
-      // when the agent was actually idle (e.g. just opened, post-
-      // refresh boot). Now: static amber when selected & idle; pulse
-      // amber only when selected AND `status === 'working'`. Selection
-      // still beats green-outline (amber takes priority over the
-      // working-not-selected style below).
-      const pulse = props.status === 'working' ? ' animate-pulse-soft' : '';
-      base.push('bg-amber-600 text-amber-50' + pulse);
-      return base.join(' ');
-    }
-    if (props.pendingReview) {
-      base.push('border border-dashed border-amber-400/70 text-amber-100 bg-amber-400/5');
-      return base.join(' ');
-    }
-    if (props.status === 'working') {
-      base.push('border border-emerald-400/60 text-emerald-100 bg-emerald-500/10 animate-pulse-soft');
-      return base.join(' ');
-    }
-    base.push('border border-gray-700/70 text-emerald-200 bg-gray-950/60 hover:border-emerald-500/40');
-    return base.join(' ');
-  };
-  return (
-    <span class={cls()} aria-label={`${props.agentId} ${props.status}`}>
-      {props.agentId}
-    </span>
   );
 }
