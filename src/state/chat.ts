@@ -1011,6 +1011,22 @@ async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promis
   // already cleared → bubble stuck forever showing "Generando…" on a
   // conv that finished seconds ago. Setting eagerly here lets the
   // event handler clear it correctly even on the fast-path race.
+  // 2026-06-11 operator field report: a 400 "empty dispatch" came back
+  // for a send that visibly had text + image attached. To diagnose, log
+  // the request shape on EVERY dispatch (image data redacted) so a
+  // failed send leaves a console breadcrumb of what was actually on the
+  // wire. Cheap (a few fields, no payload echo).
+  const _diagShape = {
+    conv,
+    text_len: (body.text ?? '').length,
+    text_preview: (body.text ?? '').slice(0, 60),
+    images: (body.images ?? []).length,
+    context_docs: (body.context_docs ?? []).length,
+    agent_type: body.agent_type ?? null,
+    initiative_id: body.initiative_id ?? null,
+    task_id: body.task_id ?? null,
+  };
+  log.info('chat dispatch →', _diagShape);
   setState('pendingReplyConvs', conv, Date.now());
   const res = await client.chatDispatch(body);
   if (!res.ok) {
@@ -1021,7 +1037,7 @@ async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promis
     }
     // Roll back the optimistic pending flag if the dispatch failed.
     clearPendingReply(conv);
-    log.warn('chat dispatch failed', res.status, res.body);
+    log.warn('chat dispatch failed', res.status, res.body, 'sent:', _diagShape);
     // 2026-06-10 operator request: surface dispatch errors INSIDE the
     // chat thread, not just in the console. Distinguish two regimes:
     //   • 4xx           → prompt-side error (validation, auth, etc.).
@@ -1052,16 +1068,34 @@ async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promis
         ? 'Daemon error — the request reached the daemon but it failed mid-handling.'
         : 'Dispatch refused';
       const detail = humanMsg && humanMsg !== verb ? ` (${humanMsg})` : '';
+      // Annotate the bubble with what was actually on the wire so the
+      // operator can compare against what they thought they sent. For
+      // "empty dispatch" this exposes the bug: text_len=0 + images=0 +
+      // context_docs=0 → "you clicked send but the body was empty".
+      const shapeDetail = ` · sent text:${_diagShape.text_len}ch images:${_diagShape.images} docs:${_diagShape.context_docs}`;
       const currentList = state.convMap[conv] ?? [];
-      setState('convMap', conv, [
-        ...currentList,
-        {
-          kind: 'system',
-          system_kind: 'error',
-          text: `${verb}${detail}`,
-          ts: new Date().toISOString(),
-        },
-      ]);
+      // Dedup consecutive identical system errors within a 2 s window —
+      // the cockpit's retry/route-on-401 logic can fire the same 400
+      // back-to-back; one bubble is enough.
+      const last = currentList[currentList.length - 1];
+      const nextText = `${verb}${detail}${shapeDetail}`;
+      const lastTs = last?.ts ? Date.parse(last.ts) : 0;
+      const isDuplicate =
+        last?.kind === 'system' &&
+        last?.system_kind === 'error' &&
+        last?.text === nextText &&
+        Date.now() - lastTs < 2000;
+      if (!isDuplicate) {
+        setState('convMap', conv, [
+          ...currentList,
+          {
+            kind: 'system',
+            system_kind: 'error',
+            text: nextText,
+            ts: new Date().toISOString(),
+          },
+        ]);
+      }
     }
     return { ok: false, status: res.status, error: res.body };
   }
