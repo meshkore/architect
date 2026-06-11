@@ -5,7 +5,15 @@ import { log } from '~/lib/log';
 import { installChunkGuard } from '~/lib/chunk-guard';
 import { startCockpitVersionPoll, COCKPIT_COMMIT, COCKPIT_VERSION } from '~/lib/cockpit-version';
 import { installDebugTransport } from '~/lib/debug-transport';
+import { auditLocalStorage } from '~/lib/storage-audit';
 import './index.css';
+
+// SRL4 — drop stale localStorage keys before anything reads from it.
+// The architect's persistent state is only the per-browser preferences
+// listed in storage-audit.ts; anything else is daemon-side state cache
+// from an older version and gets garbage-collected here. Cheap, runs
+// once at boot, never throws.
+auditLocalStorage();
 
 // py-1.10.17 — Wire the debug stream sink BEFORE the first log.* call
 // so the boot line below is captured. Feature-gated server-side; no-op
