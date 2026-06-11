@@ -1214,12 +1214,74 @@ function hydrateFromSnapshot(snap: ChatSnapshotResponse): void {
       };
     });
   }
+  // SRL3 (py-1.13.1 daemon-side) — rehydrate mid-turn UI from the
+  // snapshot. For every live conv that has `current_turn`, seed the
+  // streaming assistant bubble in convMap with the partial text the
+  // daemon already accumulated; subsequent chat.assistant.delta
+  // events match by stream_id and update the SAME bubble in place.
+  // Without this, a refresh while a turn is in flight left the
+  // operator staring at a STOP button with no rendered output.
+  let rehydratedTurns = 0;
+  let rehydratedQueues = 0;
+  for (const c of snap.convs) {
+    const ct = (c as ChatConvSummary & { current_turn?: { started_at?: string; stream_id?: string; partial_text?: string } }).current_turn;
+    if (ct && c.live && ct.stream_id) {
+      const partial = stripRememberLines(ct.partial_text || '');
+      const existing = state.convMap[c.conv] ?? [];
+      // If we already have a streaming bubble for this stream_id (rare —
+      // happens when a delta beat the snapshot fetch), don't overwrite.
+      const hasLive = existing.some(
+        (m) => m.kind === 'assistant' && m.streaming && m.stream_id === ct.stream_id,
+      );
+      if (!hasLive) {
+        setState('convMap', c.conv, [
+          ...existing,
+          {
+            kind: 'assistant',
+            text: partial,
+            streaming: true,
+            stream_id: ct.stream_id,
+            ts: ct.started_at || new Date().toISOString(),
+          },
+        ]);
+      }
+      // Keep the "preparing…" indicator visible until the next delta
+      // overwrites the bubble. pendingReplyConvs is the signal
+      // ChatThread reads for this.
+      if (ct.started_at) {
+        const startedMs = Date.parse(ct.started_at);
+        if (!Number.isNaN(startedMs)) {
+          setState('pendingReplyConvs', c.conv, startedMs);
+        }
+      }
+      rehydratedTurns += 1;
+    }
+    const queueItems = (c as ChatConvSummary & { queue?: Array<{ id?: string; text: string; queued_at?: string }> }).queue;
+    if (queueItems && queueItems.length > 0) {
+      // Map the daemon's snapshot shape onto the cockpit's
+      // ChatQueueItem. status="queued" because the snapshot ONLY
+      // includes pending items (the head, mid-flight, would be the
+      // streaming bubble itself, not a queue entry).
+      const mapped: ChatQueueItem[] = queueItems.map((q, i) => ({
+        id: q.id ?? `q_${i}`,
+        text: q.text,
+        created_at: q.queued_at || new Date().toISOString(),
+        position: i,
+        status: 'queued' as const,
+      }));
+      setState('queues', c.conv, mapped);
+      rehydratedQueues += 1;
+    }
+  }
+
   log.debug('chat.snapshot.v1 hydrated', {
     convs: snap.convs.length,
     live: snap.convs.filter((c) => c.live).length,
     archived: Object.keys(nextArchived).length,
     pruned_meta: prunedMeta,
     pruned_archived: prunedArchived,
+    rehydrated_turns: rehydratedTurns,
+    rehydrated_queues: rehydratedQueues,
   });
 }
 
