@@ -616,3 +616,42 @@
     transition: none !important;
   }
 }
+
+/* ── LAL5 (live-anchor-loop) — ✨ NEW badge + flash highlight ───────────
+ * Fires when an agent's first anchor created a new initiative/task.
+ * Both effects auto-fade in 10 s (the viewStore.isRecentlyCreated*()
+ * TTL). After that the row reads exactly like any other roadmap row. */
+
+.rt-new-badge {
+  display: inline-block;
+  background: linear-gradient(120deg, #fbbf24, #f97316);
+  color: #1a1300;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  line-height: 1.4;
+  vertical-align: baseline;
+  white-space: nowrap;
+  animation: rt-new-fade 10s linear forwards;
+}
+
+@keyframes rt-new-fade {
+  0%, 70% { opacity: 1; transform: scale(1); }
+  100%    { opacity: 0; transform: scale(.85); }
+}
+
+.is-flash-new {
+  animation: rt-flash-new 1.6s ease-out;
+}
+
+@keyframes rt-flash-new {
+  0%   { background: rgba(34, 211, 238, .22); box-shadow: 0 0 24px rgba(34, 211, 238, .35); }
+  100% { background: transparent;             box-shadow: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-new-badge, .is-flash-new { animation: none; }
+}

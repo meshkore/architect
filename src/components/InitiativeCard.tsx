@@ -18,7 +18,7 @@
  * Pre-V108 version preserved as InitiativeCard.legacy.tsx.bak.
  */
 
-import { For, Show, createMemo, createResource } from 'solid-js';
+import { For, Show, createEffect, createMemo, createResource } from 'solid-js';
 import type { ServerInitiative, ServerTask } from '~/state/server';
 import { activeEntriesByInitiative } from '~/state/server';
 import { sortTasks } from '~/components/initiative/task-grouping';
@@ -180,11 +180,28 @@ export default function InitiativeCard(props: {
     return `Run initiative #${props.initiative.id}`;
   };
 
+  let rowRef: HTMLLIElement | undefined;
+  // LAL5 — when the initiative was just created by an anchor protocol
+  // event, scroll it into view ONCE so the operator's eye lands on it.
+  // The recently-created flag flips back to false after 10s; the effect
+  // only fires while true, and only once per row mount.
+  let scrolledOnce = false;
+  createEffect(() => {
+    if (
+      !scrolledOnce &&
+      viewStore.isRecentlyCreatedInit(props.initiative.id) &&
+      rowRef
+    ) {
+      scrolledOnce = true;
+      rowRef.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  });
   return (
     <li
+      ref={(el) => { rowRef = el; }}
       class={`rt-story is-${vstate()} ${props.isOpen ? 'open' : ''} ${
         props.isDimmed ? 'dim' : ''
-      }`}
+      }${viewStore.isRecentlyCreatedInit(props.initiative.id) ? ' is-flash-new' : ''}`}
       tabIndex={0}
       role="button"
       aria-expanded={props.isOpen}
@@ -253,6 +270,9 @@ export default function InitiativeCard(props: {
           </Show>
           <h3 class="rt-title">{props.initiative.title}</h3>
           <span class={`rt-statlabel is-${vstate()}`}>{statusLabel()}</span>
+          <Show when={viewStore.isRecentlyCreatedInit(props.initiative.id)}>
+            <span class="rt-new-badge" aria-label="just created">✨ NEW</span>
+          </Show>
           <Show when={isArchived()}>
             <span class="rt-archived-tag">ARCHIVED</span>
           </Show>

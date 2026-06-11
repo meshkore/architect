@@ -44,45 +44,42 @@ export default function ChatPanel() {
   });
   const isRunning = () => stream().live !== null;
 
-  // 2026-06-10 — operator field report: when the agent starts a new
-  // reply, scroll the LIVE bubble's TOP into view (not the bottom).
-  // That way the operator can read the message from the start,
-  // instead of seeing only its tail growing off the viewport.
-  //
-  // Algorithm:
-  //  • Track the live bubble's `stream_id` across ticks.
-  //  • On transition (null → id, or id → other-id), find the
-  //    `[data-live-bubble="1"]` element and `scrollIntoView({block: 'start'})`.
-  //  • While the same bubble keeps streaming, hold position — don't
-  //    yank back to bottom on each delta (operator wants to READ).
-  //  • When no live bubble exists (idle conv), snap to bottom so any
-  //    new operator input lands at the visible end of the thread.
+  // CSR5 (2026-06-11) — conv switch is a hard reset: snap to bottom,
+  // no querySelector dance, no scrollIntoView. The leak that caused
+  // "sube, baja, append al cambiar de agente" was a module-closure
+  // `lastLiveStreamId` shared across convs: the new conv's live id
+  // looked "new" and triggered scrollIntoView on the freshly mounted
+  // bubble before the operator had a chance to even see the rail.
+  // Within a single conv: NEW live bubble → anchor top only if it
+  // overflows the viewport (long reply, read from start). Short reply
+  // → stay at bottom, natural append. Deltas → no-op (same stream_id).
+  // All scrolls are instant; smooth was perceived as a camera pan.
   let lastLiveStreamId: string | null = null;
+  let lastConv: string | null = null;
   createEffect(() => {
+    const c = conv();
     const s = stream();
-    void s;
-    const live = s.live;
-    const liveId = live?.stream_id ?? (live?.ts ?? null) ?? null;
+    const liveId = s.live?.stream_id ?? s.live?.ts ?? null;
     queueMicrotask(() => {
       if (!threadEl || historyOpen()) return;
-      if (liveId && liveId !== lastLiveStreamId) {
-        // New live bubble appeared (or the previous one was replaced
-        // by a different stream id). Anchor its top.
+      if (c !== lastConv) {
+        lastConv = c;
+        lastLiveStreamId = liveId;
+        threadEl.scrollTop = threadEl.scrollHeight;
+        return;
+      }
+      const newLive = liveId && liveId !== lastLiveStreamId;
+      lastLiveStreamId = liveId;
+      if (newLive) {
         const target = threadEl.querySelector<HTMLElement>('[data-live-bubble="1"]');
-        if (target) {
-          target.scrollIntoView({ block: 'start', behavior: 'smooth' });
-        } else {
-          // Fallback: live attribute not in DOM yet, ride to bottom for
-          // this tick so deltas remain visible.
-          threadEl.scrollTop = threadEl.scrollHeight;
+        if (target && target.getBoundingClientRect().height > threadEl.clientHeight) {
+          target.scrollIntoView({ block: 'start', behavior: 'auto' });
+          return;
         }
-      } else if (!liveId) {
-        // No live bubble — keep the tail visible so user input lands
-        // at the bottom of the rendered thread.
+      }
+      if (!liveId || newLive) {
         threadEl.scrollTop = threadEl.scrollHeight;
       }
-      // Same liveId across ticks → no scroll (operator reading the reply).
-      lastLiveStreamId = liveId;
     });
   });
   createEffect(() => { void conv(); setHistoryOpen(false); });

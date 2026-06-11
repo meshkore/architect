@@ -18,7 +18,7 @@
  * `MKT5`, `CRON-02`) render literally.
  */
 
-import { For, Show, createMemo, createResource } from 'solid-js';
+import { For, Show, createEffect, createMemo, createResource } from 'solid-js';
 import type { ServerTask } from '~/state/server';
 import { activeTaskIds, allModules } from '~/state/server';
 import { daemonStore } from '~/state/daemon';
@@ -170,11 +170,23 @@ export default function TaskCard(props: { task: ServerTask }) {
     }
   };
 
+  // LAL5 — newly-created tasks (via anchor protocol) scroll into view
+  // once and flash a green highlight + show a ✨ NEW badge for 10s.
+  let rowRef: HTMLDivElement | undefined;
+  let scrolledOnce = false;
+  createEffect(() => {
+    if (!scrolledOnce && viewStore.isRecentlyCreatedTask(props.task.id) && rowRef) {
+      scrolledOnce = true;
+      rowRef.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  });
+
   return (
     <div
+      ref={(el) => { rowRef = el; }}
       data-task-id={props.task.id}
       data-status={props.task.status}
-      class="min-w-0"
+      class={`min-w-0${viewStore.isRecentlyCreatedTask(props.task.id) ? ' is-flash-new' : ''}`}
     >
       {/* Single-line collapsed row — click anywhere to expand. V107.23:
           chevron dropped (cursor + hover bg are enough affordance).
@@ -203,6 +215,9 @@ export default function TaskCard(props: { task: ServerTask }) {
           </span>
           <h4 class="text-[13px] font-medium text-gray-100 leading-snug break-words min-w-0 flex-1">
             {props.task.title}
+            <Show when={viewStore.isRecentlyCreatedTask(props.task.id)}>
+              <span class="rt-new-badge ml-2" aria-label="just created">✨ NEW</span>
+            </Show>
           </h4>
           <Show when={moduleId()}>
             <span
