@@ -34,7 +34,7 @@
 import { createSignal, onCleanup } from 'solid-js';
 import { log } from './log';
 
-const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const CHECK_INTERVAL_MS = 60 * 1000; // 1 minute (small fleet — bump back when user-count grows)
 const HEALTH_URL = '/health.json';
 
 interface CockpitHealth {

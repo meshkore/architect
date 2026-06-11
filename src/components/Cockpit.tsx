@@ -56,6 +56,8 @@ const HASH_ZONES: readonly Zone[] = ['architect', 'agents', 'bookmarks', 'crons'
 export default function Cockpit(props: {
   selectedModule: string | null;
   onSelectModule: (id: string | null) => void;
+  connectionStatus?: { kind: string };
+  renderConnectionGate?: () => any;
 }) {
   const tab = nav.cockpitTab;
   const setTab = (t: Tab) => nav.setCockpitTab(t);
@@ -101,6 +103,19 @@ export default function Cockpit(props: {
       <div class="flex-1 flex min-h-0">
         <ProjectsRail />
         <main class="flex-1 min-h-0 relative">
+          {/* 2026-06-11 UX fix — when no daemon is connected (boot probe
+              in flight, no-daemon, or unauthorized) the ConnectionGate
+              replaces RailEmptyPanel in the main area. ProjectsRail stays
+              interactive so the operator can click any known project
+              without waiting for the initial probe to resolve. */}
+          <Show
+            when={
+              !daemonStore.state.activeId &&
+              props.connectionStatus &&
+              props.connectionStatus.kind !== 'connected' &&
+              props.renderConnectionGate
+            }
+            fallback={
           <Show
             when={!daemonStore.state.outdated}
             fallback={<DaemonOutdatedPanel />}
@@ -146,6 +161,10 @@ export default function Cockpit(props: {
               </section>
             </Show>
             </Show>
+          </Show>
+            }
+          >
+            {props.renderConnectionGate?.()}
           </Show>
         </main>
       </div>

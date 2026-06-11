@@ -14,7 +14,7 @@
  * boot-only / swap-only branching that caused stale columns earlier.
  */
 
-import { batch, createEffect, createSignal, Match, onCleanup, onMount, Switch } from 'solid-js';
+import { batch, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import {
   connect,
   storeToken,
@@ -240,25 +240,28 @@ export default function App() {
   const retry = () => { log.info('manual retry'); void connect(setStatus); };
   const saveTokenAndRetry = () => { storeToken(token()); retry(); };
 
+  // 2026-06-11 — UX fix: keep Cockpit shell mounted at all times so the
+  // projects rail + header are interactive WHILE the daemon probe is in
+  // flight. ConnectionGate becomes a fill-main-area panel passed via
+  // prop; it only paints when there's no active daemon to talk to.
+  const connectionGateNode = () => (
+    <ConnectionGate
+      status={status()}
+      token={token()}
+      onTokenInput={setToken}
+      onRetry={retry}
+      onSubmitToken={saveTokenAndRetry}
+    />
+  );
+
   return (
     <>
-      <Switch>
-        <Match when={status().kind === 'connected'}>
-          <Cockpit
-            selectedModule={selectedModule()}
-            onSelectModule={setSelectedModule}
-          />
-        </Match>
-        <Match when={status().kind !== 'connected'}>
-          <ConnectionGate
-            status={status()}
-            token={token()}
-            onTokenInput={setToken}
-            onRetry={retry}
-            onSubmitToken={saveTokenAndRetry}
-          />
-        </Match>
-      </Switch>
+      <Cockpit
+        selectedModule={selectedModule()}
+        onSelectModule={setSelectedModule}
+        connectionStatus={status()}
+        renderConnectionGate={connectionGateNode}
+      />
       <ModalHost />
       <TokenUnlockHost />
       <ProjectDebugModalHost />

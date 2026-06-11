@@ -18,7 +18,7 @@ export default function ConnectionGate(props: {
   onSubmitToken: () => void;
 }) {
   return (
-    <main class="min-h-screen flex items-center justify-center px-6">
+    <main class="h-full flex items-center justify-center px-6 py-10 overflow-auto">
       <div class="max-w-xl w-full">
         <header class="mb-8">
           <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium mb-5">

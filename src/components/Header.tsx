@@ -134,10 +134,11 @@ export default function Header() {
 
         <div class="flex-1" />
 
-        {/* RIGHT — communications status pills (read-only) + theme picker. */}
+        {/* RIGHT — daemon pill (carries version) + theme picker.
+            The cluster name is already shown on the left ProjectPlate;
+            we no longer repeat it on the right. */}
         <div class="flex items-center gap-1.5 flex-shrink-0">
           <DaemonPill />
-          <ClusterPill />
           <ThemePicker />
         </div>
       </div>
@@ -177,29 +178,25 @@ function ProjectPlate() {
 
 function DaemonPill() {
   const phase = () => daemonStore.state.phase;
-  const ws    = () => daemonStore.state.wsState;
+  const version = () => daemonStore.state.health?.version;
   const cls = () => phase() === 'connected'
     ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
     : phase() === 'connecting' || phase() === 'probing'
       ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
       : 'bg-red-500/15 border-red-500/40 text-red-300';
-  const label = () => phase() === 'connected' ? (ws() === 'open' ? 'daemon · live' : 'daemon') : phase();
+  // When connected: show "daemon · <version>" so the operator can spot
+  // auto-update bumps at a glance. Fall back to phase label when not
+  // connected, or to plain "daemon" if the health snapshot hasn't
+  // landed yet (rare race on first connect).
+  const label = () => {
+    if (phase() !== 'connected') return phase();
+    const v = version();
+    return v ? `daemon · ${v}` : 'daemon';
+  };
   return (
     <span class={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full border text-[10px] font-mono uppercase tracking-wider ${cls()}`} title="local daemon">
       <span class={`w-1.5 h-1.5 rounded-full ${phase() === 'connected' ? 'bg-emerald-400' : phase() === 'probing' || phase() === 'connecting' ? 'bg-amber-400' : 'bg-red-400'}`} />
       {label()}
     </span>
-  );
-}
-
-function ClusterPill() {
-  const health = () => daemonStore.state.health;
-  return (
-    <Show when={health()?.cluster_id}>
-      <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-full border bg-gray-900/60 border-gray-800/70 text-gray-300 text-[10px] font-mono uppercase tracking-wider" title={`cluster ${health()?.cluster_id}`}>
-        <span class="w-1.5 h-1.5 rounded-full bg-gray-400" />
-        {health()?.cluster_name ?? 'cluster'}
-      </span>
-    </Show>
   );
 }

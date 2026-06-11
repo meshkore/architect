@@ -628,6 +628,38 @@ function setRunnerAuth(req: RunnerAuthRequest | null): void {
   setState('runnerAuth', req);
 }
 
+// Periodic /health re-poll so the daemon version shown in the Header
+// reflects auto-updates without waiting for a WS reconnect. 60s is a
+// deliberate hammer pick while user-count is tiny; bump up once the
+// fleet grows. Refreshes every connected instance (not just the
+// active one) so per-project version state stays current too.
+const HEALTH_POLL_MS = 60_000;
+async function refreshAllInstanceHealth(): Promise<void> {
+  const ids = Object.keys(state.instances);
+  for (const id of ids) {
+    const inst = state.instances[id];
+    if (!inst) continue;
+    try {
+      const r = await inst.client.health();
+      if (!r.ok) continue;
+      const v = parseDaemonVersion(r.data.version);
+      const supportsSelfUpdate = (r.data.features ?? []).includes('self_update');
+      setState('instances', id, {
+        health: r.data,
+        version: v,
+        outdated: !meetsMinimum(v) || isFeatureGapped(r.data.features),
+        ahead: isDaemonAhead(v),
+        supportsSelfUpdate,
+      });
+    } catch {
+      // Per-instance failure is fine — the WS layer surfaces real
+      // outages; we just skip the version refresh this tick.
+    }
+  }
+  syncFacade();
+}
+setInterval(() => { void refreshAllInstanceHealth(); }, HEALTH_POLL_MS);
+
 export const daemonStore = {
   state,
   attachClient,
