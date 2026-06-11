@@ -174,6 +174,67 @@ function toggleContextNode(path: string): void {
   persist();
 }
 
+// LAL4 (live-anchor-loop) — recently-created markers. When the daemon
+// emits `conv.anchored` with is_new_init/is_new_task, the cockpit
+// records the id with a timestamp. LAL5 reads these to render a
+// flash-highlight + ✨ NEW badge + scroll-into-view for the first
+// ~10s after creation. Ephemeral — not persisted to localStorage.
+
+const RECENTLY_CREATED_TTL_MS = 10_000;
+
+const recentlyCreatedInits = new Map<string, number>();
+const recentlyCreatedTasks = new Map<string, number>();
+import { createSignal as _cs } from 'solid-js';
+// Tick signal so consumers re-evaluate as the TTL expires. Bumped
+// every second while there's anything live; consumers Show on
+// `isRecentlyCreatedInit(id)` which compares Date.now() vs the
+// stored timestamp.
+const [recentlyTick, setRecentlyTick] = _cs(0);
+let recentlyTimer: ReturnType<typeof setInterval> | null = null;
+
+function ensureRecentlyTicker(): void {
+  if (recentlyTimer) return;
+  recentlyTimer = setInterval(() => {
+    setRecentlyTick((n) => n + 1);
+    const cutoff = Date.now() - RECENTLY_CREATED_TTL_MS;
+    let alive = false;
+    for (const [k, t] of recentlyCreatedInits) {
+      if (t < cutoff) recentlyCreatedInits.delete(k); else alive = true;
+    }
+    for (const [k, t] of recentlyCreatedTasks) {
+      if (t < cutoff) recentlyCreatedTasks.delete(k); else alive = true;
+    }
+    if (!alive && recentlyTimer) {
+      clearInterval(recentlyTimer);
+      recentlyTimer = null;
+    }
+  }, 1000);
+}
+
+function markRecentlyCreatedInit(id: string): void {
+  recentlyCreatedInits.set(id, Date.now());
+  setRecentlyTick((n) => n + 1);
+  ensureRecentlyTicker();
+}
+
+function markRecentlyCreatedTask(id: string): void {
+  recentlyCreatedTasks.set(id, Date.now());
+  setRecentlyTick((n) => n + 1);
+  ensureRecentlyTicker();
+}
+
+function isRecentlyCreatedInit(id: string): boolean {
+  recentlyTick(); // re-evaluate on tick
+  const ts = recentlyCreatedInits.get(id);
+  return !!ts && (Date.now() - ts) < RECENTLY_CREATED_TTL_MS;
+}
+
+function isRecentlyCreatedTask(id: string): boolean {
+  recentlyTick();
+  const ts = recentlyCreatedTasks.get(id);
+  return !!ts && (Date.now() - ts) < RECENTLY_CREATED_TTL_MS;
+}
+
 export const viewStore = {
   state,
   bindCluster,
@@ -195,4 +256,8 @@ export const viewStore = {
   setInitiativeTab,
   isContextNodeExpanded,
   toggleContextNode,
+  markRecentlyCreatedInit,
+  markRecentlyCreatedTask,
+  isRecentlyCreatedInit,
+  isRecentlyCreatedTask,
 };

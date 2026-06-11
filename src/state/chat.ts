@@ -33,6 +33,7 @@ import type {
   ChatQueueItem,
 } from '~/lib/daemon-client';
 import { log } from '~/lib/log';
+import { viewStore } from '~/state/view';
 
 export const ONBOARDING_CONV_ID = '_onboarding_v1';
 
@@ -1323,6 +1324,77 @@ function ingestConvEvent(ev: DaemonEvent): void {
       return next;
     });
     saveArchivedConvs();
+    return;
+  }
+  // LAL4 (py-1.13.0 daemon-side) — anchor protocol events. The daemon
+  // parses `⟦anchor⟧ {...}` markers from agent output and emits these
+  // structured events so the cockpit can light up the right roadmap
+  // row in real time without a /state poll.
+  if (type === 'conv.anchored') {
+    setState('convs', conv, (prev) => ({
+      ...(prev ?? ({} as ChatConvSummary)),
+      conv,
+      initiative_id: typeof ev.initiative_id === 'string' ? ev.initiative_id : (prev?.initiative_id ?? null),
+      task_id: typeof ev.task_id === 'string' ? ev.task_id : (prev?.task_id ?? null),
+      last_activity_at: typeof ev.ts === 'string' ? ev.ts : (prev?.last_activity_at ?? ''),
+      archived: prev?.archived ?? false,
+      archived_at: prev?.archived_at ?? null,
+      archived_by: prev?.archived_by ?? null,
+      created_at: prev?.created_at ?? (typeof ev.ts === 'string' ? ev.ts : ''),
+      msg_count: prev?.msg_count ?? 0,
+      live: prev?.live ?? false,
+      coordinating: prev?.coordinating ?? false,
+      waiting_on: prev?.waiting_on ?? [],
+      agent_type: prev?.agent_type ?? null,
+      agent_id: prev?.agent_id ?? null,
+      parent_conv: prev?.parent_conv ?? null,
+    }));
+    // Mark recently-created so LAL5's ✨ NEW badge + flash highlight
+    // can fire. TTL is enforced inside viewStore (10 s default).
+    // The daemon also calls state_manager.rebuild() after writing the
+    // files, so allInitiatives() + allTasks() will pick them up via
+    // the existing state.rebuilt event — no explicit serverStore
+    // refresh needed here.
+    if (ev.is_new_init && typeof ev.initiative_id === 'string') {
+      viewStore.markRecentlyCreatedInit(ev.initiative_id);
+    }
+    if (ev.is_new_task && typeof ev.task_id === 'string') {
+      viewStore.markRecentlyCreatedTask(ev.task_id);
+    }
+    return;
+  }
+  if (type === 'conv.anchor_rejected') {
+    const reason = typeof ev.reason === 'string' ? ev.reason : 'anchor rejected';
+    const currentList = state.convMap[conv] ?? [];
+    setState('convMap', conv, [
+      ...currentList,
+      {
+        kind: 'system',
+        system_kind: 'warn',
+        text: `Anchor rejected: ${reason}`,
+        ts: typeof ev.ts === 'string' ? ev.ts : new Date().toISOString(),
+      },
+    ]);
+    return;
+  }
+  if (type === 'conv.anchor_missing') {
+    // No bubble; the agent simply skipped the marker. The cockpit
+    // could dim a "no anchor" affordance per-turn — for now just log.
+    log.info('agent skipped anchor for conv', conv);
+    return;
+  }
+  if (type === 'conv.task_completed') {
+    const taskId = typeof ev.task_id === 'string' ? ev.task_id : null;
+    if (!taskId) return;
+    // Clear the conv's task_id so LAL5's pulse on that task stops
+    // immediately. If the agent emits a fresh ⟦anchor⟧ for the next
+    // task, conv.anchored will set it again. The daemon also rebuilds
+    // state after writing status:done — allTasks() picks up the new
+    // status via the existing state.rebuilt event flow.
+    setState('convs', conv, (prev) => ({
+      ...(prev ?? ({} as ChatConvSummary)),
+      task_id: null,
+    }));
     return;
   }
   if (type === 'conv.activity') {
