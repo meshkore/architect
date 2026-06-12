@@ -173,6 +173,52 @@ export default function ChatScopeStrip(props: Props) {
         <span class="flex-1 text-sm font-semibold text-gray-100 truncate">
           {title()}
         </span>
+        {/* MP1 (2026-06-12) — model badge. Shows the running model when
+            an explicit override was picked in NewAgentWizard. `auto` /
+            unset → hidden (the CLI default reads "Claude" universally,
+            no value adding noise to the strip). Pulls from convMeta
+            (cockpit-local) AND the daemon's chat.snapshot.model
+            (authoritative). The daemon wins if it disagrees. */}
+        <Show when={(convState()?.model || props.meta?.model) && (convState()?.model ?? props.meta?.model) !== 'auto'}>
+          <span
+            class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider text-purple-200 bg-purple-500/10 border border-purple-500/30 flex-shrink-0"
+            title={`Model: ${convState()?.model ?? props.meta?.model} — picked at agent creation. Daemon launches claude-code with --model <id>.`}
+          >
+            {convState()?.model ?? props.meta?.model}
+          </span>
+        </Show>
+        {/* CU1 (2026-06-12) — token usage + cost chip. Hidden until the
+            first turn finalises (daemon emits chat.usage after every
+            chat.assistant.final, py-1.13.3+). Cumulative per-conv;
+            resets on daemon restart (persistence is `usage-ledger`
+            territory). */}
+        <Show when={convState()?.usage}>
+          {(usage) => {
+            const u = usage();
+            const fmt = (n: number): string =>
+              n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M`
+              : n >= 1_000 ? `${(n / 1_000).toFixed(1)}k`
+              : `${n}`;
+            const cost = (u.cost_usd ?? 0).toFixed(2);
+            const tooltip =
+              `${u.turns} turns · ${u.input_tokens} input · ${u.output_tokens} output · `
+              + `${u.cache_read_input_tokens} cache-read · ${u.cache_creation_input_tokens} cache-write · `
+              + `$${u.cost_usd.toFixed(4)}`;
+            return (
+              <span
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-gray-300 bg-gray-800/60 border border-gray-700/50 flex-shrink-0"
+                title={tooltip}
+              >
+                <span class="text-gray-400">↓</span>
+                <span>{fmt(u.input_tokens)}</span>
+                <span class="text-gray-400">↑</span>
+                <span>{fmt(u.output_tokens)}</span>
+                <span class="text-gray-500">·</span>
+                <span class="text-emerald-300">${cost}</span>
+              </span>
+            );
+          }}
+        </Show>
         {/* V50 — debug-stream overflow badge. Shows when the cockpit's
             in-memory buffer for `/debug/log` has dropped events
             (daemon unreachable or rejecting). Clears the moment the

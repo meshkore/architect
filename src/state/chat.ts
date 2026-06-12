@@ -31,6 +31,7 @@ import type {
   ChatConvSummary,
   ChatSnapshotResponse,
   ChatQueueItem,
+  ChatUsageTotal,
 } from '~/lib/daemon-client';
 import { log } from '~/lib/log';
 import { viewStore } from '~/state/view';
@@ -1009,6 +1010,13 @@ async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promis
   const finalType = slugImplied ?? meta?.type;
   if (finalType) body.agent_type = finalType;
   if (meta?.agentId) body.agent_id = meta.agentId;
+  // MP2 (2026-06-12) — propagate the per-conv model preference from
+  // convMeta (set by NewAgentWizard) to the dispatch. Daemon py-1.13.3+
+  // persists it in conv_meta and ChatRunner.spawn injects
+  // `--model <id>` into claude-code. `auto` / empty = let the CLI
+  // default — omitted from the body so older daemons that don't yet
+  // understand `model` aren't confused.
+  if (meta?.model && meta.model !== 'auto') body.model = meta.model;
   if (scope.module) body.module_id = scope.module;
   if (scope.taskId) body.task_id = scope.taskId;
   if (scope.initiative) body.initiative_id = scope.initiative;
@@ -1459,6 +1467,23 @@ function ingestConvEvent(ev: DaemonEvent): void {
     // No bubble; the agent simply skipped the marker. The cockpit
     // could dim a "no anchor" affordance per-turn — for now just log.
     log.info('agent skipped anchor for conv', conv);
+    return;
+  }
+  if (type === 'chat.usage') {
+    // CU1 (daemon py-1.13.3) — token usage + cost broadcast after
+    // every chat.assistant.final. `total` is the daemon's cumulative
+    // dict per-conv; we mirror it onto `convs[conv].usage` so the
+    // ChatScopeStrip chip updates instantly. `turn` (per-turn delta)
+    // and `model` are available on the event but not stored — they're
+    // useful for telemetry / future per-turn breakdown.
+    const total = (ev as { total?: ChatUsageTotal }).total;
+    if (total && typeof total === 'object') {
+      setState('convs', conv, (prev) => ({
+        ...(prev ?? ({} as ChatConvSummary)),
+        conv,
+        usage: total,
+      }));
+    }
     return;
   }
   if (type === 'conv.task_completed') {

@@ -336,6 +336,15 @@ export interface ProtocolDetail {
 //     when `chat.snapshot.v1` is in `health.features`; older daemons
 //     keep the legacy /state + /chat/archives path. ────────────────
 
+export interface ChatUsageTotal {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+  cost_usd: number;
+  turns: number;
+}
+
 export interface ChatConvSummary {
   conv: string;
   agent_type: string | null;
@@ -343,6 +352,9 @@ export interface ChatConvSummary {
   parent_conv: string | null;
   initiative_id: string | null;
   task_id: string | null;
+  /** MP1 (daemon py-1.13.3) — per-conv model preference. `null` for
+   *  legacy convs OR explicit `auto` → claude-code default. */
+  model?: string | null;
   archived: boolean;
   archived_at: string | null;
   archived_by: string | null;
@@ -352,6 +364,10 @@ export interface ChatConvSummary {
   created_at: string;
   last_activity_at: string;
   msg_count: number;
+  /** CU1 (daemon py-1.13.3) — cumulative token usage + cost for this
+   *  conv. Absent until the first turn finalises. Resets on daemon
+   *  restart. */
+  usage?: ChatUsageTotal;
 }
 
 export interface ChatSnapshotResponse {
@@ -396,6 +412,10 @@ export interface DispatchBody {
   text: string;
   agent_type?: string;
   agent_id?: string;
+  /** MP1 (daemon py-1.13.3) — per-conv model. `auto` / empty = let
+   *  claude-code pick; otherwise one of `opus` / `sonnet` / `haiku`
+   *  (or an explicit model id like `claude-opus-4-7`). */
+  model?: string;
   module_id?: string;
   task_id?: string;
   initiative_id?: string;
