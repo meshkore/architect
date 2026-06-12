@@ -47,25 +47,46 @@ export default function ChatPanel() {
   // CSR5 (2026-06-11) — conv switch is a hard reset: snap to bottom,
   // no querySelector dance, no scrollIntoView. The leak that caused
   // "sube, baja, append al cambiar de agente" was a module-closure
-  // `lastLiveStreamId` shared across convs: the new conv's live id
-  // looked "new" and triggered scrollIntoView on the freshly mounted
-  // bubble before the operator had a chance to even see the rail.
-  // Within a single conv: NEW live bubble → anchor top only if it
-  // overflows the viewport (long reply, read from start). Short reply
-  // → stay at bottom, natural append. Deltas → no-op (same stream_id).
-  // All scrolls are instant; smooth was perceived as a camera pan.
+  // `lastLiveStreamId` shared across convs.
+  //
+  // 2026-06-12 — operator field report: "cuando empieza a escribir
+  // la gente, lo hace por debajo, no estamos gestionando la zona
+  // visible". The CSR5 effect only scrolled on conv-switch and on
+  // the FIRST appearance of a new stream — once `lastLiveStreamId`
+  // matched, every subsequent delta was a no-op. The assistant
+  // bubble grew past the viewport while the scroll position stayed
+  // pinned. Fix: track "sticky-bottom" via a scroll listener, and on
+  // every msgs/stream tick, if the operator was at the bottom before
+  // the mutation, snap to bottom AFTER. If they scrolled up to read
+  // earlier content, leave them alone.
   let lastLiveStreamId: string | null = null;
   let lastConv: string | null = null;
+  let stickyBottom = true;
+  const SCROLL_BOTTOM_SLACK_PX = 32;
+  const updateSticky = (): void => {
+    if (!threadEl) return;
+    const dist = threadEl.scrollHeight - threadEl.scrollTop - threadEl.clientHeight;
+    stickyBottom = dist <= SCROLL_BOTTOM_SLACK_PX;
+  };
+  const attachScrollListener = (el: HTMLDivElement | undefined): void => {
+    if (!el) return;
+    el.addEventListener('scroll', updateSticky, { passive: true });
+  };
   createEffect(() => {
     const c = conv();
     const s = stream();
     const liveId = s.live?.stream_id ?? s.live?.ts ?? null;
+    // Read msgs length too so the effect fires on every delta (text
+    // grows on the streaming bubble without changing the array's
+    // reference but Solid's store granularity catches the mutation).
+    void s.live?.text;
     queueMicrotask(() => {
       if (!threadEl || historyOpen()) return;
       if (c !== lastConv) {
         lastConv = c;
         lastLiveStreamId = liveId;
         threadEl.scrollTop = threadEl.scrollHeight;
+        stickyBottom = true;
         return;
       }
       const newLive = liveId && liveId !== lastLiveStreamId;
@@ -74,10 +95,17 @@ export default function ChatPanel() {
         const target = threadEl.querySelector<HTMLElement>('[data-live-bubble="1"]');
         if (target && target.getBoundingClientRect().height > threadEl.clientHeight) {
           target.scrollIntoView({ block: 'start', behavior: 'auto' });
+          stickyBottom = false;
           return;
         }
+        // Short reply / first delta — snap and arm sticky.
+        threadEl.scrollTop = threadEl.scrollHeight;
+        stickyBottom = true;
+        return;
       }
-      if (!liveId || newLive) {
+      // Delta path: keep the live bubble visible as long as the
+      // operator hasn't scrolled away.
+      if (stickyBottom) {
         threadEl.scrollTop = threadEl.scrollHeight;
       }
     });
@@ -164,7 +192,7 @@ export default function ChatPanel() {
         <Show when={!historyOpen()} fallback={
           <ChatHistoryView conv={conv()!} onClose={() => setHistoryOpen(false)} />
         }>
-          <ChatThread ref={(el) => (threadEl = el)} stream={stream()} />
+          <ChatThread ref={(el) => { threadEl = el; attachScrollListener(el); }} stream={stream()} />
         </Show>
         {/* V89.2 — StopBar removed. The Stop control now lives inline
             in the streaming agent bubble's BubbleHeader, on the same
