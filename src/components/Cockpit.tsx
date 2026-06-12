@@ -31,6 +31,7 @@ import AgentsPanel from '~/components/zones/AgentsPanel';
 import DaemonOutdatedPanel from '~/components/DaemonOutdatedPanel';
 import DaemonAheadPanel from '~/components/DaemonAheadPanel';
 import BootingPanel from '~/components/BootingPanel';
+import DaemonBehindPanel from '~/components/DaemonBehindPanel';
 import ConfigPanel from '~/components/zones/ConfigPanel';
 import BookmarksPanel from '~/components/zones/BookmarksPanel';
 import CronsPanel from '~/components/zones/CronsPanel';
@@ -94,8 +95,6 @@ export default function Cockpit(props: {
     <div class="min-h-screen flex flex-col bg-canvas">
       <Header />
       <CockpitOutdatedBanner />
-      <DaemonAheadBanner />
-      <DaemonBehindBanner />
       {/* V86k — ProjectsRail (left) + ChatPanel (right) are now PERMANENT
           across every top-bar zone. Only the two middle columns
           (modules tree + roadmap/tasks/context/diagrams content) get
@@ -134,6 +133,16 @@ export default function Cockpit(props: {
             <Show
               when={!daemonStore.state.ahead}
               fallback={<DaemonAheadPanel />}
+            >
+            {/* 2026-06-12 — DaemonBehindPanel. Promoted from a thin top
+                banner per operator feedback: "todo lo que respecta al
+                daemon bloquea el proyecto, va al centro". Auto-fires
+                /self-update on mount if cluster.yaml permits; falls back
+                to manual instructions in-panel if not. The gate uses
+                `isDaemonBehind` (MIN ≤ daemon < EXPECTED). */}
+            <Show
+              when={!daemonStore.state.version || !isDaemonBehind(daemonStore.state.version)}
+              fallback={<DaemonBehindPanel />}
             >
             <Show
               when={!daemonStore.state.offlineSelection}
@@ -186,6 +195,7 @@ export default function Cockpit(props: {
                     tab={tab} setTab={setTab} />
                 </Show>
               </section>
+            </Show>
             </Show>
             </Show>
             </Show>
@@ -427,89 +437,10 @@ function CockpitOutdatedBanner() {
   );
 }
 
-/**
- * 2026-06-12 — Daemon-behind banner. Thin top strip shown when the
- * active daemon is older than EXPECTED_DAEMON_VERSION but still meets
- * MIN — everything works, but the operator is missing the latest
- * features and the auto-update watcher hasn't fired (or crashed).
- *
- * Single-click "Update now" POSTs `/self-update` on the active daemon.
- * The daemon downloads the canonical CDN script, hash-checks it, and
- * re-execs in place. Cockpit's `daemon-port-recovery` listener
- * automatically reattaches when the WS comes back even if the port
- * changes during the re-exec.
- *
- * Dismissible per session via sessionStorage; reloads / a successful
- * self-update naturally hide it (version moves to EXPECTED).
- */
-function DaemonBehindBanner() {
-  const [dismissed, setDismissed] = createSignal(
-    typeof sessionStorage !== 'undefined' && sessionStorage.getItem('mc-daemon-behind-dismissed') === '1',
-  );
-  const [updating, setUpdating] = createSignal(false);
-  const [error, setError] = createSignal<string | null>(null);
-  const visible = () => {
-    if (dismissed()) return false;
-    const v = daemonStore.state.version;
-    if (!v) return false;
-    return isDaemonBehind(v);
-  };
-  const dismiss = (): void => {
-    try { sessionStorage.setItem('mc-daemon-behind-dismissed', '1'); } catch { /* private */ }
-    setDismissed(true);
-  };
-  const updateNow = async (): Promise<void> => {
-    const c = daemonStore.state.client;
-    if (!c || updating()) return;
-    setUpdating(true); setError(null);
-    try {
-      const r = await c.selfUpdate({});
-      if (!r.ok && r.status !== 0) {
-        // status 0 = transport disconnected during re-exec, which is the
-        // SUCCESS shape: daemon killed itself and is restarting. Anything
-        // else with !ok is a real error.
-        setError(`Update failed (${r.status})`);
-        setUpdating(false);
-      }
-      // On the success path the daemon re-execs and the WS drops; the
-      // daemon-port-recovery listener reattaches and the banner hides
-      // itself once /health returns the new version.
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setUpdating(false);
-    }
-  };
-  return (
-    <Show when={visible()}>
-      <div class="border-b border-amber-500/30 bg-amber-500/10 text-amber-100 text-[12px] px-4 py-2 flex items-center gap-3">
-        <span class="font-mono text-amber-300/90 flex-shrink-0">↻ daemon behind</span>
-        <span class="flex-1 min-w-0 truncate">
-          <span class="font-mono">{daemonStore.state.health?.cluster_name ?? daemonStore.state.health?.identity ?? 'this project'}</span>
-          {' '}is running <span class="font-mono text-amber-300">{daemonStore.state.version?.raw ?? '?'}</span>;
-          cockpit expects <span class="font-mono text-amber-300">{EXPECTED_DAEMON_VERSION}</span>.
-          Auto-update should fire within ~30 min — click <span class="font-mono">Update now</span> to trigger immediately.
-          <Show when={error()}><span class="ml-2 text-red-300">· {error()}</span></Show>
-        </span>
-        <button
-          type="button"
-          onClick={() => { void updateNow(); }}
-          disabled={updating()}
-          class="font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/40 border border-amber-500/50 text-amber-100 transition-colors flex-shrink-0 disabled:opacity-60 disabled:cursor-wait"
-        >
-          {updating() ? 'updating…' : 'Update now'}
-        </button>
-        <button
-          type="button"
-          onClick={dismiss}
-          class="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 text-amber-200/80 hover:text-amber-100 transition-colors flex-shrink-0"
-          title="Hide until the next refresh"
-        >
-          Later
-        </button>
-      </div>
-    </Show>
-  );
-}
+// 2026-06-12 — DaemonBehindBanner was removed (promoted to the
+// full-body DaemonBehindPanel per operator feedback: daemon-version
+// signals belong in the center, the thin top bar is reserved for
+// cockpit/UI signals). See DaemonBehindPanel.tsx.
 
 function DaemonAheadBanner() {
   const [dismissed, setDismissed] = createSignal(
