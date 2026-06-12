@@ -253,18 +253,34 @@
     .chat-md li > p { margin: 0.18em 0; }
     .chat-md li > ul, .chat-md li > ol { margin: 0.2em 0; }
 
-    /* Inline code — emerald-tinted pill matching the wider palette. */
+    /* 2026-06-12 — JetBrains Darcula-inspired inline-code palette.
+       Pre-2026-06-12 every inline `code` was painted emerald
+       (`#6ee7b7`) which made dense technical replies read as "todo
+       verde" — the operator couldn't tell endpoints apart from
+       identifiers, values, or literals at a glance. Now the body of a
+       code span is neutral gray and per-token spans (emitted by
+       `lib/code-colorize.ts`) carry distinct accent colours adapted
+       from JetBrains Darcula for the cockpit's near-black canvas.
+       Restraint matters — only 5 token kinds, all readable side by
+       side without competing. Block code (`pre > code`) is unchanged. */
     .chat-md code {
       font-family: 'JetBrains Mono', monospace;
       font-size: 0.86em;
-      background: color-mix(in srgb, var(--theme-accent) 8%, transparent);
-      color: #6ee7b7;
+      background: rgba(255, 255, 255, 0.04);
+      color: #c8cdd3;
       padding: 0.08em 0.35em;
       border-radius: 3px;
-      border: 1px solid color-mix(in srgb, var(--theme-accent) 15%, transparent);
+      border: 1px solid rgba(148, 163, 184, 0.18);
       word-break: break-word;
       overflow-wrap: anywhere;
     }
+    /* Per-token accents — Darcula palette adapted for dark canvas.
+       Only inline code paints these; block code keeps default gray. */
+    .chat-md code [data-tok="string"]  { color: #a5c261; }   /* olive — quoted strings */
+    .chat-md code [data-tok="number"]  { color: #6897bb; }   /* cool blue — numeric literals */
+    .chat-md code [data-tok="literal"] { color: #cc7832; font-weight: 500; } /* orange — true/false/null */
+    .chat-md code [data-tok="path"]    { color: #ffc66d; }   /* warm yellow — paths, URLs, ::-paths */
+    .chat-md code [data-tok="ident"]   { color: #9cdcfe; }   /* light cyan — dotted identifiers */
 
     /* Code blocks — fix the "tiny vertical column of one letter" bug.
        Root cause was a flex ancestor squeezing the pre to its content

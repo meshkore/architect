@@ -15,6 +15,7 @@ import { Show, For, createEffect, createSignal, onCleanup, onMount, type JSX } f
 import { chatStore, ONBOARDING_CONV_ID, type ChatMsg } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
 import { ensureMarked } from '~/lib/cdn-loaders';
+import { colorizeInlineCodeInHtml } from '~/lib/code-colorize';
 import { log } from '~/lib/log';
 import type { DaemonEvent } from '~/lib/daemon-client';
 import ValidationBlock, { isValidationRed, isValidationGreen, isHaltViolation } from '~/components/architect/ValidationBlock';
@@ -87,7 +88,7 @@ function CollapsibleText(props: {
     // ensureMarked is CDN-loaded; cached after first call.
     void ensureMarked().then((m) => {
       try {
-        setHtml(m.parse(t, { gfm: true }));
+        setHtml(colorizeInlineCodeInHtml(m.parse(t, { gfm: true })));
       } catch (e) {
         log.warn('chat marked render failed', e instanceof Error ? e.message : String(e));
         setHtml(null);
@@ -734,7 +735,7 @@ function StreamingTail(props: { text: string }) {
     const t = props.text;
     void ensureMarked().then((m) => {
       try {
-        setHtml(m.parse(t, { gfm: true }));
+        setHtml(colorizeInlineCodeInHtml(m.parse(t, { gfm: true })));
       } catch {
         // marked never throws on valid input, but if mid-stream
         // tokens trip an edge case, fall back to escaped raw.
