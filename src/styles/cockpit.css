@@ -294,17 +294,23 @@
       word-break: break-word;
       overflow-wrap: anywhere;
     }
-    /* Per-token accents — Darcula palette adapted for dark canvas.
-       Only inline code paints these; block code keeps default gray.
-       Gated to the Colorful chat palette (the default). The Mono
-       palette below blanks all per-tok colours via `color: inherit`. */
-    .chat-md code [data-tok="url"]     { color: #569cd6; text-decoration: underline; text-decoration-color: rgba(86, 156, 214, 0.4); } /* steel blue — full URLs */
-    .chat-md code [data-tok="string"]  { color: #a5c261; }   /* olive — quoted strings */
-    .chat-md code [data-tok="stamp"]   { color: #d8b76a; }   /* muted yellow — build/version stamps */
-    .chat-md code [data-tok="path"]    { color: #ffc66d; }   /* warm yellow — paths, ::-paths */
-    .chat-md code [data-tok="literal"] { color: #cc7832; font-weight: 500; } /* orange — true/false/null */
-    .chat-md code [data-tok="number"]  { color: #6897bb; }   /* cool blue — numeric literals & HTTP status */
-    .chat-md code [data-tok="ident"]   { color: #9cdcfe; }   /* light cyan — dotted identifiers */
+    /* Per-token accents — read from `--theme-tok-*` so picking a
+       different theme (TC2 · theme-consistency, 2026-06-12) visibly
+       cascades to the chat code tokens too. Fallback literals match
+       the emerald-theme Darcula palette so the rule never breaks if
+       a theme var is missing. Block code keeps default gray. The
+       Mono chat-palette flag below blanks all of these orthogonally. */
+    .chat-md code [data-tok="url"] {
+      color: var(--theme-tok-url, #569cd6);
+      text-decoration: underline;
+      text-decoration-color: color-mix(in srgb, var(--theme-tok-url, #569cd6) 40%, transparent);
+    }
+    .chat-md code [data-tok="string"]  { color: var(--theme-tok-string, #a5c261); }
+    .chat-md code [data-tok="stamp"]   { color: var(--theme-tok-stamp, #d8b76a); }
+    .chat-md code [data-tok="path"]    { color: var(--theme-tok-path, #ffc66d); }
+    .chat-md code [data-tok="literal"] { color: var(--theme-tok-literal, #cc7832); font-weight: 500; }
+    .chat-md code [data-tok="number"]  { color: var(--theme-tok-number, #6897bb); }
+    .chat-md code [data-tok="ident"]   { color: var(--theme-tok-ident, #9cdcfe); }
 
     /* Mono palette — operator's Claude-Code-grayscale flag. Layered on
        top of any theme: blanks every per-tok colour so inline code

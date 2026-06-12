@@ -89,6 +89,18 @@ export const THEME_VAR_NAMES = [
   '--theme-text-secondary',
   '--theme-text-dim',
   '--theme-text-quiet',
+  // 2026-06-12 (TC2 · theme-consistency) — chat inline-code token
+  // tints. Each theme defines its own variant so picking Indigo /
+  // Amber / Slate visibly cascades to chat code. The Mono chat-palette
+  // flag (data-chat-palette="mono") still blanks all of these
+  // orthogonally.
+  '--theme-tok-url',
+  '--theme-tok-string',
+  '--theme-tok-stamp',
+  '--theme-tok-path',
+  '--theme-tok-literal',
+  '--theme-tok-number',
+  '--theme-tok-ident',
 ] as const;
 
 export type ThemeVar = (typeof THEME_VAR_NAMES)[number];
@@ -119,6 +131,14 @@ export const THEMES: Record<ThemeId, Record<ThemeVar, string>> = {
     '--theme-text-secondary': '#cbd5e1',
     '--theme-text-dim': '#9ca3af',
     '--theme-text-quiet': '#6b7280',
+    // Emerald → JetBrains Darcula adapted (the original CSR1 set).
+    '--theme-tok-url':     '#569cd6',
+    '--theme-tok-string':  '#a5c261',
+    '--theme-tok-stamp':   '#d8b76a',
+    '--theme-tok-path':    '#ffc66d',
+    '--theme-tok-literal': '#cc7832',
+    '--theme-tok-number':  '#6897bb',
+    '--theme-tok-ident':   '#9cdcfe',
   },
   indigo: {
     '--theme-accent': '#6366f1',
@@ -145,6 +165,14 @@ export const THEMES: Record<ThemeId, Record<ThemeVar, string>> = {
     '--theme-text-secondary': '#c7d2fe',
     '--theme-text-dim': '#9ca3af',
     '--theme-text-quiet': '#6b7280',
+    // Indigo → cool indigo/cyan/violet/rose, aligned to swatches.
+    '--theme-tok-url':     '#818cf8',
+    '--theme-tok-string':  '#a5f3fc',
+    '--theme-tok-stamp':   '#c4b5fd',
+    '--theme-tok-path':    '#a5b4fc',
+    '--theme-tok-literal': '#fda4af',
+    '--theme-tok-number':  '#67e8f9',
+    '--theme-tok-ident':   '#d8b4fe',
   },
   amber: {
     '--theme-accent': '#f59e0b',
@@ -171,6 +199,14 @@ export const THEMES: Record<ThemeId, Record<ThemeVar, string>> = {
     '--theme-text-secondary': '#fde68a',
     '--theme-text-dim': '#d1d5db',
     '--theme-text-quiet': '#9ca3af',
+    // Amber → warm amber/orange/lime, aligned to swatches.
+    '--theme-tok-url':     '#fcd34d',
+    '--theme-tok-string':  '#bef264',
+    '--theme-tok-stamp':   '#fbbf24',
+    '--theme-tok-path':    '#fb923c',
+    '--theme-tok-literal': '#fda4af',
+    '--theme-tok-number':  '#fde047',
+    '--theme-tok-ident':   '#fed7aa',
   },
   slate: {
     '--theme-accent': '#94a3b8',
@@ -197,6 +233,16 @@ export const THEMES: Record<ThemeId, Record<ThemeVar, string>> = {
     '--theme-text-secondary': '#cbd5e1',
     '--theme-text-dim': '#94a3b8',
     '--theme-text-quiet': '#64748b',
+    // Slate → mostly slate/sky with a single warm rose for literals.
+    // Subtle by design — picks out path & url for emphasis, the rest
+    // sit in slate territory.
+    '--theme-tok-url':     '#7dd3fc',
+    '--theme-tok-string':  '#cbd5e1',
+    '--theme-tok-stamp':   '#cbd5e1',
+    '--theme-tok-path':    '#bae6fd',
+    '--theme-tok-literal': '#fda4af',
+    '--theme-tok-number':  '#94a3b8',
+    '--theme-tok-ident':   '#cbd5e1',
   },
 };
 
