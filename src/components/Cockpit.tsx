@@ -67,6 +67,32 @@ export default function Cockpit(props: {
   const setTab = (t: Tab) => nav.setCockpitTab(t);
   const zone = () => uiStore.state.activeZone;
 
+  // 2026-06-13 — BootingPanel escape hatch. The boot gate normally
+  // waits for BOTH the roadmap snapshot AND the chat snapshot to
+  // hydrate. But if the daemon's /chat/snapshot hangs (e.g. a
+  // ChatSessions lock deadlock — ikamiro incident), the panel would
+  // block the ENTIRE project forever. So: once the roadmap snapshot is
+  // in, give chat hydration a grace window; if it doesn't arrive,
+  // fall through and let the cockpit render (chat lazy-loads when the
+  // conv is focused / when the snapshot finally lands). A hung chat
+  // endpoint must never brick the whole UI.
+  const CHAT_HYDRATE_GRACE_MS = 6000;
+  const [chatGraceElapsed, setChatGraceElapsed] = createSignal(false);
+  createEffect(() => {
+    // (Re)start the grace timer whenever the roadmap snapshot becomes
+    // available but chat hasn't hydrated yet.
+    if (serverStore.state.snapshot != null && chatStore.state.convsHydratedAt == null) {
+      setChatGraceElapsed(false);
+      const t = setTimeout(() => setChatGraceElapsed(true), CHAT_HYDRATE_GRACE_MS);
+      onCleanup(() => clearTimeout(t));
+    }
+  });
+  const booted = (): boolean => {
+    if (serverStore.state.snapshot == null) return false; // roadmap is mandatory
+    if (chatStore.state.convsHydratedAt != null) return true; // both ready
+    return chatGraceElapsed(); // chat slow/hung → fall through after grace
+  };
+
   // Hash deep-link — read `#zone` on mount + popstate, write it back
   // when the zone changes.
   onMount(() => {
@@ -161,7 +187,7 @@ export default function Cockpit(props: {
                 throughout so the operator can switch clusters
                 without waiting. */}
             <Show
-              when={serverStore.state.snapshot != null && chatStore.state.convsHydratedAt != null}
+              when={booted()}
               fallback={<BootingPanel />}
             >
               <section class={`tab-panel three-col${uiStore.state.modulesCollapsed ? ' nav-collapsed' : ''}`}>

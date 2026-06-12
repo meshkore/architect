@@ -99,6 +99,14 @@ export const MIN_DAEMON_VERSION = 'py-1.11.0';
  * and operators get an infinite "Reload" loop (the new bundle has
  * the same stale EXPECTED → banner reappears).
  */
+// 2026-06-13 — PINNED to py-1.14.3 (the version published to the CDN +
+// running on all clusters). The canonical daemon.py is locally at
+// py-1.14.4 because a daemon-modularize-2 refactor is in flight and
+// UNPUBLISHED; auto-syncing to 1.14.4 here would make every cluster
+// show DaemonBehindPanel and loop trying to self-update to a version
+// the CDN doesn't serve. The modularize agent re-points this when it
+// publishes 1.14.4. Build this with `npx vite build` (skips the
+// prebuild sync) until then.
 export const EXPECTED_DAEMON_VERSION = 'py-1.14.3';
 
 /** Convenience: gate against the project's MIN. */
