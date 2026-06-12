@@ -23,14 +23,38 @@
  * stays operator-controlled.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// architect/scripts/sync-daemon-version.mjs → meshkore/.meshkore/scripts/daemon.py
 const repoRoot = resolve(__dirname, '..', '..');
-const daemonPath = join(repoRoot, '.meshkore', 'scripts', 'daemon.py');
+
+// CVS1 (2026-06-12) — Prefer the canonical daemon source over the
+// cluster's auto-updated copy. Operator field report 2026-06-12:
+// MeshKore Core cluster was down → its `.meshkore/scripts/daemon.py`
+// stayed at py-1.12.24 from yesterday. The prebuild read that file
+// and baked an EXPECTED_DAEMON_VERSION two minors behind into the
+// production bundle, triggering a false "daemon ahead" banner.
+//
+// Lookup order:
+//   1. daemon/daemon.py — canonical; updated SECONDS before every
+//      deploy. Always matches what just shipped.
+//   2. .meshkore/scripts/daemon.py — fallback for workspaces that
+//      have only the cluster's local copy. Warning emitted because
+//      stale risk reappears.
+const canonicalDaemonPath = join(repoRoot, 'daemon', 'daemon.py');
+const fallbackDaemonPath = join(repoRoot, '.meshkore', 'scripts', 'daemon.py');
+const daemonPath = existsSync(canonicalDaemonPath)
+  ? canonicalDaemonPath
+  : fallbackDaemonPath;
+if (daemonPath === fallbackDaemonPath) {
+  console.warn(
+    '[sync-daemon-version] canonical daemon/daemon.py missing — falling ' +
+    "back to the cluster's local copy. EXPECTED_DAEMON_VERSION may be " +
+    'stale if that cluster lags the CDN.',
+  );
+}
 const versionPath = join(__dirname, '..', 'src', 'lib', 'version.ts');
 
 function fail(msg) {

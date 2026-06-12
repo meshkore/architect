@@ -99,7 +99,7 @@ export const MIN_DAEMON_VERSION = 'py-1.11.0';
  * and operators get an infinite "Reload" loop (the new bundle has
  * the same stale EXPECTED → banner reappears).
  */
-export const EXPECTED_DAEMON_VERSION = 'py-1.12.24';
+export const EXPECTED_DAEMON_VERSION = 'py-1.13.1';
 
 /** Convenience: gate against the project's MIN. */
 export function meetsMinimum(actual: string | DaemonVersion | undefined | null): boolean {
