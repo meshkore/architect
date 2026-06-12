@@ -343,10 +343,14 @@
   vertical-align: baseline;
   margin-right: 8px;
 }
-.rt-story.is-active   .rt-id { color: #7dd3fc; border-color: #0ea5e955; }
-.rt-story.is-running  .rt-id { color: #f9a8d4; border-color: #ec489955; background: #ec48990d; }
-.rt-story.is-next     .rt-id { color: #fcd34d; border-color: #f59e0b55; }
-.rt-story.is-done     .rt-id { color: #c4b5fd; border-color: #a78bfa3a; }
+/* 2026-06-12 (TC3) — chip colours pull from the theme-status group
+ * so picking Indigo / Amber / Slate retones the initiative ID chips
+ * in lockstep with the timeline nodes. Backlog stays a literal slate
+ * — no `--theme-status-backlog` var exists by design (dormant work). */
+.rt-story.is-active   .rt-id { color: var(--theme-status-active-ring, #7dd3fc); border-color: color-mix(in srgb, var(--theme-status-active, #0ea5e9) 33%, transparent); }
+.rt-story.is-running  .rt-id { color: var(--theme-status-running-ring, #f9a8d4); border-color: color-mix(in srgb, var(--theme-status-running, #ec4899) 33%, transparent); background: color-mix(in srgb, var(--theme-status-running, #ec4899) 6%, transparent); }
+.rt-story.is-next     .rt-id { color: var(--theme-status-next-ring, #fcd34d); border-color: color-mix(in srgb, var(--theme-status-next, #f59e0b) 33%, transparent); }
+.rt-story.is-done     .rt-id { color: var(--theme-status-done-ring, #c4b5fd); border-color: color-mix(in srgb, var(--theme-status-done, #a78bfa) 22%, transparent); }
 .rt-story.is-backlog  .rt-id { color: #6b7280; }
 
 .rt-title {
