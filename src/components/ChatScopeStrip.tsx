@@ -18,6 +18,7 @@ import { Show, createMemo, createSignal } from 'solid-js';
 import { chatStore, ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
 import { agentVisualInfo } from '~/lib/agent-types';
+import { modelLabel } from '~/lib/models';
 import { debugDropCount } from '~/lib/debug-transport';
 import { log } from '~/lib/log';
 
@@ -181,20 +182,32 @@ export default function ChatScopeStrip(props: Props) {
         <span class="flex-1 text-sm font-semibold text-gray-100 truncate">
           {title()}
         </span>
-        {/* MP1 (2026-06-12) — model badge. Shows the running model when
-            an explicit override was picked in NewAgentWizard. `auto` /
-            unset → hidden (the CLI default reads "Claude" universally,
-            no value adding noise to the strip). Pulls from convMeta
-            (cockpit-local) AND the daemon's chat.snapshot.model
-            (authoritative). The daemon wins if it disagrees. */}
-        <Show when={(convState()?.model || props.meta?.model) && (convState()?.model ?? props.meta?.model) !== 'auto'}>
-          <span
-            class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider text-purple-200 bg-purple-500/10 border border-purple-500/30 flex-shrink-0"
-            title={`Model: ${convState()?.model ?? props.meta?.model} — picked at agent creation. Daemon launches claude-code with --model <id>.`}
-          >
-            {convState()?.model ?? props.meta?.model}
-          </span>
-        </Show>
+        {/* MP1/MP3 (2026-06-12) — model + effort badge. Shows the
+            running model (full label, e.g. "Opus 4.8") when an explicit
+            override was picked, plus the effort level when non-default.
+            `auto` model + `default` effort → hidden (no value adding
+            noise). Daemon-authoritative (chat.snapshot) wins over the
+            cockpit-local convMeta if they disagree. */}
+        {(() => {
+          const modelId = () => convState()?.model ?? props.meta?.model ?? null;
+          const effortId = () => convState()?.effort ?? props.meta?.effort ?? null;
+          const showModel = () => modelId() && modelId() !== 'auto';
+          const showEffort = () => effortId() && effortId() !== 'default';
+          return (
+            <Show when={showModel() || showEffort()}>
+              <span
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-purple-200 bg-purple-500/10 border border-purple-500/30 flex-shrink-0"
+                title={`Model: ${modelLabel(modelId())}${showEffort() ? ` · effort: ${effortId()}` : ''} — daemon launches claude-code with --model / --effort.`}
+              >
+                <Show when={showModel()}>{modelLabel(modelId())}</Show>
+                <Show when={showEffort()}>
+                  <span class="text-purple-300/70">·</span>
+                  <span class="uppercase tracking-wider text-amber-200/90">{effortId()}</span>
+                </Show>
+              </span>
+            </Show>
+          );
+        })()}
         {/* CU1 (2026-06-12) — token usage + cost chip. Hidden until the
             first turn finalises (daemon emits chat.usage after every
             chat.assistant.final, py-1.13.3+). Cumulative per-conv;

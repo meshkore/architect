@@ -355,6 +355,9 @@ export interface ChatConvSummary {
   /** MP1 (daemon py-1.13.3) — per-conv model preference. `null` for
    *  legacy convs OR explicit `auto` → claude-code default. */
   model?: string | null;
+  /** MP3 (daemon py-1.14.2) — per-conv effort (reasoning depth).
+   *  `null`/`default` → no `--effort` flag. */
+  effort?: string | null;
   archived: boolean;
   archived_at: string | null;
   archived_by: string | null;
@@ -416,6 +419,9 @@ export interface DispatchBody {
    *  claude-code pick; otherwise one of `opus` / `sonnet` / `haiku`
    *  (or an explicit model id like `claude-opus-4-7`). */
   model?: string;
+  /** MP3 (daemon py-1.14.2) — reasoning depth → `--effort`.
+   *  low|medium|high|xhigh|max; `default`/empty = no flag. */
+  effort?: string;
   module_id?: string;
   task_id?: string;
   initiative_id?: string;

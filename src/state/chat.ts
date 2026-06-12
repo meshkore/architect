@@ -43,6 +43,9 @@ export type AgentType = 'custom' | 'deploy' | 'db' | 'testing' | 'audit' | 'docs
 export interface ConvMeta {
   agentId: string;
   model: string;
+  /** MP3 (2026-06-12) — reasoning-depth dial → claude-code `--effort`.
+   *  'default' / undefined = no flag. */
+  effort?: string;
   type: AgentType;
   title: string;
   location: { type: 'local' | 'remote'; host?: string; provider?: string };
@@ -637,6 +640,7 @@ function ensureConvMeta(convId: string, init: Partial<ConvMeta> = {}): ConvMeta 
   const meta: ConvMeta = {
     agentId: init.agentId ?? nextAgentId(),
     model: init.model ?? 'auto',
+    effort: init.effort ?? 'default',
     type: (init.type ?? 'custom') as AgentType,
     title: init.title ?? '',
     location: init.location ?? { type: 'local', host: 'this machine' },
@@ -715,6 +719,7 @@ function createConv(opts: {
   type: AgentType;
   title: string;
   model: string;
+  effort?: string;
   scope?: { module?: string | null; taskId?: string | null };
 }): string {
   const stamp = new Date().toISOString().slice(5, 16).replace(/[:T-]/g, '').toLowerCase();
@@ -736,7 +741,7 @@ function createConv(opts: {
   // (welcomeForAgentType) live in onboarding-brief.ts for the
   // operator's own reference but no longer auto-render.
   if (!state.convMap[slug]) setState('convMap', slug, []);
-  ensureConvMeta(slug, { type: opts.type, title: opts.title, model: opts.model });
+  ensureConvMeta(slug, { type: opts.type, title: opts.title, model: opts.model, effort: opts.effort });
   // V107.30 — Use setActiveConv (not raw setState) so the picked slug
   // is persisted in localStorage (`mc-last-conv-v1::<cluster>`). Pre-fix,
   // reloading right after creating an agent dropped the selection back
@@ -1045,6 +1050,9 @@ async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promis
   // default — omitted from the body so older daemons that don't yet
   // understand `model` aren't confused.
   if (meta?.model && meta.model !== 'auto') body.model = meta.model;
+  // MP3 (2026-06-12) — propagate reasoning-depth (effort) the same way.
+  // 'default' / unset → omitted (daemon skips --effort, CLI default).
+  if (meta?.effort && meta.effort !== 'default') body.effort = meta.effort;
   if (scope.module) body.module_id = scope.module;
   if (scope.taskId) body.task_id = scope.taskId;
   if (scope.initiative) body.initiative_id = scope.initiative;
@@ -1494,8 +1502,19 @@ function ingestConvEvent(ev: DaemonEvent): void {
       created_at: cur?.created_at ?? (typeof ev.ts === 'string' ? ev.ts : ''),
       last_activity_at: typeof ev.ts === 'string' ? ev.ts : (cur?.last_activity_at ?? ''),
       msg_count: cur?.msg_count ?? 0,
+      model: typeof ev.model === 'string' ? ev.model : (cur?.model ?? null),
+      effort: typeof ev.effort === 'string' ? ev.effort : (cur?.effort ?? null),
     };
     setState('convs', conv, merged);
+    // MP3 — mirror daemon-authoritative model/effort onto the local
+    // convMeta so the rail card + chat badges + the next dispatch all
+    // agree with what the daemon will actually launch.
+    if (typeof ev.model === 'string' && state.convMeta[conv]) {
+      setState('convMeta', conv, 'model', ev.model);
+    }
+    if (typeof ev.effort === 'string' && state.convMeta[conv]) {
+      setState('convMeta', conv, 'effort', ev.effort);
+    }
     return;
   }
   if (type === 'conv.archived') {
