@@ -38,8 +38,6 @@ export { projectsRailScan } from '~/components/projects-rail/discovery';
 const RAIL_MIN_W = 56;
 const RAIL_MAX_W = 280;
 const SHORT_THRESHOLD = 100;
-const FULL_W = 180;
-const SHORT_W = 56;
 
 export default function ProjectsRail() {
   const width = () => uiStore.state.projectsRailWidth;
@@ -91,10 +89,9 @@ export default function ProjectsRail() {
     window.addEventListener('pointerup', onUp);
   };
 
-  // Toggle between the two canonical widths.
-  const toggle = (): void => {
-    uiStore.setProjectsRailWidth(mode() === 'short' ? FULL_W : SHORT_W);
-  };
+  // 2026-06-12 — Toggle button removed (the rail is drag-resizable;
+  // the explicit << / >> button was redundant chrome). The `toggle`
+  // helper is gone too.
 
   return (
     <aside
@@ -106,14 +103,6 @@ export default function ProjectsRail() {
       <div class="projects-rail-resize" onPointerDown={onResizeDown} title="Drag to resize" />
       <div class="projects-rail-head">
         <span class="projects-rail-title">Projects</span>
-        <button type="button" class="projects-rail-btn" onClick={toggle} title="Toggle rail width">
-          <svg class="rail-icon-collapse" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" width="14" height="14">
-            <path d="M11 5l-7 7 7 7M20 5l-7 7 7 7" />
-          </svg>
-          <svg class="rail-icon-expand" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" width="14" height="14">
-            <path d="M13 5l7 7-7 7M4 5l7 7-7 7" />
-          </svg>
-        </button>
       </div>
       <div class="projects-rail-list">
         <Show
