@@ -158,17 +158,25 @@ export default function ChatScopeStrip(props: Props) {
           >Save</button>
         </>
       }>
-        {/* Agent ID pill — same shape as in the AgentCard so the
-            operator's eye binds them together. */}
+        {/* 2026-06-12 — leading pill shows the agent TYPE initial, not
+            the ID. The ID (A001…) is hidden from the chat wall per
+            operator request — it stays internal (diaries, logs, WS).
+            The colour still binds to the agent type. */}
         <span
-          class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono text-gray-200 flex-shrink-0"
+          class="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-mono flex-shrink-0"
           style={{
             background: 'rgba(17,24,39,0.7)',
             border: `1px solid ${typeInfo().color}55`,
+            color: typeInfo().color,
+            'min-width': '20px',
           }}
-          title={props.meta?.agentId ? `Agent id: ${props.meta.agentId}` : ''}
+          title={`${typeInfo().label}${props.meta?.agentId ? ` · ${props.meta.agentId}` : ''}`}
         >
-          {props.meta?.agentId ?? '—'}
+          {(() => {
+            const src = (typeInfo().shortLabel ?? typeInfo().label).trim();
+            if (!src) return '·';
+            return src.length <= 2 ? src.toUpperCase() : src[0]!.toUpperCase();
+          })()}
         </span>
         <span class="flex-1 text-sm font-semibold text-gray-100 truncate">
           {title()}

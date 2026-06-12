@@ -27,6 +27,7 @@
 import { Show } from 'solid-js';
 import type { ConvMeta, AgentStatusKind } from '~/state/chat';
 import { agentVisualInfo } from '~/lib/agent-types';
+import { modelShort } from '~/lib/models';
 
 export interface AgentCardProps {
   conv: string;
@@ -192,15 +193,16 @@ export default function AgentCard(props: AgentCardProps) {
           </Show>
         </span>
 
-        {/* ROW 2 — metadata pills (subtle borders, brighten when the
-         *  card is selected). Type letter · ID · local/remote.
-         *  Operator 2026-06-10: borders + text more vivid when active,
-         *  elegant but clearly visible. */}
+        {/* ROW 2 — metadata pills. 2026-06-12 operator rewrite: the
+         *  agent ID (A001…) is HIDDEN from the rail — the operator
+         *  navigates by name; the ID stays internal (diaries, logs,
+         *  WS). Pills now show: type letter · MODEL (short) · L/R.
+         *  "local"/"remote" collapse to single chars L / R. */}
         {(() => {
           const pillBorder = props.active
             ? 'rgba(170, 180, 200, 0.65)'
             : 'rgba(75, 85, 99, 0.45)';
-          const idColor = props.active ? '#e5e7eb' : '#9ca3af';
+          const dimColor = props.active ? '#cbd5e1' : '#9ca3af';
           return (
             <span class="flex items-center gap-1 font-mono"
               style={{ 'font-size': 'var(--fs-meta, 10px)' }}
@@ -217,25 +219,25 @@ export default function AgentCard(props: AgentCardProps) {
                 {typeInitials()}
               </span>
               <span
-                class="inline-flex items-center px-1.5 py-px rounded border truncate"
-                style={{ 'border-color': pillBorder, color: idColor }}
-                title={`Agent id ${props.meta.agentId ?? '?'}`}
+                class="inline-flex items-center px-1.5 py-px rounded border flex-shrink-0"
+                style={{ 'border-color': pillBorder, color: dimColor }}
+                title={`Model: ${props.meta.model ?? 'auto'}`}
               >
-                {props.meta.agentId ?? '?'}
+                {modelShort(props.meta.model)}
               </span>
               <Show when={!props.medium}>
                 <span
-                  class="inline-flex items-center gap-1 px-1.5 py-px rounded border flex-shrink-0"
+                  class="inline-flex items-center justify-center px-1.5 py-px rounded border flex-shrink-0"
                   style={{
                     color: isRemote()
                       ? '#7dd3fc'
                       : (props.active ? '#cbd5e1' : '#9ca3af'),
                     'border-color': pillBorder,
+                    'min-width': '16px',
                   }}
                   title={isRemote() ? 'remote' : 'local'}
                 >
-                  <span aria-hidden="true">{isRemote() ? '○' : '•'}</span>
-                  {isRemote() ? 'remote' : 'local'}
+                  {isRemote() ? 'R' : 'L'}
                 </span>
               </Show>
             </span>

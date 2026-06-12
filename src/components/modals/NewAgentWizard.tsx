@@ -4,9 +4,8 @@ import { Modal } from '~/components/Modal';
 import { chatStore } from '~/state/chat';
 import type { AgentType } from '~/state/chat';
 import { AGENT_TYPES, AGENT_TYPE_ORDER } from '~/lib/agent-types';
+import { MODEL_CATALOG, DEFAULT_MODEL } from '~/lib/models';
 import AgentTypePill from './new-agent/AgentTypePill';
-
-const MODEL_OPTIONS = ['auto', 'opus', 'sonnet', 'haiku'];
 
 interface OpenOpts {
   scope?: { module?: string | null; taskId?: string | null };
@@ -48,7 +47,7 @@ function NewAgentWizard(props: {
   const [picked, setPicked] = createSignal<AgentType>('custom');
   const [title, setTitle] = createSignal(defaultTitleFor('custom', props.scope));
   const [titleTouched, setTitleTouched] = createSignal(false);
-  const [model, setModel] = createSignal(props.defaultModel ?? 'auto');
+  const [model, setModel] = createSignal(props.defaultModel ?? DEFAULT_MODEL);
 
   const pickType = (t: AgentType) => {
     setPicked(t);
@@ -108,10 +107,15 @@ function NewAgentWizard(props: {
               onChange={(e) => setModel(e.currentTarget.value)}
               class="w-full bg-[#020617] border border-gray-700/40 rounded-md px-2.5 py-1.5 text-[13px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
             >
-              <For each={MODEL_OPTIONS}>{(m) => <option value={m}>{m}</option>}</For>
+              <For each={MODEL_CATALOG}>{(m) => <option value={m.id}>{m.label}</option>}</For>
             </select>
           </div>
         </div>
+        {/* Per-model hint so the operator picks deliberately — opus is
+            expensive, haiku is fast, sonnet is the default workhorse. */}
+        <p class="mt-2 text-[11px] text-gray-500 leading-snug">
+          {MODEL_CATALOG.find((m) => m.id === model())?.hint ?? ''}
+        </p>
       </div>
     </Modal>
   );
