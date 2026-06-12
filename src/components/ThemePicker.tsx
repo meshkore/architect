@@ -21,6 +21,7 @@ import { themeStore } from '~/state/theme';
 import {
   THEME_OPTIONS,
   SIZE_OPTIONS,
+  CHAT_PALETTE_OPTIONS,
   CHAT_USER_COLOR_CHIPS,
   THEMES,
   SIZE_PRESETS,
@@ -193,41 +194,98 @@ function TabButton(props: {
 
 function ThemeTab() {
   return (
-    <div class="px-3 py-3">
-      <div class="text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-2">
-        Preset
+    <div class="px-3 py-3 space-y-4">
+      <div>
+        <div class="text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-2">
+          Preset
+        </div>
+        <ul class="grid grid-cols-2 gap-1.5">
+          <For each={THEME_OPTIONS}>
+            {(opt) => (
+              <li>
+                <button
+                  type="button"
+                  onClick={() => themeStore.setThemeId(opt.id)}
+                  class="w-full flex items-center gap-2 px-2 py-2 rounded text-left text-xs transition-colors hover:bg-gray-800/60"
+                  style={
+                    themeStore.themeId() === opt.id
+                      ? {
+                          background: 'rgba(255,255,255,0.06)',
+                          border: '1px solid rgba(120,130,150,0.40)',
+                        }
+                      : { border: '1px solid transparent' }
+                  }
+                  title={`Apply the ${opt.label} preset`}
+                >
+                  <span class="flex gap-0.5 flex-shrink-0">
+                    <For each={opt.swatches}>
+                      {(c) => (
+                        <span class="w-3 h-3 rounded-full" style={{ background: c }} />
+                      )}
+                    </For>
+                  </span>
+                  <span class="font-mono text-gray-200">{opt.label}</span>
+                </button>
+              </li>
+            )}
+          </For>
+        </ul>
       </div>
-      <ul class="grid grid-cols-2 gap-1.5">
-        <For each={THEME_OPTIONS}>
-          {(opt) => (
-            <li>
-              <button
-                type="button"
-                onClick={() => themeStore.setThemeId(opt.id)}
-                class="w-full flex items-center gap-2 px-2 py-2 rounded text-left text-xs transition-colors hover:bg-gray-800/60"
-                style={
-                  themeStore.themeId() === opt.id
-                    ? {
-                        background: 'rgba(255,255,255,0.06)',
-                        border: '1px solid rgba(120,130,150,0.40)',
-                      }
-                    : { border: '1px solid transparent' }
-                }
-                title={`Apply the ${opt.label} preset`}
-              >
-                <span class="flex gap-0.5 flex-shrink-0">
-                  <For each={opt.swatches}>
-                    {(c) => (
-                      <span class="w-3 h-3 rounded-full" style={{ background: c }} />
-                    )}
-                  </For>
-                </span>
-                <span class="font-mono text-gray-200">{opt.label}</span>
-              </button>
-            </li>
-          )}
-        </For>
-      </ul>
+
+      {/* 2026-06-12 — Chat output palette. Layered on top of the theme:
+          `colorful` keeps the JetBrains-Darcula per-token colours in
+          chat inline code; `mono` blanks them for a Claude-Code-style
+          near-white grayscale. Operator framing: "una que fuera
+          colorista y otra que fuera escala de gris un poco como
+          claude code". */}
+      <div>
+        <div class="text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-2">
+          Chat palette
+        </div>
+        <ul class="grid grid-cols-2 gap-1.5">
+          <For each={CHAT_PALETTE_OPTIONS}>
+            {(opt) => (
+              <li>
+                <button
+                  type="button"
+                  onClick={() => themeStore.setChatPalette(opt.id)}
+                  class="w-full flex flex-col items-start gap-1 px-2 py-2 rounded text-left text-xs transition-colors hover:bg-gray-800/60"
+                  style={
+                    themeStore.chatPalette() === opt.id
+                      ? {
+                          background: 'rgba(255,255,255,0.06)',
+                          border: '1px solid rgba(120,130,150,0.40)',
+                        }
+                      : { border: '1px solid transparent' }
+                  }
+                  title={opt.hint}
+                >
+                  <span class="flex items-center gap-2 w-full">
+                    <span class="flex gap-0.5 flex-shrink-0">
+                      <Show
+                        when={opt.id === 'colorful'}
+                        fallback={
+                          <>
+                            <span class="w-3 h-3 rounded-full" style={{ background: '#c8cdd3' }} />
+                            <span class="w-3 h-3 rounded-full" style={{ background: '#9ca3af' }} />
+                            <span class="w-3 h-3 rounded-full" style={{ background: '#6b7280' }} />
+                          </>
+                        }
+                      >
+                        <span class="w-3 h-3 rounded-full" style={{ background: '#ffc66d' }} />
+                        <span class="w-3 h-3 rounded-full" style={{ background: '#9cdcfe' }} />
+                        <span class="w-3 h-3 rounded-full" style={{ background: '#a5c261' }} />
+                      </Show>
+                    </span>
+                    <span class="font-mono text-gray-200">{opt.label}</span>
+                  </span>
+                  <span class="text-[10px] text-gray-500 leading-snug">{opt.hint}</span>
+                </button>
+              </li>
+            )}
+          </For>
+        </ul>
+      </div>
     </div>
   );
 }

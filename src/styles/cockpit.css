@@ -244,14 +244,34 @@
       margin: 0.7em 0 0.3em; text-transform: uppercase; letter-spacing: 0.05em;
     }
 
-    /* Paragraphs + lists — compact spacing, decent indentation. */
-    .chat-md p { margin: 0.5em 0; }
-    .chat-md ul, .chat-md ol { margin: 0.5em 0; padding-left: 1.5em; }
+    /* 2026-06-12 — Paragraphs + lists. Operator: "ciertos párrafos
+       deberíamos separarlos con un interlineado doble… desde la lista
+       de puntos hasta el siguiente párrafo que habla de otra cosa, hay
+       ciertas secciones que se podrían separar con un poco más de
+       interlineado". Bumped p-margin (0.5em → 0.85em) and added beefy
+       extra gap between a list and the paragraph that follows (1.25em)
+       so the reader gets a visual break between "summary of findings"
+       and "what to do next". List markers pick up the active theme
+       accent instead of staying gray. */
+    .chat-md p { margin: 0.85em 0; }
+    .chat-md ul, .chat-md ol { margin: 0.7em 0; padding-left: 1.5em; }
     .chat-md ul { list-style: disc outside; }
     .chat-md ol { list-style: decimal outside; }
-    .chat-md li { margin: 0.18em 0; }
-    .chat-md li > p { margin: 0.18em 0; }
-    .chat-md li > ul, .chat-md li > ol { margin: 0.2em 0; }
+    .chat-md li { margin: 0.25em 0; }
+    .chat-md li > p { margin: 0.25em 0; }
+    .chat-md li > ul, .chat-md li > ol { margin: 0.3em 0; }
+    /* Theme-aware list markers — picks up emerald / indigo / amber /
+       slate depending on the active theme. */
+    .chat-md ul li::marker, .chat-md ol li::marker {
+      color: var(--theme-accent-bright, #34d399);
+    }
+    /* Beefy break between a list and the next paragraph (the
+       "summary → recommendation" jump the operator flagged). */
+    .chat-md ul + p, .chat-md ol + p,
+    .chat-md ul + h2, .chat-md ol + h2,
+    .chat-md ul + h3, .chat-md ol + h3 { margin-top: 1.25em; }
+    /* And a softer one between paragraph and the next paragraph. */
+    .chat-md p + p { margin-top: 1.0em; }
 
     /* 2026-06-12 — JetBrains Darcula-inspired inline-code palette.
        Pre-2026-06-12 every inline `code` was painted emerald
@@ -275,12 +295,26 @@
       overflow-wrap: anywhere;
     }
     /* Per-token accents — Darcula palette adapted for dark canvas.
-       Only inline code paints these; block code keeps default gray. */
+       Only inline code paints these; block code keeps default gray.
+       Gated to the Colorful chat palette (the default). The Mono
+       palette below blanks all per-tok colours via `color: inherit`. */
+    .chat-md code [data-tok="url"]     { color: #569cd6; text-decoration: underline; text-decoration-color: rgba(86, 156, 214, 0.4); } /* steel blue — full URLs */
     .chat-md code [data-tok="string"]  { color: #a5c261; }   /* olive — quoted strings */
-    .chat-md code [data-tok="number"]  { color: #6897bb; }   /* cool blue — numeric literals */
+    .chat-md code [data-tok="stamp"]   { color: #d8b76a; }   /* muted yellow — build/version stamps */
+    .chat-md code [data-tok="path"]    { color: #ffc66d; }   /* warm yellow — paths, ::-paths */
     .chat-md code [data-tok="literal"] { color: #cc7832; font-weight: 500; } /* orange — true/false/null */
-    .chat-md code [data-tok="path"]    { color: #ffc66d; }   /* warm yellow — paths, URLs, ::-paths */
+    .chat-md code [data-tok="number"]  { color: #6897bb; }   /* cool blue — numeric literals & HTTP status */
     .chat-md code [data-tok="ident"]   { color: #9cdcfe; }   /* light cyan — dotted identifiers */
+
+    /* Mono palette — operator's Claude-Code-grayscale flag. Layered on
+       top of any theme: blanks every per-tok colour so inline code
+       stays at the default near-white gray. Set on the document root
+       via `themeStore.setChatPalette('mono')`. */
+    html[data-chat-palette="mono"] .chat-md code [data-tok] {
+      color: inherit;
+      text-decoration: none;
+      font-weight: inherit;
+    }
 
     /* Code blocks — fix the "tiny vertical column of one letter" bug.
        Root cause was a flex ancestor squeezing the pre to its content

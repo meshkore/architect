@@ -18,6 +18,13 @@
 
 export type ThemeId = 'emerald' | 'indigo' | 'amber' | 'slate';
 export type SizeId = 'compact' | 'default' | 'large';
+/** 2026-06-12 — Chat-area output palette. Sits on top of the chosen
+ *  theme: `colorful` keeps the JetBrains-Darcula token colours for
+ *  inline `<code>` (paths warm yellow, strings olive, etc.); `mono`
+ *  blanks every per-token colour so chat reads as near-white text on
+ *  near-black like Claude Code's terminal. Applied via the
+ *  `data-chat-palette` attribute on `<html>` and gated in cockpit.css. */
+export type ChatPaletteId = 'colorful' | 'mono';
 
 export interface ThemeMeta {
   id: ThemeId;
@@ -43,6 +50,17 @@ export const SIZE_OPTIONS: readonly SizeMeta[] = [
   { id: 'compact', label: 'Compact', hint: 'Dense — more content per screen' },
   { id: 'default', label: 'Default', hint: 'Original cockpit spacing' },
   { id: 'large',   label: 'Large',   hint: 'Bigger text + buttons' },
+];
+
+export interface ChatPaletteMeta {
+  id: ChatPaletteId;
+  label: string;
+  hint: string;
+}
+
+export const CHAT_PALETTE_OPTIONS: readonly ChatPaletteMeta[] = [
+  { id: 'colorful', label: 'Colorful', hint: 'JetBrains-Darcula tokens — paths, strings, numbers, identifiers in distinct accents.' },
+  { id: 'mono',     label: 'Mono',     hint: 'Near-white grayscale — Claude-Code style. No per-token colour in chat code.' },
 ];
 
 /** Full theme schema. Every preset MUST cover every key. */

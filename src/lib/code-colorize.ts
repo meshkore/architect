@@ -10,13 +10,15 @@
  *
  * This module wraps recognizable atoms inside an inline `<code>` span
  * in `<span data-tok="…">` so the cockpit's CSS can colour them
- * independently. Six kinds, scanned in priority order (first match
- * wins so an identifier inside a string doesn't get reclassified):
+ * independently. Seven kinds, scanned in priority order (first match
+ * wins so an identifier inside a URL doesn't get reclassified):
  *
+ *   url      — http(s):// URLs incl. scheme (whole atom, one colour)
  *   string   — quoted strings, "..." / '...'
- *   number   — integer / decimal literals
- *   literal  — true / false / null / undefined / None
+ *   stamp    — build / version / commit stamps with `·` separators
  *   path     — atoms with `/` or `::`, file paths and namespaced ids
+ *   literal  — true / false / null / undefined / None
+ *   number   — integer / decimal literals (HTTP status codes land here)
  *   ident    — multi-segment dotted identifiers (Foo.bar.baz)
  *   default  — everything else (rendered in the chat's neutral gray)
  *
@@ -37,16 +39,26 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ESC[c]);
 }
 
-const KIND_ORDER = ['string', 'number', 'literal', 'path', 'ident'] as const;
+const KIND_ORDER = ['url', 'string', 'stamp', 'path', 'literal', 'number', 'ident'] as const;
 const TOKEN_RE = new RegExp([
+  // url — full http(s):// URLs incl. scheme. Highest priority so a URL
+  // never gets split between scheme and path. Stops at whitespace,
+  // quote, paren, bracket, angle, or backtick — common URL boundaries.
+  '(?<url>\\bhttps?:\\/\\/[^\\s\'"<>`)\\]]+)',
   // string — double or single quoted, supports escaped quote
   '(?<string>"(?:[^"\\\\]|\\\\.)*"|\'(?:[^\'\\\\]|\\\\.)*\')',
-  // number — int / decimal, optional sign
-  '(?<number>-?\\b\\d+(?:\\.\\d+)?\\b)',
+  // stamp — version / build / commit stamps separated by middle-dot
+  // `·` (U+00B7) or pipe, e.g. `v0.0.1·3a7c81b·2026-06-12`. Atomic so
+  // the renderer doesn\'t fracture the stamp into three different colours.
+  '(?<stamp>[A-Za-z_]?[\\w.\\-]+(?:[·|][\\w.\\-]+)+)',
+  // path — `/`, `::`, or `\\` separator between word chars (file paths,
+  // namespaced ids, Windows paths). URLs are already caught above.
+  '(?<path>[A-Za-z_][\\w.\\-]*(?:[\\/:\\\\]{1,2}[\\w.\\-]+)+)',
   // literal — common multi-language reserved values
   '(?<literal>\\b(?:true|false|null|undefined|None|True|False)\\b)',
-  // path — contains `/` or `::` between word chars (file paths, URLs, Rust paths)
-  '(?<path>[A-Za-z_][\\w.\\-]*(?:[\\/:]{1,2}[\\w.\\-]+)+)',
+  // number — int / decimal, optional sign. Order matters: number AFTER
+  // stamp so `2026-06-12` inside a stamp doesn\'t get pre-eaten.
+  '(?<number>-?\\b\\d+(?:\\.\\d+)?\\b)',
   // ident — dotted multi-segment identifier (Foo.bar, namespace.x.y)
   '(?<ident>[A-Za-z_][\\w]*(?:\\.[A-Za-z_][\\w]*)+)',
 ].join('|'), 'g');
