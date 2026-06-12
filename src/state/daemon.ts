@@ -301,11 +301,38 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
 
   const ws = new DaemonWS(client.transport);
   // Wire wsState updates so the rail and header can render per-instance.
+  // 2026-06-12 — Auto-recover when the cluster's daemon moved ports.
+  // Symptom (operator field report): MeshKore Core daemon auto-updated,
+  // restarted on a different port, the cockpit's cached entry still
+  // pointed at the old port → WS dial loops to `fatal` → the booting
+  // overlay stays stuck on "Historial de conversaciones ⟳" forever.
+  // Recovery: when WS state flips to `fatal`, if we know this cluster's
+  // `cluster_id`, scan the local range for a daemon serving that id at
+  // a NEW port. If found, hot-swap the active client via switchToPort.
+  let recovering = false;
   ws.onState((s) => {
     if (state.instances[key]) {
       setState('instances', key, 'wsState', s);
       if (state.activeId === key) setState('wsState', s);
     }
+    if (s !== 'fatal' || recovering) return;
+    const cid = state.instances[key]?.health?.cluster_id;
+    if (!cid) return;
+    recovering = true;
+    void (async () => {
+      try {
+        const { findClusterPort } = await import('~/components/projects-rail/discovery');
+        const found = await findClusterPort(cid);
+        if (!found || found.port === state.instances[key]?.port) return;
+        log.info('ws-fatal: cluster moved ports, hot-swapping', {
+          cluster_id: cid, stale: state.instances[key]?.port, live: found.port,
+        });
+        try { localStorage.setItem('meshcore-last-port', String(found.port)); } catch { /* quota */ }
+        await daemonStore.switchToPortDetailed(found.port);
+      } finally {
+        recovering = false;
+      }
+    })();
   });
 
   const inst: DaemonInstance = {
