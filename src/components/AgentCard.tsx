@@ -36,11 +36,14 @@ export interface AgentCardProps {
   status: AgentStatusKind;
   pendingReview: boolean;
   stripe: string;
-  /** When true (rail < 80 px wide), render the name-letters-only layout. */
+  /** When true (rail < 60 px wide), render the name-letters-only layout. */
   compact?: boolean;
-  /** When true (rail < 160 px but ≥ 80 px), drop the location chip and
+  /** When true (rail < 160 px but ≥ 60 px), drop the location chip and
    *  use a tighter metadata row. */
   medium?: boolean;
+  /** 2026-06-13 — raw rail width, so the metadata row can shed pills
+   *  progressively (type → +model → +L/R) instead of clipping. */
+  railWidth?: number;
   onSelect: (conv: string) => void;
   onDragStart: (conv: string) => void;
   onDragEnd: () => void;
@@ -60,6 +63,18 @@ export default function AgentCard(props: AgentCardProps) {
   const typeInfo = () => agentVisualInfo(props.conv, props.meta);
 
   const narrowChars = (): string => title().trim().slice(0, 3);
+
+  // 2026-06-13 — progressive metadata disclosure by rail width. The
+  // recent model badge + L/R made row 2 wide enough to overflow and
+  // CLIP (hard cut) at mid widths. Now we shed pills by width:
+  //   < 130 px → type pill only
+  //   130–185  → type · model
+  //   ≥ 185 px → type · model · L/R
+  // The type pill is the always-visible anchor (colour-coded). The row
+  // is overflow-hidden + nowrap so a sub-pixel overrun never wraps.
+  const w = (): number => props.railWidth ?? (props.medium ? 130 : 200);
+  const showModelPill = (): boolean => w() >= 130;
+  const showLocPill = (): boolean => w() >= 185;
 
   /** 1-2 character abbreviation derived from the agent type's
    *  `shortLabel` (or `label`). Replaces the emoji in the metadata
@@ -178,7 +193,9 @@ export default function AgentCard(props: AgentCardProps) {
           <Show
             when={props.status === 'working'}
             fallback={
-              <Show when={props.active}>
+              /* 2026-06-13 — "idle" text only when there's room (≥150px);
+                 below that it steals the name's width → "M..." */
+              <Show when={props.active && w() >= 150}>
                 <span class="font-mono text-gray-600 flex-shrink-0" style={{ 'font-size': '9px' }}>idle</span>
               </Show>
             }
@@ -204,7 +221,7 @@ export default function AgentCard(props: AgentCardProps) {
             : 'rgba(75, 85, 99, 0.45)';
           const dimColor = props.active ? '#cbd5e1' : '#9ca3af';
           return (
-            <span class="flex items-center gap-1 font-mono"
+            <span class="flex items-center gap-1 font-mono overflow-hidden flex-nowrap"
               style={{ 'font-size': 'var(--fs-meta, 10px)' }}
             >
               <span
@@ -218,14 +235,16 @@ export default function AgentCard(props: AgentCardProps) {
               >
                 {typeInitials()}
               </span>
-              <span
-                class="inline-flex items-center px-1.5 py-px rounded border flex-shrink-0"
-                style={{ 'border-color': pillBorder, color: dimColor }}
-                title={`Model: ${props.meta.model ?? 'auto'}`}
-              >
-                {modelShort(props.meta.model)}
-              </span>
-              <Show when={!props.medium}>
+              <Show when={showModelPill()}>
+                <span
+                  class="inline-flex items-center px-1.5 py-px rounded border flex-shrink-0"
+                  style={{ 'border-color': pillBorder, color: dimColor }}
+                  title={`Model: ${props.meta.model ?? 'auto'}`}
+                >
+                  {modelShort(props.meta.model)}
+                </span>
+              </Show>
+              <Show when={showLocPill()}>
                 <span
                   class="inline-flex items-center justify-center px-1.5 py-px rounded border flex-shrink-0"
                   style={{

@@ -183,6 +183,7 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
                 stripe={agentVisualColor(c, meta())}
                 compact={compact()}
                 medium={medium()}
+                railWidth={uiStore.state.chatRailWidth}
                 onSelect={chatStore.setActiveConv}
                 onDragStart={(id) => setDragSrc(id)}
                 onDragEnd={() => { setDragSrc(null); setDragTgt(null); }}
