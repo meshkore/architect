@@ -51,24 +51,33 @@ export default function DaemonBehindPanel(): JSX.Element {
     }
     setPhase('updating');
     setErrorMsg(null);
+    setShowManual(false);
     log.info('daemon-behind: firing /self-update', { cluster: cluster(), from: current() });
+    // Arm the "stuck" timer BEFORE the request resolves. Without this,
+    // a hung daemon (e.g. the request thread is blocked on a stuck
+    // chat session) keeps the panel spinning forever — selfUpdate
+    // never resolves so the post-await setTimeout never fires.
+    const stuckTimer = setTimeout(() => setShowManual(true), STUCK_AFTER_MS);
     try {
       const r = await c.selfUpdate({});
       // status 0 = transport closed mid-update (the daemon killed itself
       // to re-exec). That's the SUCCESS shape — wait for WS to come back.
       // Any other !ok is a real error.
       if (!r.ok && r.status !== 0) {
+        clearTimeout(stuckTimer);
         setPhase('failed');
-        setErrorMsg(`Update returned ${r.status}: ${r.error ?? 'unknown'}`);
+        const detail = r.status === 409
+          ? 'chat turn in progress — cancel the active conv before retrying'
+          : (r.error ?? r.body ?? 'unknown');
+        setErrorMsg(`Update returned ${r.status}: ${detail}`);
         return;
       }
-      // On success the panel unmounts when version reaches EXPECTED.
-      // Schedule a "stuck" reveal in case the re-exec hangs.
-      setTimeout(() => {
-        // If we're still here after the timeout, surface manual fallback.
-        setShowManual(true);
-      }, STUCK_AFTER_MS);
+      // Success path: daemon re-execs, WS drops, port-recovery
+      // reattaches. The panel unmounts when version reaches EXPECTED.
+      // Keep the stuck timer armed in case the re-exec hangs after the
+      // request returned ok.
     } catch (e) {
+      clearTimeout(stuckTimer);
       setPhase('failed');
       setErrorMsg(e instanceof Error ? e.message : String(e));
     }
