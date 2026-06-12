@@ -540,7 +540,7 @@ function ingestEventForCluster(clusterKey: string, ev: DaemonEvent): void {
     const text = typeof ev.text === 'string' ? ev.text : '';
     if (!streamId) return;
     const idx = arr.findIndex((m) => m.kind === 'assistant' && m.stream_id === streamId);
-    const cleaned = stripRememberLines(text);
+    const cleaned = stripAnchorMarkers(stripRememberLines(text));
     if (idx >= 0) {
       const next = arr.slice();
       const prev = next[idx]!;
@@ -564,7 +564,7 @@ function ingestEventForCluster(clusterKey: string, ev: DaemonEvent): void {
   if (ev.type === 'chat.assistant.final') {
     const streamId = typeof ev.stream_id === 'string' ? ev.stream_id : undefined;
     const text = typeof ev.text === 'string' ? ev.text : '';
-    const cleaned = stripRememberLines(text);
+    const cleaned = stripAnchorMarkers(stripRememberLines(text));
     const idx = arr.findIndex((m) => m.kind === 'assistant' && streamId !== undefined && m.stream_id === streamId);
     if (idx >= 0) {
       const next = arr.slice();
@@ -803,6 +803,22 @@ function stripRememberLines(text: string): string {
     .trimEnd();
 }
 
+/**
+ * 2026-06-12 — Belt-and-suspenders strip for the daemon-frontend
+ * `⟦anchor⟧ {...}` / `⟦anchor-progress⟧ {...}` wire-protocol markers.
+ * Daemon py-1.13.2 strips them server-side before persisting, but
+ * older daemons OR historical messages persisted by py-1.13.0/1.13.1
+ * still carry them. Defensive scrub at the cockpit so the operator
+ * never sees the wire format leak into chat regardless of daemon
+ * version on the other end.
+ */
+function stripAnchorMarkers(text: string): string {
+  if (!text || !text.includes('⟦anchor')) return text;
+  return text
+    .replace(/^[\s\n]*⟦anchor⟧\s*\{[^\n]*\}[ \t]*\n?/, '')
+    .replace(/⟦anchor-progress⟧\s*\{[^\n]*\}[ \t]*\n?/g, '');
+}
+
 // py-1.11.0 — Set while pre-seeding convMap from a `chatConvMessages`
 // pagination fetch. Suppresses the `_freshFinal` auto-expand flag on
 // historical messages (only LIVE finals should auto-expand). Set by
@@ -860,7 +876,7 @@ function ingestEvent(ev: DaemonEvent): void {
     if (!streamId) return;
     // Find existing live bubble for this stream.
     const idx = arr.findIndex((m) => m.kind === 'assistant' && m.stream_id === streamId);
-    const cleaned = stripRememberLines(text);
+    const cleaned = stripAnchorMarkers(stripRememberLines(text));
     if (idx >= 0) {
       setState('convMap', conv, idx, { text: cleaned, streaming: true });
     } else {
@@ -886,7 +902,7 @@ function ingestEvent(ev: DaemonEvent): void {
   if (ev.type === 'chat.assistant.final') {
     const streamId = typeof ev.stream_id === 'string' ? ev.stream_id : undefined;
     const text = typeof ev.text === 'string' ? ev.text : '';
-    const cleaned = stripRememberLines(text);
+    const cleaned = stripAnchorMarkers(stripRememberLines(text));
     const idx = arr.findIndex(
       (m) => m.kind === 'assistant' && streamId !== undefined && m.stream_id === streamId,
     );
@@ -1226,7 +1242,7 @@ function hydrateFromSnapshot(snap: ChatSnapshotResponse): void {
   for (const c of snap.convs) {
     const ct = (c as ChatConvSummary & { current_turn?: { started_at?: string; stream_id?: string; partial_text?: string } }).current_turn;
     if (ct && c.live && ct.stream_id) {
-      const partial = stripRememberLines(ct.partial_text || '');
+      const partial = stripAnchorMarkers(stripRememberLines(ct.partial_text || ''));
       const existing = state.convMap[c.conv] ?? [];
       // If we already have a streaming bubble for this stream_id (rare —
       // happens when a delta beat the snapshot fetch), don't overwrite.
