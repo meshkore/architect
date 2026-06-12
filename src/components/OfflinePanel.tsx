@@ -1,30 +1,27 @@
 /**
- * OfflinePanel — V107.27 (wizard rewrite).
+ * OfflinePanel — 2026-06-12 wizard rewrite, coherent with DaemonBehindPanel.
  *
- * Renders inside the cockpit body when the operator selected a row
- * whose daemon isn't reachable. Wizard with three layers:
+ * Operator framing: "centrarlo, montarlo lo más simple posible, a modo
+ * wizard. Si va automático el resto sobra. Solo si falla o no está
+ * activo, mostrar las opciones de dispararlo o que el usuario lo haga."
  *
- *   1. Diagnosis line — one sentence in plain language.
- *   2. Two big buttons — "I'll start it myself" / "Hand it to my
- *      local code agent". Optionally a third tiny link for "show me
- *      the raw curl repair" (TLS-missing case).
- *   3. Whichever path the operator picked expands inline. Step by
- *      step. Each step is a card with a label, a hint, and a single
- *      copy-to-clipboard button. Other paths stay hidden.
- *
- * The auto-watcher (poll /health every 2s, switch the moment it
- * answers) is unchanged from V86b — it lives at the bottom and is
- * always visible regardless of which path is open. Pre-V107.27 the
- * panel dumped all four steps simultaneously (terminal cd + start +
- * shutdown+sync+restart + agent prompt) and operators reported it
- * as a wall of shell commands they couldn't navigate.
+ * Flow:
+ *   1. Default: centered spinner + "Watching /health on :PORT — Ns
+ *      elapsed". The auto-reconnect runs in the background; when the
+ *      daemon answers we hot-swap and the panel unmounts naturally.
+ *   2. After STUCK_AFTER_MS, reveal "Start it myself" + "Hand it to
+ *      Claude Code" inline below the spinner. The watcher keeps
+ *      running — if the daemon comes back while the operator was
+ *      reading the manual block, the panel still vanishes on its own.
+ *   3. The two paths expand the relevant copy-paste commands in
+ *      place (no new screen).
  *
  * Selection lives in `daemonStore.state.offlineSelection`. The rail
  * row stays highlighted so the operator can still hit the trash icon
  * to forget the project.
  */
 
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from 'solid-js';
 import { daemonStore, type OfflineSelection } from '~/state/daemon';
 import { switchProject } from '~/components/ProjectsRailRow';
 import { liveClusters } from '~/components/projects-rail/discovery';
@@ -34,13 +31,13 @@ import * as kp from '~/lib/known-projects';
 
 const WATCH_INTERVAL_MS = 2000;
 const WATCH_TIMEOUT_MS = 800;
+const STUCK_AFTER_MS = 15_000;
 
-type Flow = 'choose' | 'manual' | 'agent';
 type Diagnose = 'unknown' | 'tls-missing';
+type ManualMode = null | 'self' | 'agent';
 
-export default function OfflinePanel() {
+export default function OfflinePanel(): JSX.Element {
   const sel = (): OfflineSelection | null => daemonStore.state.offlineSelection;
-
   const repoPath = createMemo<string | null>(() => {
     const s = sel();
     if (!s) return null;
@@ -49,7 +46,6 @@ export default function OfflinePanel() {
     );
     return entry?.repo_path ?? null;
   });
-
   return (
     <Show when={sel()}>
       {(s) => <PanelBody sel={s()} repoPath={repoPath()} />}
@@ -57,28 +53,27 @@ export default function OfflinePanel() {
   );
 }
 
-function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }) {
-  const [watching, setWatching] = createSignal(true);
+function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }): JSX.Element {
   const [elapsedSec, setElapsedSec] = createSignal(0);
-  // diagnose 'tls-missing' = HTTPS fails but HTTP localhost succeeds → daemon
-  // alive without TLS bundle. Anything else stays 'unknown' and the panel
-  // assumes the simpler "not running" case (which is also the most common).
   const [diagnose, setDiagnose] = createSignal<Diagnose>('unknown');
-  // V107.27 wizard navigation. 'choose' is the landing; the two big
-  // buttons advance to 'manual' or 'agent'. Back-link returns to 'choose'.
-  const [flow, setFlow] = createSignal<Flow>('choose');
+  const [stuck, setStuck] = createSignal(false);
+  const [mode, setMode] = createSignal<ManualMode>(null);
 
-  // ── Auto-watcher (unchanged from V86g; TLS diagnose from V86m). ──
+  // ── Auto-watcher. Polls /health every 2s, switches the moment it
+  //    answers. Also diagnoses the "TLS missing" case (HTTP works but
+  //    HTTPS doesn't). Always running — the manual options are layered
+  //    ON TOP for cases where the operator wants to act directly.
   createEffect(() => {
-    if (!watching()) return;
     const port = props.sel.port;
     let cancelled = false;
     let probeTimer: ReturnType<typeof setTimeout> | null = null;
     const startedAt = Date.now();
     setElapsedSec(0);
+    setStuck(false);
     const elapsedTimer = setInterval(() => {
       setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
     }, 1000);
+    const stuckTimer = setTimeout(() => setStuck(true), STUCK_AFTER_MS);
 
     const probe = async (): Promise<void> => {
       if (cancelled) return;
@@ -95,25 +90,19 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }) {
           });
           return;
         }
-      } catch { /* not up yet — keep ticking */ }
+      } catch { /* not up yet */ }
       if (diagnose() === 'unknown' && !cancelled) {
         try {
           const r2 = await fetch(`http://localhost:${port}/health`, {
             signal: AbortSignal.timeout(WATCH_TIMEOUT_MS),
           });
           if (r2.ok) {
-            log.warn('[OfflinePanel] daemon answers HTTP but not HTTPS — TLS bundle missing', { port });
+            log.warn('[OfflinePanel] HTTP-only — TLS bundle missing', { port });
             setDiagnose('tls-missing');
           }
-        } catch (e) {
-          log.warn('[OfflinePanel] HTTP fallback probe threw', {
-            port, err: e instanceof Error ? e.message : String(e),
-          });
-        }
+        } catch { /* nothing bound */ }
       }
-      if (!cancelled) {
-        probeTimer = setTimeout(() => { void probe(); }, WATCH_INTERVAL_MS);
-      }
+      if (!cancelled) probeTimer = setTimeout(() => { void probe(); }, WATCH_INTERVAL_MS);
     };
     void probe();
 
@@ -121,6 +110,7 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }) {
       cancelled = true;
       if (probeTimer !== null) clearTimeout(probeTimer);
       clearInterval(elapsedTimer);
+      clearTimeout(stuckTimer);
     });
   });
 
@@ -129,8 +119,7 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }) {
     const cid = props.sel.cluster_id;
     if (!cid) return;
     const live = liveClusters().get(cid);
-    if (!live) return;
-    if (live.port === props.sel.port) return;
+    if (!live || live.port === props.sel.port) return;
     log.info('[OfflinePanel] live discovery surfaced cluster at new port', {
       cluster_id: cid, stale: props.sel.port, live: live.port,
     });
@@ -141,17 +130,17 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }) {
     });
   });
 
-  // ── Commands ────────────────────────────────────────────────────
-  const startCommand = (): string => `python3 .meshkore/scripts/daemon.py --port ${props.sel.port}`;
+  // ── Commands ─────────────────────────────────────────────────────
+  const cdCommand = (): string | null =>
+    props.repoPath ? `cd "${props.repoPath}"` : null;
+  const startCommand = (): string =>
+    `python3 .meshkore/scripts/daemon.py --port ${props.sel.port}`;
   const shutdownCommand = (): string =>
-    `curl -s -X POST http://localhost:${props.sel.port}/shutdown ` +
-    `-H "Authorization: Bearer $(cat .meshkore/credentials/portal-token)"`;
+    `curl -s -X POST http://localhost:${props.sel.port}/shutdown -H "Authorization: Bearer $(cat .meshkore/credentials/portal-token)"`;
   const syncCommand = (): string => [
     'cp ~/Documents/Prj/asimovia/meshkore/.meshkore/scripts/daemon.py .meshkore/scripts/daemon.py',
     'cp -R ~/Documents/Prj/asimovia/meshkore/.meshkore/scripts/tls .meshkore/scripts/tls',
   ].join(' && \\\n');
-  const cdCommand = (): string | null =>
-    props.repoPath ? `cd "${props.repoPath}"` : null;
 
   const agentPrompt = (): string => {
     const port = props.sel.port;
@@ -180,229 +169,168 @@ https://daemon.meshkore.com:${port}/health.`
     );
   };
 
-  // ── Diagnosis sentence (single line, plain language) ─────────────
-  const diagnoseLine = (): string => {
-    if (diagnose() === 'tls-missing') {
-      return `Port :${props.sel.port} is bound — but the daemon is serving plain HTTP, so the HTTPS-only cockpit can't reach it. Sync the TLS bundle and restart.`;
-    }
-    return `Most likely the daemon process simply isn't running. Pick one of the two paths below.`;
-  };
+  const cluster = (): string =>
+    props.sel.cluster_name ?? props.sel.display ?? `port ${props.sel.port}`;
 
   return (
-    <section class="offline-panel">
-      <div class="offline-panel__inner">
-        <header class="offline-panel__head">
-          <div class="offline-panel__title">
-            <span class="offline-panel__dot" aria-hidden="true" />
-            <h2>{props.sel.display}</h2>
-            <span class="offline-panel__port">:{props.sel.port}</span>
-            <Show when={props.sel.cluster_id}>
-              {(cid) => <span class="offline-panel__cluster">· {cid()}</span>}
-            </Show>
-            <span class="offline-panel__pill" data-state={diagnose()}>
-              {diagnose() === 'tls-missing' ? 'TLS missing' : 'offline'}
-            </span>
+    <section class="h-full flex items-center justify-center px-6 py-12 overflow-auto">
+      <div class="max-w-xl w-full">
+        <header class="mb-6">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-500/10 border border-gray-500/40 text-gray-300 text-xs font-medium mb-4">
+            <span class="w-1.5 h-1.5 rounded-full bg-gray-400 animate-pulse-soft" />
+            <Show when={diagnose() === 'tls-missing'} fallback="Daemon offline">TLS bundle missing</Show>
           </div>
-          <p class="offline-panel__subtitle">{diagnoseLine()}</p>
+          <h1 class="text-2xl md:text-3xl font-semibold tracking-tight mb-2">
+            <Show
+              when={diagnose() === 'tls-missing'}
+              fallback={<>Esperando a <span class="font-mono text-gray-100">{cluster()}</span></>}
+            >
+              Reparando <span class="font-mono text-gray-100">{cluster()}</span>
+            </Show>
+          </h1>
+          <p class="text-gray-400 leading-relaxed text-sm">
+            <Show
+              when={diagnose() === 'tls-missing'}
+              fallback={<>
+                The daemon on <span class="font-mono text-gray-300">:{props.sel.port}</span> isn't
+                responding. The cockpit reconnects the moment <code class="font-mono text-gray-300">/health</code> answers.
+              </>}
+            >
+              Something is bound to <span class="font-mono text-gray-300">:{props.sel.port}</span>{' '}
+              but it's serving plain HTTP. The cockpit speaks HTTPS only — sync the TLS bundle and restart.
+            </Show>
+          </p>
         </header>
 
-        {/* ── Wizard body ─────────────────────────────────────────── */}
-        <Show when={flow() === 'choose'}>
-          <ChoiceCards
-            onPickManual={() => setFlow('manual')}
-            onPickAgent={() => setFlow('agent')}
-          />
-        </Show>
-
-        <Show when={flow() === 'manual'}>
-          <ManualFlow
-            tlsMissing={diagnose() === 'tls-missing'}
-            cdCommand={cdCommand()}
-            startCommand={startCommand()}
-            shutdownCommand={shutdownCommand()}
-            syncCommand={syncCommand()}
-            onBack={() => setFlow('choose')}
-          />
-        </Show>
-
-        <Show when={flow() === 'agent'}>
-          <AgentFlow
-            prompt={agentPrompt()}
-            onBack={() => setFlow('choose')}
-          />
-        </Show>
-
-        {/* ── Heartbeat — always visible ─────────────────────────── */}
-        <div class="offline-panel__watch" data-state={watching() ? 'on' : 'off'}>
-          <Show
-            when={watching()}
-            fallback={
-              <>
-                <span class="offline-panel__watch-label">
-                  Watcher stopped — the cockpit won't auto-reconnect until you click below.
-                </span>
-                <button
-                  type="button"
-                  class="offline-panel__watch-btn is-primary"
-                  onClick={() => { setElapsedSec(0); setWatching(true); }}
-                >
-                  Resume watching :{props.sel.port}
-                </button>
-              </>
-            }
-          >
-            <span class="offline-panel__watch-dot" aria-hidden="true" />
-            <span class="offline-panel__watch-label">
-              Watching <code>/health</code> on :{props.sel.port} — {elapsedSec()}s elapsed. The cockpit reconnects the moment the daemon answers.
+        <section class="bg-gray-900/50 border border-gray-800 rounded-2xl p-6">
+          <div class="flex items-center gap-3 text-gray-200 text-sm">
+            <span class="inline-block w-4 h-4 rounded-full border-2 border-gray-500/40 border-t-gray-200 animate-spin" />
+            <span>
+              Watching <code class="font-mono text-gray-300">/health</code> on{' '}
+              <span class="font-mono text-gray-300">:{props.sel.port}</span> — {elapsedSec()}s elapsed
             </span>
-            <button
-              type="button"
-              class="offline-panel__watch-btn"
-              onClick={() => setWatching(false)}
-            >
-              Stop watching
-            </button>
-          </Show>
-        </div>
+          </div>
 
-        <footer class="offline-panel__foot">
-          <p>
-            Project is gone for good? Use the trash icon on the rail row to forget it.
-          </p>
-        </footer>
+          <Show when={stuck()}>
+            <div class="mt-5 pt-5 border-t border-gray-800 space-y-3">
+              <p class="text-gray-400 text-xs leading-relaxed">
+                Looks like the daemon isn't coming back on its own. Pick one of these — the watcher
+                keeps running, so the panel vanishes as soon as <code class="font-mono">/health</code> answers.
+              </p>
+              <div class="flex gap-2">
+                <ModeButton active={mode() === 'self'} onClick={() => setMode(mode() === 'self' ? null : 'self')}>
+                  I'll start it myself
+                </ModeButton>
+                <ModeButton active={mode() === 'agent'} onClick={() => setMode(mode() === 'agent' ? null : 'agent')}>
+                  Hand it to my Claude Code
+                </ModeButton>
+              </div>
+
+              <Show when={mode() === 'self'}>
+                <ManualSteps
+                  tlsMissing={diagnose() === 'tls-missing'}
+                  cdCommand={cdCommand()}
+                  startCommand={startCommand()}
+                  shutdownCommand={shutdownCommand()}
+                  syncCommand={syncCommand()}
+                />
+              </Show>
+
+              <Show when={mode() === 'agent'}>
+                <CommandBlock multiline label="Paste this into Claude Code / Cursor / Cline">
+                  {agentPrompt()}
+                </CommandBlock>
+              </Show>
+            </div>
+          </Show>
+        </section>
+
+        <p class="text-gray-500 text-[11px] leading-relaxed mt-4 text-center">
+          Project gone for good? Use the trash icon on the rail row to forget it.
+        </p>
       </div>
     </section>
   );
 }
 
-// ── Wizard pieces ──────────────────────────────────────────────────
-
-function ChoiceCards(props: { onPickManual: () => void; onPickAgent: () => void }) {
+function ModeButton(props: { active: boolean; onClick: () => void; children: JSX.Element }): JSX.Element {
   return (
-    <div class="offline-choices">
-      <button type="button" class="offline-choice" onClick={props.onPickManual}>
-        <span class="offline-choice__icon" aria-hidden="true">⌨</span>
-        <span class="offline-choice__title">I'll start it myself</span>
-        <span class="offline-choice__desc">
-          Open a terminal in the project, run a one-line command.
-          You'll see each step with a copy button.
-        </span>
-      </button>
-      <button type="button" class="offline-choice" onClick={props.onPickAgent}>
-        <span class="offline-choice__icon" aria-hidden="true">✦</span>
-        <span class="offline-choice__title">Hand it to my local Claude Code</span>
-        <span class="offline-choice__desc">
-          Get a ready-to-paste prompt for Claude Code / Cursor / Cline.
-          Covers both the "not running" and "missing TLS" cases.
-        </span>
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={props.onClick}
+      class={`flex-1 font-mono text-xs uppercase tracking-wider px-3 py-2 rounded-lg border transition-colors ${
+        props.active
+          ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-100'
+          : 'bg-gray-800/40 border-gray-700 text-gray-300 hover:bg-gray-800/80 hover:border-gray-600'
+      }`}
+    >
+      {props.children}
+    </button>
   );
 }
 
-function ManualFlow(props: {
+function ManualSteps(props: {
   tlsMissing: boolean;
   cdCommand: string | null;
   startCommand: string;
   shutdownCommand: string;
   syncCommand: string;
-  onBack: () => void;
-}) {
-  // Build the linear step list the operator sees. Short-circuit on the
-  // TLS-missing diagnose: that case needs shutdown→sync→start (three
-  // commands the daemon-already-bound case requires), so we don't try
-  // to be clever — show them all, copy buttons make it painless.
-  const steps = (): Array<{ label: string; hint: string; code: string | null }> => {
-    const out: Array<{ label: string; hint: string; code: string | null }> = [];
-    out.push({
-      label: 'Open a terminal in the project folder',
-      hint: props.cdCommand
-        ? "We know the path from this cockpit's known-projects list — copy & paste."
-        : "cd into the project's root directory.",
-      code: props.cdCommand,
-    });
+}): JSX.Element {
+  const steps = (): Array<{ label: string; code: string | null }> => {
+    const out: Array<{ label: string; code: string | null }> = [];
+    out.push({ label: 'Open a terminal in the project folder', code: props.cdCommand });
     if (props.tlsMissing) {
-      out.push({
-        label: 'Shut down the half-broken daemon',
-        hint: 'Plain HTTP via localhost is fine — no auth needed for /shutdown there.',
-        code: props.shutdownCommand,
-      });
-      out.push({
-        label: 'Sync daemon.py + the TLS bundle from MeshKore Core',
-        hint: 'Source path assumes the meshkore monorepo lives at ~/Documents/Prj/asimovia/meshkore. Adjust if yours is elsewhere.',
-        code: props.syncCommand,
-      });
+      out.push({ label: 'Shut down the half-broken daemon', code: props.shutdownCommand });
+      out.push({ label: 'Sync daemon.py + TLS bundle', code: props.syncCommand });
     }
-    out.push({
-      label: props.tlsMissing ? 'Start the daemon again' : 'Start the daemon',
-      hint: 'Leave this terminal open — the daemon logs to stdout and exits on Ctrl+C. The cockpit will reconnect on its own.',
-      code: props.startCommand,
-    });
+    out.push({ label: props.tlsMissing ? 'Start the daemon again' : 'Start the daemon', code: props.startCommand });
     return out;
   };
-
   return (
-    <div class="offline-flow">
-      <button type="button" class="offline-flow__back" onClick={props.onBack}>
-        ← back to options
-      </button>
-      <ol class="offline-flow__steps">
-        <For each={steps()}>
-          {(s, i) => <Step n={i() + 1} title={s.label} hint={s.hint} code={s.code} />}
-        </For>
-      </ol>
-    </div>
+    <ol class="space-y-2">
+      <For each={steps()}>
+        {(s, i) => (
+          <li class="flex gap-3 items-start">
+            <span class="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-800 text-[10px] font-mono text-gray-400 mt-1">
+              {i() + 1}
+            </span>
+            <div class="flex-1 min-w-0">
+              <p class="text-gray-200 text-xs mb-1">{s.label}</p>
+              <Show when={s.code}>
+                <CommandBlock>{s.code!}</CommandBlock>
+              </Show>
+            </div>
+          </li>
+        )}
+      </For>
+    </ol>
   );
 }
 
-function AgentFlow(props: { prompt: string; onBack: () => void }) {
-  return (
-    <div class="offline-flow">
-      <button type="button" class="offline-flow__back" onClick={props.onBack}>
-        ← back to options
-      </button>
-      <Step
-        n={1}
-        title="Open Claude Code / Cursor / Cline in this project root"
-        hint="Whichever local code agent you use — the prompt below is provider-neutral. The agent will need shell + file access."
-        code={null}
-      />
-      <Step
-        n={2}
-        title="Paste this prompt and let the agent take it"
-        hint="The prompt diagnoses (running? bound? TLS?) and fixes the right path. You don't need to read it — just paste."
-        code={props.prompt}
-        multiline
-      />
-    </div>
-  );
-}
-
-function Step(props: { n: number; title: string; hint: string; code: string | null; multiline?: boolean }) {
+function CommandBlock(props: { children: string; multiline?: boolean; label?: string }): JSX.Element {
   const [copied, setCopied] = createSignal(false);
-  const onCopy = async (): Promise<void> => {
-    if (!props.code) return;
+  const copy = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(props.code);
+      await navigator.clipboard.writeText(props.children);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
+      setTimeout(() => setCopied(false), 1500);
     } catch { /* clipboard denied */ }
   };
   return (
-    <li class="offline-step">
-      <div class="offline-step__head">
-        <span class="offline-step__n">{props.n}</span>
-        <h3>{props.title}</h3>
-      </div>
-      <p class="offline-step__hint">{props.hint}</p>
-      <Show when={props.code}>
-        <div class={`offline-step__code${props.multiline ? ' is-multiline' : ''}`}>
-          <code>{props.code}</code>
-          <button type="button" class="offline-step__copy" onClick={onCopy}>
-            {copied() ? 'copied' : 'copy'}
-          </button>
-        </div>
+    <div class="rounded-lg border border-gray-800 bg-gray-950 p-3 font-mono text-[11px] text-gray-200 overflow-x-auto">
+      <Show when={props.label}>
+        <p class="text-[10px] uppercase tracking-wider text-gray-500 mb-2 font-mono">{props.label}</p>
       </Show>
-    </li>
+      <div class="flex items-start justify-between gap-2">
+        <code class={`whitespace-pre-wrap break-all leading-snug select-all ${props.multiline ? '' : ''}`}>{props.children}</code>
+        <button
+          type="button"
+          onClick={() => { void copy(); }}
+          class="flex-shrink-0 text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-gray-700 hover:border-gray-600 text-gray-400 hover:text-gray-200 transition-colors"
+        >
+          {copied() ? 'copied' : 'copy'}
+        </button>
+      </div>
+    </div>
   );
 }
