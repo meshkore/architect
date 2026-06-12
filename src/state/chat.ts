@@ -91,14 +91,6 @@ export interface ChatMsg {
    *  on the daemon. Currently emitted only for `kind: 'user'` events
    *  whose dispatch carried images / docs. */
   attachments?: ChatAttachment[];
-  /** V89.2 — Ephemeral flag set when the cockpit witnesses
-   *  `chat.assistant.final` LIVE (not during a timeline rehydrate).
-   *  Causes the bubble to auto-expand on arrival so the operator
-   *  sees the full summary without having to click. Once they toggle
-   *  the bubble manually OR the page is reloaded, the flag isn't
-   *  carried (CollapsibleText keeps its own local expand state and
-   *  rehydration goes through the gated codepath). */
-  _freshFinal?: boolean;
   _placeholder_user?: boolean;
   _placeholder?: boolean;
 }
@@ -151,6 +143,25 @@ export interface ChatStoreState {
    *  head when the conv goes idle after a turn final). Cockpit ingests
    *  via WS `queue.item.*` events. Empty array when no queue. */
   queues: Record<string, ChatQueueItem[]>;
+  /** 2026-06-12 — per-conv pagination cursor for the windowed history
+   *  loader. A long-lived conv has hundreds of persisted messages; the
+   *  UI only ever renders a sliding window (INITIAL_PAGE on focus,
+   *  +PAGE on scroll-up, hard-capped at UI_MESSAGE_CAP). The storage
+   *  keeps everything; we just don't paint past the cap. */
+  paging: Record<string, ChatPaging>;
+}
+
+export interface ChatPaging {
+  /** Daemon says there are older messages beyond what we've loaded. */
+  hasMore: boolean;
+  /** ISO ts of the oldest message currently in convMap (the `before`
+   *  cursor for the next older page). */
+  oldestTs: string;
+  /** A page fetch is in flight (prevents double-trigger on scroll). */
+  loading: boolean;
+  /** UI cap reached: even if `hasMore`, we stop loading to protect the
+   *  render + memory. The history still exists on disk. */
+  capped: boolean;
 }
 
 const initial: ChatStoreState = {
@@ -165,7 +176,21 @@ const initial: ChatStoreState = {
   convs: {},
   convsHydratedAt: null,
   queues: {},
+  paging: {},
 };
+
+// 2026-06-12 — windowed history loader knobs.
+//   INITIAL_PAGE — messages loaded when a conv gains focus / on reload.
+//   PAGE         — messages loaded per scroll-up step.
+//   UI_MESSAGE_CAP — hard ceiling on rendered messages per conv. Past
+//                    this we stop loading older pages AND trim the
+//                    oldest as live finals append, so a long session
+//                    never balloons the DOM. The daemon keeps the full
+//                    history; the operator just can't scroll past it
+//                    in the cockpit.
+export const INITIAL_PAGE = 20;
+export const PAGE = 20;
+export const UI_MESSAGE_CAP = 100;
 
 const [state, setState] = createStore<ChatStoreState>(initial);
 const [activeClusterId, setActiveClusterId] = createSignal<string | null>(null);
@@ -821,9 +846,9 @@ function stripAnchorMarkers(text: string): string {
 }
 
 // py-1.11.0 — Set while pre-seeding convMap from a `chatConvMessages`
-// pagination fetch. Suppresses the `_freshFinal` auto-expand flag on
-// historical messages (only LIVE finals should auto-expand). Set by
-// `loadConvMessagesPage` around the seed loop.
+// pagination fetch, so the ingest reducer treats historical messages
+// as rehydration (e.g. the work-* conv auto-unarchive guard below
+// stays inert). Set by `loadConvMessagesPage` around the seed loop.
 let hydrating = false;
 
 /**
@@ -907,16 +932,14 @@ function ingestEvent(ev: DaemonEvent): void {
     const idx = arr.findIndex(
       (m) => m.kind === 'assistant' && streamId !== undefined && m.stream_id === streamId,
     );
-    // V89.2 — only flag _freshFinal on LIVE events. During timeline
-    // rehydration we re-run every historical final through the same
-    // reducer; flagging fresh on those would make every old summary
-    // auto-expand on reload, which is the opposite of the design.
-    const freshFinal = !hydrating;
+    // V107.36 — _freshFinal auto-expand removed (it un-clamped every
+    // fresh reply → 50-line walls landed expanded). Fresh finals now
+    // respect the CollapsibleText clamp; contract-following agents
+    // self-disclose via <details> and aren't clamped at all.
     if (idx >= 0) {
       setState('convMap', conv, idx, {
         text: cleaned,
         streaming: false,
-        _freshFinal: freshFinal || undefined,
       });
     } else {
       setState('convMap', conv, [
@@ -928,7 +951,6 @@ function ingestEvent(ev: DaemonEvent): void {
           ts: typeof ev.ts === 'string' ? ev.ts : undefined,
           streaming: false,
           stream_id: streamId,
-          _freshFinal: freshFinal || undefined,
         },
       ]);
     }
@@ -945,6 +967,12 @@ function ingestEvent(ev: DaemonEvent): void {
     // finished work-* subagent convs in its runner's final handler and
     // broadcasts conv.archived; the cockpit just reacts via
     // ingestConvEvent.
+    // 2026-06-12 — windowed-history cap. After a LIVE final appends,
+    // trim the conv's rendered window to the newest UI_MESSAGE_CAP so a
+    // long session doesn't balloon the DOM. Only during live ingest
+    // (not hydrating — the initial page is already ≤ INITIAL_PAGE). The
+    // daemon keeps the full history; we just cap what's painted.
+    if (!hydrating) capConvWindow(conv);
     return;
   }
   if (ev.type === 'chat.cancelled') {
@@ -1350,7 +1378,91 @@ async function loadConvMessagesPage(
   } finally {
     hydrating = false;
   }
+  // 2026-06-12 — record the pagination cursor so the windowed loader
+  // (loadEarlierMessages) and the UI's "load earlier" affordance know
+  // whether older pages exist and where to resume from.
+  const list = state.convMap[conv] ?? [];
+  const oldest = list.length > 0 ? (list[0].ts ?? '') : (res.data.oldest_ts ?? '');
+  setState('paging', conv, {
+    hasMore: !!res.data.has_more,
+    oldestTs: oldest,
+    loading: false,
+    capped: list.length >= UI_MESSAGE_CAP,
+  });
   return { has_more: res.data.has_more, oldest_ts: res.data.oldest_ts };
+}
+
+/** 2026-06-12 — Load the next older PAGE of messages for `conv` and
+ *  PREPEND them to convMap. Called by ChatThread when the operator
+ *  scrolls near the top. No-ops when: no more history, already loading,
+ *  or the UI cap is reached (the daemon keeps the history; we just stop
+ *  rendering past UI_MESSAGE_CAP to protect the DOM + memory). Returns
+ *  the number of messages prepended so the caller can preserve scroll. */
+async function loadEarlierMessages(client: DaemonClient, conv: string): Promise<number> {
+  const p = state.paging[conv];
+  if (!p || !p.hasMore || p.loading) return 0;
+  const before = list_len(conv) >= UI_MESSAGE_CAP;
+  if (before) {
+    setState('paging', conv, 'capped', true);
+    return 0;
+  }
+  setState('paging', conv, 'loading', true);
+  const res = await client.chatConvMessages(conv, { before: p.oldestTs, limit: PAGE });
+  if (!res.ok) {
+    setState('paging', conv, 'loading', false);
+    log.warn('loadEarlierMessages failed', { conv, status: res.status });
+    return 0;
+  }
+  // Build the older-message array WITHOUT touching convMap's live tail,
+  // then splice it on the front. We can't reuse ingestEvent here (it
+  // appends), so map + prepend manually with the same shape.
+  const older: ChatMsg[] = [];
+  for (const ev of res.data.messages) {
+    const t = typeof (ev as DaemonEvent).type === 'string' ? (ev as DaemonEvent).type : '';
+    const e = ev as DaemonEvent;
+    if (t === 'chat.user') {
+      older.push({ kind: 'user', text: String(e.text ?? ''), author: String(e.author ?? 'operator'), ts: String(e.ts ?? '') });
+    } else if (t === 'chat.assistant' || t === 'chat.assistant.final') {
+      older.push({ kind: 'assistant', text: stripAnchorMarkers(stripRememberLines(String(e.text ?? ''))), streaming: false, ts: String(e.ts ?? ''), stream_id: typeof e.stream_id === 'string' ? e.stream_id : undefined });
+    } else if (t === 'chat.cancelled') {
+      older.push({ kind: 'assistant', text: String(e.text ?? ''), streaming: false, cancelled: true, ts: String(e.ts ?? '') });
+    }
+  }
+  const current = state.convMap[conv] ?? [];
+  const merged = [...older, ...current];
+  // Respect the UI cap: if prepending would blow past it, keep the
+  // NEWEST UI_MESSAGE_CAP and flag capped (no more loads). The operator
+  // sees a thin "older history hidden" notice in the UI.
+  let next = merged;
+  let capped = false;
+  if (merged.length > UI_MESSAGE_CAP) {
+    next = merged.slice(merged.length - UI_MESSAGE_CAP);
+    capped = true;
+  }
+  setState('convMap', conv, next);
+  setState('paging', conv, {
+    hasMore: !!res.data.has_more && !capped,
+    oldestTs: next.length > 0 ? (next[0].ts ?? '') : p.oldestTs,
+    loading: false,
+    capped,
+  });
+  return older.length;
+}
+
+function list_len(conv: string): number {
+  return (state.convMap[conv] ?? []).length;
+}
+
+/** 2026-06-12 — Trim a conv's rendered window to the newest
+ *  UI_MESSAGE_CAP messages. Called after a live final appends. Once
+ *  trimming kicks in, mark `capped` so the scroll-up loader stops
+ *  fetching older pages (we'd just trim them right back off). */
+function capConvWindow(conv: string): void {
+  const list = state.convMap[conv] ?? [];
+  if (list.length <= UI_MESSAGE_CAP) return;
+  setState('convMap', conv, list.slice(list.length - UI_MESSAGE_CAP));
+  const p = state.paging[conv];
+  if (p) setState('paging', conv, 'capped', true);
 }
 
 /** Apply a WS `conv.*` event to the local convs map. Idempotent —
@@ -1609,6 +1721,7 @@ export const chatStore = {
   hydrateFromSnapshot,
   ingestConvEvent,
   loadConvMessagesPage,
+  loadEarlierMessages,
   // V107.41 — chat-turn queue (Standard v16).
   ingestQueueEvent,
   hydrateQueue,

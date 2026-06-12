@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
-import { chatStore, type ChatMsg } from '~/state/chat';
+import { chatStore, INITIAL_PAGE, type ChatMsg } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
 import { MessageBubble, PreparingBubble, ToolUseBubble, TaskLifecycleBubble } from '~/components/ChatBubbles';
 import { waitingByConv } from '~/state/server';
@@ -81,7 +81,12 @@ export default function ChatThread(props: {
     loadedConvs.add(conv);
     // V107.36 — flag in-flight; clear on completion (success OR fail).
     setLoadingConvs((s) => { const n = new Set(s); n.add(conv); return n; });
-    void chatStore.loadConvMessagesPage(client, conv, { limit: 200 }).finally(() => {
+    // 2026-06-12 — windowed history: load only the newest INITIAL_PAGE
+    // messages on focus (was 200). A long conv has hundreds of
+    // persisted turns; rendering them all froze the panel + scrolled
+    // from the top. The scroll-up handler below loads older pages on
+    // demand, hard-capped at UI_MESSAGE_CAP.
+    void chatStore.loadConvMessagesPage(client, conv, { limit: INITIAL_PAGE }).finally(() => {
       setLoadingConvs((s) => { const n = new Set(s); n.delete(conv); return n; });
     });
   });
@@ -123,10 +128,61 @@ export default function ChatThread(props: {
     return true;
   };
 
+  // 2026-06-12 — windowed history scroll-up loader. When the operator
+  // scrolls within SCROLL_TRIGGER_PX of the top AND there are older
+  // pages, fetch the next PAGE and prepend it — preserving the visual
+  // scroll position so the viewport doesn't jump (anchor on the
+  // scrollHeight delta). Stops at UI_MESSAGE_CAP (paging.capped).
+  let scrollEl: HTMLDivElement | undefined;
+  const SCROLL_TRIGGER_PX = 80;
+  const paging = () => {
+    const c = chatStore.state.activeConv;
+    return c ? chatStore.state.paging[c] : undefined;
+  };
+  const onScroll = (): void => {
+    if (!scrollEl) return;
+    if (scrollEl.scrollTop > SCROLL_TRIGGER_PX) return;
+    const conv = chatStore.state.activeConv;
+    const client = daemonStore.state.client;
+    const p = paging();
+    if (!conv || !client || !p || !p.hasMore || p.loading || p.capped) return;
+    const prevHeight = scrollEl.scrollHeight;
+    const prevTop = scrollEl.scrollTop;
+    void chatStore.loadEarlierMessages(client, conv).then((added) => {
+      if (added > 0 && scrollEl) {
+        // Preserve the viewport: new content was prepended, so shift
+        // scrollTop down by the height that got added above.
+        requestAnimationFrame(() => {
+          if (!scrollEl) return;
+          scrollEl.scrollTop = prevTop + (scrollEl.scrollHeight - prevHeight);
+        });
+      }
+    });
+  };
+
   return (
-    <div ref={props.ref} class="flex-1 min-h-0 overflow-y-auto p-3 space-y-6">
+    <div
+      ref={(el) => { scrollEl = el; props.ref(el); }}
+      onScroll={onScroll}
+      class="flex-1 min-h-0 overflow-y-auto p-3 space-y-6"
+    >
       <Show when={showLoader()}>
         <ChatLoadingPlaceholder />
+      </Show>
+      {/* 2026-06-12 — windowed history affordances at the top of the
+          thread. While an older page loads: a spinner. When the UI
+          cap is hit: a thin notice (the history isn't deleted — just
+          not painted past UI_MESSAGE_CAP to keep the panel snappy). */}
+      <Show when={paging()?.loading}>
+        <div class="flex items-center justify-center gap-2 py-2 text-[11px] text-gray-500">
+          <span class="inline-block w-3 h-3 rounded-full border-2 border-gray-600 border-t-gray-300 animate-spin" />
+          Cargando mensajes anteriores…
+        </div>
+      </Show>
+      <Show when={paging()?.capped && !paging()?.loading}>
+        <div class="text-center py-2 text-[11px] text-gray-600">
+          — mostrando los últimos mensajes · el historial completo sigue en el daemon —
+        </div>
       </Show>
       <For each={props.stream.pre}>
         {(it) => {
