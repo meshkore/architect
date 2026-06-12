@@ -13,6 +13,10 @@ export type ModalProps = {
   onClose: (id: string | null) => void;
   title?: string;
   subtitle?: string;
+  /** 2026-06-13 — when provided, renders in place of the `subtitle`
+   *  string. Lets a caller put an inline-editable field (e.g. the
+   *  agent title) directly in the modal header. */
+  subtitleNode?: JSX.Element;
   buttons?: ModalButton[];
   floating?: boolean;
   zIndex?: number;
@@ -66,8 +70,12 @@ export function Modal(props: ModalProps): JSX.Element {
                 <Show when={props.title}>
                   <h2 class="text-base font-semibold text-gray-100 truncate">{props.title}</h2>
                 </Show>
-                <Show when={props.subtitle}>
-                  <p class="text-xs text-gray-400 mt-0.5 truncate">{props.subtitle}</p>
+                <Show when={props.subtitleNode} fallback={
+                  <Show when={props.subtitle}>
+                    <p class="text-xs text-gray-400 mt-0.5 truncate">{props.subtitle}</p>
+                  </Show>
+                }>
+                  <div class="mt-1">{props.subtitleNode}</div>
                 </Show>
               </div>
               <button
