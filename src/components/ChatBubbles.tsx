@@ -57,6 +57,61 @@ const COLLAPSED_MAX_PX = 144;
 const COLLAPSED_MASK = 'linear-gradient(to bottom, #000 0%, #000 70%, rgba(0,0,0,0.55) 88%, transparent 100%)';
 
 /**
+ * 2026-06-12 — Inject a top-right "copy" button into every `<pre>`
+ * code block of a rendered-markdown container. The chat bubble's
+ * body is set via `innerHTML` (marked output), so Solid can't own
+ * these buttons — we walk the DOM after each render and attach a
+ * native button + click handler. Idempotent: a `data-copy-enhanced`
+ * marker on the `<pre>` prevents double-injection across re-renders.
+ *
+ * The button copies the `<pre>`'s textContent (the raw code, not the
+ * tokenised HTML). Visual: a small absolutely-positioned chip that
+ * fades in on hover of the block, and confirms with a 1.5s "copied".
+ */
+function enhanceCodeBlocks(root: HTMLElement): void {
+  const pres = root.querySelectorAll('pre');
+  for (let i = 0; i < pres.length; i += 1) {
+    const pre = pres[i] as HTMLElement;
+    if (pre.dataset.copyEnhanced === '1') continue;
+    pre.dataset.copyEnhanced = '1';
+    // The <pre> needs to be a positioning context for the absolute btn.
+    if (getComputedStyle(pre).position === 'static') pre.style.position = 'relative';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chat-copy-btn';
+    btn.textContent = 'copy';
+    btn.setAttribute('aria-label', 'Copy code');
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const text = pre.innerText; // innerText = rendered code, preserves newlines
+      const done = (): void => {
+        btn.textContent = 'copied';
+        btn.classList.add('is-copied');
+        window.setTimeout(() => {
+          btn.textContent = 'copy';
+          btn.classList.remove('is-copied');
+        }, 1500);
+      };
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(() => { /* denied */ });
+      } else {
+        // Fallback for non-secure contexts.
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); done(); } catch { /* noop */ }
+        document.body.removeChild(ta);
+      }
+    });
+    pre.appendChild(btn);
+  }
+}
+
+/**
  * Collapsible text wrapper. Renders text up to COLLAPSED_MAX_PX tall
  * by default; if the content overflows, surfaces a "+ show more"
  * toggle directly below. Expanded state unclamps + flips to
@@ -126,6 +181,18 @@ function CollapsibleText(props: {
   // Re-measure on every text mutation (covers streaming + edits + the
   // marked render lifecycle since the parsed HTML lands async).
   createEffect(() => { void props.text; void html(); queueMicrotask(measure); });
+
+  // 2026-06-12 — copy button on code blocks. Operator: "cuando se
+  // despliegan estos contenedores, deberíamos tener arriba a la
+  // derecha un botón de copiar." The agent's <details> bodies render
+  // their payload inside <pre> blocks via innerHTML, so Solid can't
+  // own the button — we inject it into the DOM after each render and
+  // wire a native click handler. Idempotent via a data-marker.
+  createEffect(() => {
+    void html();
+    if (!props.markdown) return;
+    queueMicrotask(() => { if (bodyEl) enhanceCodeBlocks(bodyEl); });
+  });
 
   // V107.36 — When the agent self-discloses via native `<details>` blocks
   // (daemon py-1.14.0 Output Contract: ≤8-line summary + one <details> per

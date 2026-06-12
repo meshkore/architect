@@ -356,6 +356,110 @@
       /* break-word + anywhere shouldn't apply inside a pre. */
     }
 
+    /* 2026-06-12 — top-right copy button injected into every code block
+       (enhanceCodeBlocks in ChatBubbles.tsx). Faint by default, brightens
+       on hover of the block, confirms green on copy. */
+    .chat-md pre .chat-copy-btn {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 2px 7px;
+      border-radius: 5px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      background: rgba(15, 23, 42, 0.85);
+      color: #9ca3af;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 120ms, color 120ms, border-color 120ms, background 120ms;
+      z-index: 2;
+    }
+    .chat-md pre:hover .chat-copy-btn,
+    .chat-md pre .chat-copy-btn:focus-visible { opacity: 1; }
+    .chat-md pre .chat-copy-btn:hover {
+      color: #e5e7eb;
+      border-color: rgba(148, 163, 184, 0.55);
+      background: rgba(15, 23, 42, 0.95);
+    }
+    .chat-md pre .chat-copy-btn.is-copied {
+      opacity: 1;
+      color: var(--theme-accent-bright, #34d399);
+      border-color: color-mix(in srgb, var(--theme-accent-bright, #34d399) 50%, transparent);
+    }
+    /* Touch / no-hover: keep the button always visible so it's reachable. */
+    @media (hover: none) {
+      .chat-md pre .chat-copy-btn { opacity: 0.7; }
+    }
+
+    /* 2026-06-12 (V107.36) — Native <details> blocks. Daemon py-1.14.0's
+       Output Contract has every agent put per-file / per-topic detail
+       inside a <details>, so the operator scans an ≤8-line summary and
+       clicks only what they care about. Style it as a quiet, bordered
+       disclosure card: a clickable summary row with a rotating ▸ marker,
+       indented body when open. Palette stays in the chat's near-black /
+       gray register — no emerald (that's reserved for true accents). */
+    .chat-md details {
+      margin: 0.5em 0;
+      border: 1px solid rgba(75, 85, 99, 0.32);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.018);
+      overflow: hidden;
+    }
+    .chat-md details + details { margin-top: 0.4em; }
+    .chat-md summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 0.4em 0.7em;
+      font-size: 0.9em;
+      font-weight: 600;
+      color: #cbd2da;
+      display: flex;
+      align-items: center;
+      gap: 0.5em;
+      user-select: none;
+      transition: color 120ms, background 120ms;
+    }
+    .chat-md summary:hover { color: #f3f4f6; background: rgba(255, 255, 255, 0.03); }
+    .chat-md summary::-webkit-details-marker { display: none; }
+    .chat-md summary::before {
+      content: '▸';
+      color: var(--theme-accent-bright, #34d399);
+      font-size: 0.8em;
+      transition: transform 120ms ease;
+      flex: none;
+    }
+    .chat-md details[open] > summary::before { transform: rotate(90deg); }
+    /* Far-right affordance: a down-chevron pinned to the right edge of
+       the summary row (margin-left:auto eats the flex gap) so it's
+       obvious the card opens downward. Flips to point up when open. */
+    .chat-md summary::after {
+      content: '⌄';
+      margin-left: auto;
+      flex: none;
+      color: #8b94a3;
+      font-size: 1.1em;
+      line-height: 1;
+      transform: translateY(-0.12em);
+      transition: transform 120ms ease, color 120ms;
+    }
+    .chat-md summary:hover::after { color: #cbd2da; }
+    .chat-md details[open] > summary::after { transform: translateY(0.06em) rotate(180deg); }
+    .chat-md details[open] > summary {
+      border-bottom: 1px solid rgba(75, 85, 99, 0.28);
+    }
+    /* Body of an open <details> — everything after the summary. The
+       padding gives the disclosed content room; first/last child margins
+       are trimmed so the card stays tight. */
+    .chat-md details[open] > summary ~ * {
+      margin-left: 0.7em;
+      margin-right: 0.7em;
+    }
+    .chat-md details[open] > summary + * { margin-top: 0.6em; }
+    .chat-md details[open] > :last-child { margin-bottom: 0.6em; }
+
     /* Blockquote — emerald left rail accent. */
     .chat-md blockquote {
       border-left: 3px solid color-mix(in srgb, var(--theme-accent-bright) 40%, transparent);
