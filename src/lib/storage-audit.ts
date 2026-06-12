@@ -27,6 +27,22 @@ const ALLOWED_EXACT = new Set<string>([
   'mc-layout-v1',
   'mc-panel-order-v1',
   'mc-panel-widths-v1',
+  // uiStore per-browser preferences (state/ui.ts KEYS). 2026-06-13 —
+  // these were being WIPED on every boot because the allowlist
+  // predated them: rail widths, collapsed state, active tab/zone,
+  // filters, etc. didn't survive a refresh. Operator field report:
+  // "si reduzco una columna, si la muevo… debes guardarlo en el
+  // localStorage". Each must match KEYS in state/ui.ts exactly.
+  'mc-active-tab',
+  'mc-active-zone',
+  'mc-projects-rail-mode',
+  'mc-projects-rail-width',
+  'mc-chat-rail-width',
+  'mc-nav-filter',
+  'mc-ws-tab',
+  'mc-initiative-group-by-phase',
+  'mc-modules-pill',
+  'mc-modules-collapsed',
   // Auth (per-browser tokens)
   'meshkore-tokens-v1',
   'meshcore-token', // legacy single-cluster token; tokens-v1 supersedes
