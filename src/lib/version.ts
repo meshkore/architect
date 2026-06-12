@@ -99,7 +99,7 @@ export const MIN_DAEMON_VERSION = 'py-1.11.0';
  * and operators get an infinite "Reload" loop (the new bundle has
  * the same stale EXPECTED → banner reappears).
  */
-export const EXPECTED_DAEMON_VERSION = 'py-1.13.3';
+export const EXPECTED_DAEMON_VERSION = 'py-1.14.1';
 
 /** Convenience: gate against the project's MIN. */
 export function meetsMinimum(actual: string | DaemonVersion | undefined | null): boolean {
@@ -136,6 +136,23 @@ export function missingRequiredFeatures(features: readonly string[] | undefined 
 
 export function isFeatureGapped(features: readonly string[] | undefined | null): boolean {
   return missingRequiredFeatures(features).length > 0;
+}
+
+/**
+ * 2026-06-12 — Returns true when the daemon is STRICTLY older than
+ * `EXPECTED_DAEMON_VERSION` (the cockpit's build target) but STILL
+ * meets the hard minimum. This is the "behind but functional" band:
+ * everything works, but the operator is missing new features that
+ * just shipped. Drives the soft `DaemonBehindBanner` — a thin top
+ * strip with an "Update now" button, NOT a full-body block.
+ *
+ * `DaemonOutdatedPanel` (full body) still handles the hard case
+ * (daemon below MIN or feature-gapped). `DaemonAheadPanel` handles
+ * the inverse (daemon ahead by ≥ minor).
+ */
+export function isDaemonBehind(actual: string | DaemonVersion | undefined | null): boolean {
+  if (!meetsMinimum(actual)) return false; // hard-outdated supersedes
+  return !isDaemonAtLeast(actual, EXPECTED_DAEMON_VERSION);
 }
 
 /**
