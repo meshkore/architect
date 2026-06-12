@@ -30,6 +30,7 @@ import DiagramsPanel from '~/components/DiagramsPanel';
 import AgentsPanel from '~/components/zones/AgentsPanel';
 import DaemonOutdatedPanel from '~/components/DaemonOutdatedPanel';
 import DaemonAheadPanel from '~/components/DaemonAheadPanel';
+import BootingPanel from '~/components/BootingPanel';
 import ConfigPanel from '~/components/zones/ConfigPanel';
 import BookmarksPanel from '~/components/zones/BookmarksPanel';
 import CronsPanel from '~/components/zones/CronsPanel';
@@ -46,6 +47,7 @@ import ColumnDragGrip from '~/components/ColumnDragGrip';
 import { openNewAgentWizard } from '~/components/modals/NewAgentWizard';
 import { daemonStore } from '~/state/daemon';
 import { serverStore } from '~/state/server';
+import { chatStore } from '~/state/chat';
 import { nav } from '~/state/nav';
 import { uiStore, type Zone } from '~/state/ui';
 import { layoutStore, type ColumnId } from '~/state/layout';
@@ -140,6 +142,18 @@ export default function Cockpit(props: {
               when={daemonStore.state.activeId}
               fallback={<RailEmptyPanel />}
             >
+            {/* CBO1 (2026-06-12) — boot overlay. The moment a daemon
+                WS opens, activeId flips true and the workspace
+                renders with empty data while serverStore.snapshot +
+                chatStore.convsHydratedAt are still in flight. Cover
+                the body with BootingPanel until both hydrate. The
+                ProjectsRail lives outside <main>, stays clickable
+                throughout so the operator can switch clusters
+                without waiting. */}
+            <Show
+              when={serverStore.state.snapshot != null && chatStore.state.convsHydratedAt != null}
+              fallback={<BootingPanel />}
+            >
               <section class={`tab-panel three-col${uiStore.state.modulesCollapsed ? ' nav-collapsed' : ''}`}>
                 {/* Middle two columns: architect zone keeps its own
                     nav-col + splitter + left-col; migrated top-tab
@@ -171,6 +185,7 @@ export default function Cockpit(props: {
                     tab={tab} setTab={setTab} />
                 </Show>
               </section>
+            </Show>
             </Show>
             </Show>
             </Show>
