@@ -29,6 +29,7 @@ import ContextPanel from '~/components/ContextPanel';
 import DiagramsPanel from '~/components/DiagramsPanel';
 import AgentsPanel from '~/components/zones/AgentsPanel';
 import DaemonOutdatedPanel from '~/components/DaemonOutdatedPanel';
+import DaemonAheadPanel from '~/components/DaemonAheadPanel';
 import ConfigPanel from '~/components/zones/ConfigPanel';
 import BookmarksPanel from '~/components/zones/BookmarksPanel';
 import CronsPanel from '~/components/zones/CronsPanel';
@@ -120,6 +121,17 @@ export default function Cockpit(props: {
             when={!daemonStore.state.outdated}
             fallback={<DaemonOutdatedPanel />}
           >
+            {/* CVS2 (2026-06-12) — when the daemon is ahead by ≥ minor,
+                the wire format may have evolved beyond what this cockpit
+                bundle understands. Block the body until the operator
+                reloads to pick up the matching frontend.
+                `daemonStore.state.ahead` already gates on major/minor
+                (not patch) via isDaemonAhead — patch differences fall
+                through to the existing thin DaemonAheadBanner up top. */}
+            <Show
+              when={!daemonStore.state.ahead}
+              fallback={<DaemonAheadPanel />}
+            >
             <Show
               when={!daemonStore.state.offlineSelection}
               fallback={<OfflinePanel />}
@@ -159,6 +171,7 @@ export default function Cockpit(props: {
                     tab={tab} setTab={setTab} />
                 </Show>
               </section>
+            </Show>
             </Show>
             </Show>
           </Show>
@@ -402,7 +415,15 @@ function DaemonAheadBanner() {
   const [dismissed, setDismissed] = createSignal(
     typeof sessionStorage !== 'undefined' && sessionStorage.getItem('mc-daemon-ahead-dismissed') === '1',
   );
-  const visible = () => daemonStore.state.ahead && !dismissed();
+  // CVS2 — when ahead === true (≥ minor mismatch) the full-body
+  // DaemonAheadPanel already covers the main area. The thin top
+  // banner is reserved for softer cases (e.g. future patch-level
+  // ahead detection that doesn't warrant a block). Today
+  // isDaemonAhead() only fires on minor/major, so this banner
+  // never actually renders — kept as scaffolding for a future
+  // patch-level signal. Guarded explicitly to make the intent
+  // obvious and prevent double-rendering with the panel.
+  const visible = () => false && daemonStore.state.ahead && !dismissed();
   const dismiss = (): void => {
     try { sessionStorage.setItem('mc-daemon-ahead-dismissed', '1'); } catch { /* private mode */ }
     setDismissed(true);
