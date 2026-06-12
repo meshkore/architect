@@ -42,6 +42,34 @@ export default function DaemonBehindPanel(): JSX.Element {
   const [errorMsg, setErrorMsg] = createSignal<string | null>(null);
   const [showManual, setShowManual] = createSignal(false);
 
+  // 2026-06-13 — Follow a daemon that already moved/updated. The
+  // pre-1.14.3 self-update re-execs on a NEW port and the OLD one dies;
+  // if the cockpit cached the old port it sees a stale health record
+  // (e.g. "py-1.14.1" on a now-dead :5574) and fires self-update into
+  // the void. This scans the local range for THIS cluster_id and, if a
+  // daemon is answering at a different port (typically already the new
+  // version), hot-swaps the active client to it — the panel then
+  // unmounts on its own once health reports >= EXPECTED. Returns true
+  // if it followed a move.
+  const followMovedDaemon = async (): Promise<boolean> => {
+    const cid = daemonStore.state.health?.cluster_id;
+    if (!cid) return false;
+    try {
+      const { findClusterPort } = await import('~/components/projects-rail/discovery');
+      const found = await findClusterPort(cid);
+      const curPort = daemonStore.state.instances[daemonStore.state.activeId ?? '']?.port;
+      if (found && found.port !== curPort) {
+        log.info('daemon-behind: cluster moved, following', { cid, from: curPort, to: found.port });
+        try { localStorage.setItem('meshcore-last-port', String(found.port)); } catch { /* quota */ }
+        await daemonStore.switchToPortDetailed(found.port);
+        return true;
+      }
+    } catch (e) {
+      log.warn('daemon-behind: followMovedDaemon failed', e instanceof Error ? e.message : String(e));
+    }
+    return false;
+  };
+
   const fireUpdate = async (): Promise<void> => {
     const c = daemonStore.state.client;
     if (!c) {
@@ -53,17 +81,29 @@ export default function DaemonBehindPanel(): JSX.Element {
     setErrorMsg(null);
     setShowManual(false);
     log.info('daemon-behind: firing /self-update', { cluster: cluster(), from: current() });
-    // Arm the "stuck" timer BEFORE the request resolves. Without this,
-    // a hung daemon (e.g. the request thread is blocked on a stuck
-    // chat session) keeps the panel spinning forever — selfUpdate
-    // never resolves so the post-await setTimeout never fires.
-    const stuckTimer = setTimeout(() => setShowManual(true), STUCK_AFTER_MS);
+    // Arm the "stuck" timer BEFORE the request resolves. On stuck we
+    // first try to FOLLOW a moved daemon (the pre-1.14.3 new-port
+    // re-exec case) before surfacing the manual fallback.
+    const stuckTimer = setTimeout(() => {
+      void followMovedDaemon().then((moved) => { if (!moved) setShowManual(true); });
+    }, STUCK_AFTER_MS);
     try {
       const r = await c.selfUpdate({});
-      // status 0 = transport closed mid-update (the daemon killed itself
-      // to re-exec). That's the SUCCESS shape — wait for WS to come back.
-      // Any other !ok is a real error.
-      if (!r.ok && r.status !== 0) {
+      // status 0 = transport closed. Two cases, both handled the same:
+      //   (a) the daemon killed itself to re-exec (success), OR
+      //   (b) the daemon at this cached port is already dead because a
+      //       prior update moved it to a new port.
+      // Either way, try to follow a moved daemon immediately — if the
+      // cluster is answering elsewhere (already updated), hot-swap and
+      // the panel unmounts. Harmless on the same-port re-exec path (the
+      // scan finds nothing new, WS reconnects on its own).
+      if (r.status === 0) {
+        clearTimeout(stuckTimer);
+        // Small grace for the re-exec to bind, then follow.
+        setTimeout(() => { void followMovedDaemon(); }, 1500);
+        return;
+      }
+      if (!r.ok) {
         clearTimeout(stuckTimer);
         setPhase('failed');
         const detail = r.status === 409
@@ -72,24 +112,30 @@ export default function DaemonBehindPanel(): JSX.Element {
         setErrorMsg(`Update returned ${r.status}: ${detail}`);
         return;
       }
-      // Success path: daemon re-execs, WS drops, port-recovery
-      // reattaches. The panel unmounts when version reaches EXPECTED.
-      // Keep the stuck timer armed in case the re-exec hangs after the
-      // request returned ok.
+      // 2xx: daemon accepted; re-exec in progress. Keep the stuck timer
+      // armed in case it hangs.
     } catch (e) {
       clearTimeout(stuckTimer);
-      setPhase('failed');
-      setErrorMsg(e instanceof Error ? e.message : String(e));
+      // A thrown fetch = connection refused → the cached port is dead.
+      // The daemon likely already moved (prior new-port re-exec). Follow
+      // it before declaring failure.
+      const moved = await followMovedDaemon();
+      if (!moved) {
+        setPhase('failed');
+        setErrorMsg(e instanceof Error ? e.message : String(e));
+      }
     }
   };
 
   onMount(() => {
-    if (autoEnabled()) {
-      void fireUpdate();
-    } else {
-      // Auto-update disabled — go straight to manual instructions.
-      setPhase('manual');
-    }
+    // Always probe for a moved daemon FIRST — if a prior update already
+    // landed the cluster on a new port at a healthy version, we follow
+    // it and the panel unmounts without firing a redundant update.
+    void followMovedDaemon().then((moved) => {
+      if (moved) return;
+      if (autoEnabled()) void fireUpdate();
+      else setPhase('manual');
+    });
   });
 
   return (
