@@ -31,8 +31,16 @@ import ArchitectViolationBanner from '~/components/architect/ArchitectViolationB
  * detalle" — the operator sees movement at all times, doesn't lose
  * scroll position to a growing wall of text. The full text reflows
  * the moment `streaming` flips to false (see AssistantBubble).
+ *
+ * 2026-06-12 — operator: "mientras trabaja y genera output seguimos
+ * como siempre, dejamos ver de 5 a 6 líneas; cuando tenemos el
+ * sumario final, se formatea y se presenta completo." Bumped the tail
+ * from ~4.5 lines (84px) to ~6 lines (112px @ 12px/1.55). The live
+ * markdown render stays light (no collapse, no reformat) — only the
+ * FINAL, after streaming flips false, goes through the full
+ * CollapsibleText + <details> formatting.
  */
-const STREAM_TAIL_HEIGHT_PX = 84;
+const STREAM_TAIL_HEIGHT_PX = 112;
 
 /**
  * V86o — collapse threshold for long messages, in px. Chosen to leave
@@ -63,15 +71,16 @@ function CollapsibleText(props: {
   text: string;
   lockExpanded?: boolean;
   markdown?: boolean;
-  /** V89.2 — When true, the bubble starts EXPANDED. Used by the
-   *  assistant bubble for fresh-final summaries (auto-expand once the
-   *  agent just finished its turn). After the operator toggles, the
-   *  internal `expanded` signal owns the state — the prop only
-   *  influences the initial value. */
-  initialExpanded?: boolean;
   children?: JSX.Element;
 }) {
-  const [expanded, setExpanded] = createSignal(!!props.initialExpanded);
+  // V107.36 — Always start collapsed. The V89.2 `initialExpanded`
+  // auto-expand-on-fresh-final was removed: it un-clamped every fresh
+  // assistant reply, so a 50-line wall landed fully expanded in the
+  // operator's face (the exact complaint behind daemon py-1.14.0's
+  // Output Contract). Now fresh finals respect the clamp; agents that
+  // follow the contract self-disclose via <details> and aren't clamped
+  // at all (see selfDiscloses()).
+  const [expanded, setExpanded] = createSignal(false);
   const [overflows, setOverflows] = createSignal(false);
   // V86r — Markdown rendering for assistant responses. The daemon
   // streams plain text that's actually markdown (headings, tables,
@@ -118,8 +127,17 @@ function CollapsibleText(props: {
   // marked render lifecycle since the parsed HTML lands async).
   createEffect(() => { void props.text; void html(); queueMicrotask(measure); });
 
-  const collapsedNow = (): boolean => !props.lockExpanded && !expanded() && overflows();
-  const showToggle = (): boolean => !props.lockExpanded && overflows();
+  // V107.36 — When the agent self-discloses via native `<details>` blocks
+  // (daemon py-1.14.0 Output Contract: ≤8-line summary + one <details> per
+  // file/topic), the whole-message clamp is counter-productive — it would
+  // hide the <details> headlines behind a second "show more", double-collapsing
+  // the operator's own progressive disclosure. So when the rendered HTML
+  // contains a <details>, we skip the message-level clamp entirely and let the
+  // <details> do the expanding. The clamp stays as the safety net for
+  // non-compliant agents that still emit a 50-line wall of plain prose.
+  const selfDiscloses = (): boolean => (html() ?? '').includes('<details');
+  const collapsedNow = (): boolean => !props.lockExpanded && !expanded() && overflows() && !selfDiscloses();
+  const showToggle = (): boolean => !props.lockExpanded && overflows() && !selfDiscloses();
 
   // V107.35 — Build the collapsed-state inline styles (max-height + soft
   // mask gradient) in one helper so plain-text and markdown branches stay
@@ -561,7 +579,7 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
           <Show
             when={props.msg.streaming}
             fallback={
-              <CollapsibleText text={bodyText()} markdown initialExpanded={props.msg._freshFinal}>
+              <CollapsibleText text={bodyText()} markdown>
                 <Show when={props.msg.cancelled}>
                   <span class="text-red-400/80 text-[11px]"> · cancelled</span>
                 </Show>
