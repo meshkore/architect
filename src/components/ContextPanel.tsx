@@ -185,7 +185,11 @@ const INDENT = 18;     // px per nesting level
 const HALF = 12;       // px — the vertical drops under the parent's +/−
                        //      toggle centre (rowPad 4 + toggle half 8 = 12)
 const ROWCENTER = 13;  // px — vertical centre of a row; where the elbow sits
-const LINE = 'bg-gray-600/60';
+// Bold, high-contrast emerald guides — the operator wants the tree
+// skeleton to read CLEARLY, no subtle hairlines. 2px wide.
+const LINE = 'bg-emerald-500/70';
+const VW = '2px';      // vertical line width
+const HH = '2px';      // horizontal elbow thickness
 
 function TreeNode(props: {
   node: ContextNode;
@@ -240,8 +244,8 @@ function TreeNode(props: {
             {(on, i) => (
               <Show when={on}>
                 <div
-                  class={`absolute w-px ${LINE}`}
-                  style={{ left: `${i() * INDENT + HALF}px`, top: '0', bottom: '0' }}
+                  class={`absolute rounded-full ${LINE}`}
+                  style={{ left: `${i() * INDENT + HALF - 1}px`, top: '0', bottom: '0', width: VW }}
                 />
               </Show>
             )}
@@ -250,17 +254,17 @@ function TreeNode(props: {
               continues to the bottom only if a sibling follows (else it
               becomes a └ corner) */}
           <div
-            class={`absolute w-px ${LINE}`}
+            class={`absolute rounded-full ${LINE}`}
             style={
               props.isLast
-                ? { left: `${ownX}px`, top: '0', height: `${ROWCENTER}px` }
-                : { left: `${ownX}px`, top: '0', bottom: '0' }
+                ? { left: `${ownX - 1}px`, top: '0', height: `${ROWCENTER}px`, width: VW }
+                : { left: `${ownX - 1}px`, top: '0', bottom: '0', width: VW }
             }
           />
           {/* horizontal elbow into the row */}
           <div
-            class={`absolute h-px ${LINE}`}
-            style={{ left: `${ownX}px`, top: `${ROWCENTER}px`, width: `${INDENT}px` }}
+            class={`absolute rounded-full ${LINE}`}
+            style={{ left: `${ownX - 1}px`, top: `${ROWCENTER - 1}px`, width: `${INDENT + 2}px`, height: HH }}
           />
         </div>
       </Show>
