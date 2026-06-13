@@ -13,7 +13,7 @@
  * replace the cockpit body with their own panel via `ZoneView`.
  */
 
-import { createEffect, createSignal, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
+import { createEffect, createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { EXPECTED_DAEMON_VERSION, isDaemonBehind } from '~/lib/version';
 import { cockpitOutdated, latestCockpitCommit, COCKPIT_COMMIT, probeCockpitHealth } from '~/lib/cockpit-version';
 import Header from '~/components/Header';
@@ -76,20 +76,30 @@ export default function Cockpit(props: {
   // fall through and let the cockpit render (chat lazy-loads when the
   // conv is focused / when the snapshot finally lands). A hung chat
   // endpoint must never brick the whole UI.
-  const CHAT_HYDRATE_GRACE_MS = 6000;
+  const CHAT_HYDRATE_GRACE_MS = 3000;
   const [chatGraceElapsed, setChatGraceElapsed] = createSignal(false);
+  // Track the boolean readiness, NOT the snapshot OBJECT identity.
+  // `serverStore.state.snapshot` is replaced with a fresh object on every
+  // roadmap refresh (poll/WS, server.ts:188). Reading it directly in the
+  // grace effect re-ran the effect on every refresh — clearing + restarting
+  // the timer so it NEVER reached CHAT_HYDRATE_GRACE_MS, leaving BootingPanel
+  // hung forever whenever /chat/snapshot was slow/hung (ikamiro ChatSessions
+  // deadlock, 2026-06-13). createMemo only notifies on the boolean flip, so
+  // the timer starts once on snapshot-ready and actually fires.
+  const snapReady = createMemo(() => serverStore.state.snapshot != null);
+  const chatReady = createMemo(() => chatStore.state.convsHydratedAt != null);
   createEffect(() => {
-    // (Re)start the grace timer whenever the roadmap snapshot becomes
-    // available but chat hasn't hydrated yet.
-    if (serverStore.state.snapshot != null && chatStore.state.convsHydratedAt == null) {
+    // Start the grace timer once the roadmap snapshot is in but chat
+    // hasn't hydrated. Only re-runs when either BOOLEAN flips.
+    if (snapReady() && !chatReady()) {
       setChatGraceElapsed(false);
       const t = setTimeout(() => setChatGraceElapsed(true), CHAT_HYDRATE_GRACE_MS);
       onCleanup(() => clearTimeout(t));
     }
   });
   const booted = (): boolean => {
-    if (serverStore.state.snapshot == null) return false; // roadmap is mandatory
-    if (chatStore.state.convsHydratedAt != null) return true; // both ready
+    if (!snapReady()) return false; // roadmap is mandatory
+    if (chatReady()) return true; // both ready
     return chatGraceElapsed(); // chat slow/hung → fall through after grace
   };
 
