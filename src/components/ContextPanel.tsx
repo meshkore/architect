@@ -112,7 +112,14 @@ export default function ContextPanel(_props: Props) {
               <Show when={t().exists && t().tree.length > 0} fallback={<EmptyTree />}>
                 <ul class="text-[13px]">
                   <For each={t().tree}>
-                    {(node) => <TreeNode node={node} depth={0} />}
+                    {(node, i) => (
+                      <TreeNode
+                        node={node}
+                        depth={0}
+                        isLast={i() === t().tree.length - 1}
+                        ancestorLines={[]}
+                      />
+                    )}
                   </For>
                 </ul>
               </Show>
@@ -170,7 +177,22 @@ function EmptyTree() {
   );
 }
 
-function TreeNode(props: { node: ContextNode; depth: number }) {
+// ── Tree-guide geometry ───────────────────────────────────────────────
+// The connector skeleton (├─ │ └─) is drawn with absolutely-positioned
+// 1px divs rather than borders/masks, so it stays correct at any depth
+// and never depends on the (themeable) background colour.
+const INDENT = 18;     // px per nesting level
+const HALF = 12;       // px — the vertical drops under the parent's +/−
+                       //      toggle centre (rowPad 4 + toggle half 8 = 12)
+const ROWCENTER = 13;  // px — vertical centre of a row; where the elbow sits
+const LINE = 'bg-gray-600/60';
+
+function TreeNode(props: {
+  node: ContextNode;
+  depth: number;
+  isLast: boolean;
+  ancestorLines: boolean[]; // slots 0..depth-2: draw a through-line iff that ancestor has more siblings below
+}) {
   const isFile = () => props.node.kind === 'file';
   const isDir = () => props.node.kind === 'dir';
   const isExpanded = () => viewStore.isContextNodeExpanded(props.node.path);
@@ -180,6 +202,12 @@ function TreeNode(props: { node: ContextNode; depth: number }) {
     if (isDir() && !hasChildren()) return;
     viewStore.toggleContextNode(props.node.path);
   };
+
+  // Lines handed to THIS node's children: my ancestors' lines + my own
+  // continuation (true iff I have a sibling below me). Top-level (depth
+  // 0) draws no connector, so its children start a fresh slot at 0.
+  const childLines = (): boolean[] =>
+    props.depth === 0 ? [] : [...props.ancestorLines, !props.isLast];
 
   // Full body — fetched once the file node is expanded.
   const [bodyHtml] = createResource(
@@ -197,17 +225,49 @@ function TreeNode(props: { node: ContextNode; depth: number }) {
     },
   );
 
-  // Row label / box indent. Files in folders sit at depth 1; the body
-  // box keeps a small per-depth indent so it reads as belonging to its
-  // node, while still spanning to the container's right edge.
-  const rowPad = () => `${0.4 + props.depth * 0.85}rem`;
-  const boxIndent = () => `${0.4 + props.depth * 0.85 + 1.45}rem`;
+  const rowPad = () => `${4 + props.depth * INDENT}px`;
+  const ownX = (props.depth - 1) * INDENT + HALF; // x of this node's connector slot
+  const boxIndent = () => `${props.depth * INDENT + 26}px`;
 
   return (
-    <li>
+    <li class="relative">
+      {/* ── tree-guide rails (absolute, full li height, above the row's
+            hover bg so they never get painted over) ── */}
+      <Show when={props.depth >= 1}>
+        <div class="absolute inset-0 z-10 pointer-events-none">
+          {/* through-lines for ancestors that still have siblings below */}
+          <For each={props.ancestorLines}>
+            {(on, i) => (
+              <Show when={on}>
+                <div
+                  class={`absolute w-px ${LINE}`}
+                  style={{ left: `${i() * INDENT + HALF}px`, top: '0', bottom: '0' }}
+                />
+              </Show>
+            )}
+          </For>
+          {/* this node's vertical: from the top down to the elbow; it
+              continues to the bottom only if a sibling follows (else it
+              becomes a └ corner) */}
+          <div
+            class={`absolute w-px ${LINE}`}
+            style={
+              props.isLast
+                ? { left: `${ownX}px`, top: '0', height: `${ROWCENTER}px` }
+                : { left: `${ownX}px`, top: '0', bottom: '0' }
+            }
+          />
+          {/* horizontal elbow into the row */}
+          <div
+            class={`absolute h-px ${LINE}`}
+            style={{ left: `${ownX}px`, top: `${ROWCENTER}px`, width: `${INDENT}px` }}
+          />
+        </div>
+      </Show>
+
       <div
         onClick={toggle}
-        class={`group flex items-center gap-1.5 px-2 py-1 cursor-pointer rounded transition-colors ${
+        class={`group relative flex items-center gap-1.5 px-2 min-h-[26px] cursor-pointer rounded transition-colors ${
           isExpanded() && isFile() ? 'text-emerald-200' : 'hover:bg-gray-800/40 text-gray-300'
         }`}
         style={{ 'padding-left': rowPad() }}
@@ -220,7 +280,9 @@ function TreeNode(props: { node: ContextNode; depth: number }) {
           class={`w-4 h-4 flex-shrink-0 inline-flex items-center justify-center rounded font-mono text-[11px] leading-none transition-colors ${
             isDir() && !hasChildren()
               ? 'text-gray-700 cursor-default'
-              : 'text-gray-500 hover:text-emerald-300 hover:bg-emerald-500/10'
+              : isExpanded()
+                ? 'text-emerald-300 bg-emerald-500/10'
+                : 'text-gray-500 bg-gray-900/60 hover:text-emerald-300 hover:bg-emerald-500/10'
           }`}
           title={isExpanded() ? 'colapsar' : 'expandir'}
           aria-label={isExpanded() ? 'collapse' : 'expand'}
@@ -280,9 +342,16 @@ function TreeNode(props: { node: ContextNode; depth: number }) {
 
       {/* DIR expanded → children (README included) */}
       <Show when={isDir() && isExpanded() && hasChildren()}>
-        <ul class="border-l border-gray-800/50 ml-3">
+        <ul>
           <For each={props.node.children!}>
-            {(child) => <TreeNode node={child} depth={props.depth + 1} />}
+            {(child, i) => (
+              <TreeNode
+                node={child}
+                depth={props.depth + 1}
+                isLast={i() === props.node.children!.length - 1}
+                ancestorLines={childLines()}
+              />
+            )}
           </For>
         </ul>
       </Show>
