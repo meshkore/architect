@@ -1,9 +1,12 @@
 /**
- * ContextPanel — V107.38 (single-column nested-tree accordion).
+ * ContextPanel — V107.40 (single-column tree, single common root).
  *
  * Renders the project's context tree (`.meshkore/context/`, daemon
  * `/context`, py-1.14.1+) as ONE full-width column:
  *
+ *   • A circled-C ROOT node sits at the top; its spine drops straight
+ *     down and EVERY top-level branch elbows off it (bold emerald 2px
+ *     guides: ├─ │ └─), so the tree reads as one connected whole.
  *   • Every node — folders AND files — carries a +/− toggle.
  *   • Expanding a FOLDER reveals its children (README.md included).
  *   • Expanding a FILE reveals its FULL markdown body inline, in a
@@ -110,18 +113,40 @@ export default function ContextPanel(_props: Props) {
             {/* SINGLE COLUMN — the tree IS the document */}
             <div class="flex-1 overflow-y-auto px-4 py-3">
               <Show when={t().exists && t().tree.length > 0} fallback={<EmptyTree />}>
-                <ul class="text-[13px]">
-                  <For each={t().tree}>
-                    {(node, i) => (
-                      <TreeNode
-                        node={node}
-                        depth={0}
-                        isLast={i() === t().tree.length - 1}
-                        ancestorLines={[]}
-                      />
-                    )}
-                  </For>
-                </ul>
+                {/* Everything hangs off ONE common origin: a circled-C
+                    root node at the top. Its spine drops straight down
+                    and every top-level branch elbows off it, so the tree
+                    reads as a single connected whole (not N loose roots). */}
+                <div class="relative">
+                  <div class="relative flex items-center" style={{ height: '30px' }}>
+                    {/* spine: from the badge centre down into the children */}
+                    <div
+                      class={`absolute rounded-full ${LINE}`}
+                      style={{ left: `${HALF - 1}px`, top: '15px', bottom: '0', width: VW }}
+                    />
+                    {/* circled-C origin marker (border + black fill) */}
+                    <span
+                      class="relative z-10 inline-flex items-center justify-center rounded-full border-2 border-emerald-500/80 bg-black text-emerald-400 text-[10px] font-bold leading-none"
+                      style={{ width: '18px', height: '18px', 'margin-left': `${HALF - 9}px` }}
+                      title="context root"
+                    >
+                      C
+                    </span>
+                    <span class="ml-2 text-[11px] font-mono uppercase tracking-wider text-gray-500">context</span>
+                  </div>
+                  <ul class="text-[13px]">
+                    <For each={t().tree}>
+                      {(node, i) => (
+                        <TreeNode
+                          node={node}
+                          depth={1}
+                          isLast={i() === t().tree.length - 1}
+                          ancestorLines={[]}
+                        />
+                      )}
+                    </For>
+                  </ul>
+                </div>
               </Show>
             </div>
           </>
@@ -208,10 +233,10 @@ function TreeNode(props: {
   };
 
   // Lines handed to THIS node's children: my ancestors' lines + my own
-  // continuation (true iff I have a sibling below me). Top-level (depth
-  // 0) draws no connector, so its children start a fresh slot at 0.
-  const childLines = (): boolean[] =>
-    props.depth === 0 ? [] : [...props.ancestorLines, !props.isLast];
+  // continuation (true iff I have a sibling below me, so the spine keeps
+  // dropping past my subtree to the next sibling). Nodes start at depth
+  // 1 — the circled-C root above the tree owns depth 0's spine.
+  const childLines = (): boolean[] => [...props.ancestorLines, !props.isLast];
 
   // Full body — fetched once the file node is expanded.
   const [bodyHtml] = createResource(
