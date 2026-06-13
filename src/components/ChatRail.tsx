@@ -73,6 +73,13 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
     }
     for (const slug of Object.keys(chatStore.state.convMeta)) {
       if (chatStore.state.archivedConvs[slug]) continue;
+      // Belt-and-suspenders: respect the daemon snapshot's `archived`
+      // flag even if the local `archivedConvs` set hasn't been seeded
+      // yet (e.g. the snapshot fetch lagged / hung — ikamiro deadlock,
+      // 2026-06-13). Without this, stale localStorage convMeta entries
+      // from past sessions (every conv ever seen) flood the rail with
+      // already-archived agents until hydration prunes them.
+      if (snapshotConvs[slug]?.archived) continue;
       allSet.add(slug);
     }
     allSet.add(ONBOARDING_CONV_ID); // master is always present, even on a fresh cluster
