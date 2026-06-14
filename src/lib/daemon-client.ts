@@ -904,12 +904,20 @@ export class DaemonClient {
       headers['authorization'] = `Bearer ${this.transport.token}`;
     }
     let res: Response;
+    // V108 — bound EVERY request. Most callers (boot path: health /
+    // state / chatSnapshot, the discovery scan) pass no signal, so a
+    // stalled connection (TLS handshake hiccup, saturated per-host pool)
+    // hung the fetch forever — that's what stranded both the "Looking
+    // for the daemon" scan AND the hydration BootingPanel with no
+    // escape. Cap at 15s and compose with any caller-supplied signal.
+    const timeoutSignal = AbortSignal.timeout(15000);
+    const effectiveSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
     try {
       res = await fetch(url, {
         method,
         headers,
         body: sendsBody ? JSON.stringify(body ?? {}) : undefined,
-        signal,
+        signal: effectiveSignal,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
