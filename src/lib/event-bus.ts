@@ -27,6 +27,7 @@ import { chatStore } from '~/state/chat';
 import { serverStore } from '~/state/server';
 import { storyStore } from '~/state/story';
 import { daemonStore } from '~/state/daemon';
+import { bumpContextRev } from '~/state/context-sync';
 import { log } from './log';
 
 const SNAPSHOT_REFRESH_TYPES = new Set<string>([
@@ -151,6 +152,18 @@ export function attachEventBus(
       // serverStore.refresh writes to byCluster[clusterKey] — already
       // cluster-scoped on the WRITE side. Safe to call from any bus.
       void serverStore.refresh(client, clusterKey);
+      return;
+    }
+    if (t === 'context.changed') {
+      // Daemon detected a `.meshkore/context/` change (an agent it
+      // spawned edited the project context). Bump the revision so the
+      // Context tab re-fetches its tree + any expanded bodies live.
+      // Active-cluster only — same isolation rule as conv.*/run.*.
+      if (!isActiveCluster()) {
+        log.debug('[event-bus] dropping context.changed from non-active cluster', { clusterKey, active: daemonStore.state.activeId });
+        return;
+      }
+      bumpContextRev();
       return;
     }
     // py-1.12.5 — Runner auth events. State lives in daemonStore;

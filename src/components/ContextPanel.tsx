@@ -1,5 +1,12 @@
 /**
- * ContextPanel — V107.40 (single-column tree, single common root).
+ * ContextPanel — V107.41 (live-synced single-column tree).
+ *
+ * Real-time: the daemon broadcasts `context.changed` when any
+ * `.meshkore/context/` file changes (an agent it spawned edited the
+ * project context); the event-bus bumps `contextRev`, and this panel
+ * re-fetches the tree + any expanded bodies live. No manual sync button
+ * — context is presumed always in sync with the daemon.
+ *
  *
  * Renders the project's context tree (`.meshkore/context/`, daemon
  * `/context`, py-1.14.1+) as ONE full-width column:
@@ -28,6 +35,7 @@ import { createResource, For, Show } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { ensureMarked } from '~/lib/cdn-loaders';
 import { viewStore } from '~/state/view';
+import { contextRev } from '~/state/context-sync';
 import { log } from '~/lib/log';
 import type { ContextNode } from '~/lib/daemon-client';
 
@@ -37,12 +45,16 @@ interface Props {
   moduleId?: string | null;
 }
 
+// Body cache keyed by `${rev}|${path}`. A new context revision (daemon
+// `context.changed` WS event) is a fresh key → fresh fetch, so expanded
+// bodies update live without manual cache-busting.
 const bodyCache = new Map<string, string>();
 
 // Shared body loader. Strips YAML frontmatter (the body is what the
-// operator reads) and memoizes by path so re-expanding is instant.
-async function loadContextBody(path: string): Promise<string | null> {
-  const cached = bodyCache.get(path);
+// operator reads) and memoizes by (rev, path).
+async function loadContextBody(path: string, rev: number): Promise<string | null> {
+  const key = `${rev}|${path}`;
+  const cached = bodyCache.get(key);
   if (cached !== undefined) return cached;
   const client = daemonStore.state.client;
   if (!client) return null;
@@ -54,7 +66,7 @@ async function loadContextBody(path: string): Promise<string | null> {
     if (end !== -1) body = body.slice(end + 5);
   }
   body = body.trim();
-  bodyCache.set(path, body);
+  bodyCache.set(key, body);
   return body;
 }
 
@@ -74,9 +86,11 @@ const PROSE = [
 ].join(' ');
 
 export default function ContextPanel(_props: Props) {
-  // Fetch the tree on mount + refetch when the cluster changes.
-  const [treeRes, { refetch }] = createResource(
-    () => daemonStore.state.activeId,
+  // Fetch the tree on mount, refetch when the cluster changes OR when the
+  // daemon signals a `.meshkore/context/` change (contextRev bump). No
+  // manual sync — context is presumed always in sync with the daemon.
+  const [treeRes] = createResource(
+    () => `${daemonStore.state.activeId ?? ''}|${contextRev()}`,
     async () => {
       const client = daemonStore.state.client;
       if (!client) return null;
@@ -94,8 +108,6 @@ export default function ContextPanel(_props: Props) {
     },
   );
 
-  const refresh = () => { void refetch(); };
-
   return (
     <div class="flex flex-col h-full min-h-0">
       <Show when={treeRes()}
@@ -109,7 +121,7 @@ export default function ContextPanel(_props: Props) {
       >
         {(t) => (
           <>
-            <BudgetBadge tree={t()} onRefresh={refresh} />
+            <BudgetBadge tree={t()} />
             {/* SINGLE COLUMN — the tree IS the document */}
             <div class="flex-1 overflow-y-auto px-4 py-3">
               <Show when={t().exists && t().tree.length > 0} fallback={<EmptyTree />}>
@@ -156,7 +168,7 @@ export default function ContextPanel(_props: Props) {
   );
 }
 
-function BudgetBadge(props: { tree: { token_estimate: number; budget_tokens: number; over_budget: boolean; warnings: string[] }; onRefresh: () => void }) {
+function BudgetBadge(props: { tree: { token_estimate: number; budget_tokens: number; over_budget: boolean; warnings: string[] } }) {
   const pct = (): number => Math.min(100, Math.round((props.tree.token_estimate / props.tree.budget_tokens) * 100));
   const cls = (): string => {
     if (props.tree.over_budget) return 'text-red-300 border-red-500/40 bg-red-500/10';
@@ -174,14 +186,15 @@ function BudgetBadge(props: { tree: { token_estimate: number; budget_tokens: num
         </span>
       </Show>
       <div class="flex-1" />
-      <button
-        type="button"
-        onClick={props.onRefresh}
-        title="Refetch context tree"
-        class="text-gray-500 hover:text-emerald-300 transition px-1.5 py-0.5 rounded hover:bg-emerald-500/10"
-      >
-        ↻
-      </button>
+      {/* No manual sync — the daemon pushes `context.changed` and the
+          tree refetches live. A quiet "live" dot communicates that. */}
+      <span class="flex items-center gap-1.5 text-gray-500" title="Sincronizado en vivo con el daemon">
+        <span class="relative flex h-1.5 w-1.5">
+          <span class="absolute inline-flex h-full w-full rounded-full bg-emerald-400/60 animate-ping" />
+          <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+        </span>
+        en vivo
+      </span>
     </div>
   );
 }
@@ -238,12 +251,17 @@ function TreeNode(props: {
   // 1 — the circled-C root above the tree owns depth 0's spine.
   const childLines = (): boolean[] => [...props.ancestorLines, !props.isLast];
 
-  // Full body — fetched once the file node is expanded.
+  // Full body — fetched when the file node is expanded, and re-fetched
+  // when the daemon signals a context change (contextRev bump) so an
+  // expanded body updates live, not just on collapse/re-expand.
   const [bodyHtml] = createResource(
-    () => (isFile() && isExpanded() ? props.node.path : null),
-    async (path: string | null) => {
-      if (!path) return '';
-      const raw = await loadContextBody(path);
+    () => (isFile() && isExpanded() ? `${props.node.path}|${contextRev()}` : null),
+    async (key: string | null) => {
+      if (!key) return '';
+      const sep = key.lastIndexOf('|');
+      const path = key.slice(0, sep);
+      const rev = Number(key.slice(sep + 1));
+      const raw = await loadContextBody(path, rev);
       if (raw == null) return null; // null → render an error hint
       try {
         const m = await ensureMarked();
