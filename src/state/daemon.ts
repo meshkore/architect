@@ -507,7 +507,12 @@ async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
   let health: HealthResponse;
   try {
     console.log('[RAIL] switchToPort probing', probeUrl);
-    const r = await fetch(probeUrl);
+    // V108 — bounded probe. Without a timeout a hung /health (TLS stall,
+    // saturated connection pool) left switchToPortDetailed pending
+    // forever, so the switchProject in-flight guard never cleared and
+    // the project was stuck un-switchable. 5s is well above a healthy
+    // localhost /health (<100ms) yet bounds the worst case.
+    const r = await fetch(probeUrl, { signal: AbortSignal.timeout(5000) });
     if (!r.ok) {
       console.warn('[RAIL] switchToPort probe non-OK', { port, status: r.status });
       log.warn('switchToPort probe failed', port, r.status);

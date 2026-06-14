@@ -94,7 +94,38 @@ export async function stopAllAgents(clusterKey: string): Promise<{ cancelled: nu
   };
 }
 
+const switchProjectInFlight = new Set<number>();
+
+/**
+ * V108 — per-port re-entrancy guard. A failed/flapping switch (the
+ * OfflinePanel /health auto-watcher + its port-reconcile effect both
+ * retrying the SAME port) stacked infinite concurrent switchProject
+ * calls, each firing a /health probe. Those probes saturated the
+ * browser's per-host connection pool and the UI froze in an endless
+ * `switchProject → switchToPort → probing` loop (ikamiro hang, field
+ * 2026-06-15). Coalesce: while a switch to this port is in flight,
+ * re-entrant calls no-op immediately — no reactive mutation, no probe —
+ * until the first one settles (attach succeeds, or fails and the slow
+ * 2s OfflinePanel poll can retry one-at-a-time).
+ */
 export async function switchProject(
+  port: number,
+  key: string,
+  fallback?: { display: string; cluster_id: string | null; cluster_name: string | null },
+): Promise<boolean> {
+  if (switchProjectInFlight.has(port)) {
+    console.log('[RAIL] switchProject coalesced — switch to this port already in flight', { port, key });
+    return false;
+  }
+  switchProjectInFlight.add(port);
+  try {
+    return await switchProjectImpl(port, key, fallback);
+  } finally {
+    switchProjectInFlight.delete(port);
+  }
+}
+
+async function switchProjectImpl(
   port: number,
   key: string,
   fallback?: { display: string; cluster_id: string | null; cluster_name: string | null },
