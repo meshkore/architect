@@ -160,12 +160,16 @@ export default function ChatPanel() {
 
   const onTokenRejected = () => {
     const h = daemonStore.state.health;
-    const cli = client();
-    if (!h || !cli) return;
+    if (!h) return;
     openTokenUnlockModal({
       project: { port: h.port, cluster_id: h.cluster_id ?? null, cluster_name: h.cluster_name ?? null },
       reason: 'Token rejected by /chat/dispatch — paste a fresh one.',
-      onUnlocked: (token) => { cli.transport.token = token; },
+      // A-TOKEN-01 (V110) — re-attach through switchToPortDetailed (the
+      // modal already saved the new token to the per-cluster store). That
+      // re-runs the D-TLS-02 identity challenge AND re-dials the WS
+      // carrying the new token — vs the old `cli.transport.token = token`
+      // which left the open WS streaming on the STALE credential.
+      onUnlocked: () => { void daemonStore.switchToPortDetailed(h.port); },
     });
   };
 

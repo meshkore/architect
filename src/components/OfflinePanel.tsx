@@ -81,6 +81,12 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }): J
         const r = await fetch(`${daemonHttpBase(port)}/health`, {
           signal: AbortSignal.timeout(WATCH_TIMEOUT_MS),
         });
+        // A-OFFLINE-RACE-01 (V110) — re-check AFTER the await: the port
+        // may have changed (sel update / reconcile effect) while the
+        // fetch was in flight, and `cancelled` is only checked before
+        // the loop. Without this the stale in-flight probe could fire a
+        // switch to a now-wrong port.
+        if (cancelled) return;
         if (r.ok) {
           log.info('[OfflinePanel] daemon answered — switching', { port });
           void switchProject(port, props.sel.key, {
@@ -309,12 +315,19 @@ function ManualSteps(props: {
 
 function CommandBlock(props: { children: string; multiline?: boolean; label?: string }): JSX.Element {
   const [copied, setCopied] = createSignal(false);
+  const [copyErr, setCopyErr] = createSignal(false);
   const copy = async (): Promise<void> => {
     try {
       await navigator.clipboard.writeText(props.children);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch { /* clipboard denied */ }
+    } catch {
+      // A-OFFLINE-RACE-01 (V110) — surface the failure instead of
+      // swallowing it; clipboard is often denied without a user gesture
+      // / on insecure origins, and a silent no-op looks like a dead button.
+      setCopyErr(true);
+      setTimeout(() => setCopyErr(false), 2500);
+    }
   };
   return (
     <div class="rounded-lg border border-gray-800 bg-gray-950 p-3 font-mono text-[11px] text-gray-200 overflow-x-auto">
@@ -328,7 +341,7 @@ function CommandBlock(props: { children: string; multiline?: boolean; label?: st
           onClick={() => { void copy(); }}
           class="flex-shrink-0 text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-gray-700 hover:border-gray-600 text-gray-400 hover:text-gray-200 transition-colors"
         >
-          {copied() ? 'copied' : 'copy'}
+          {copyErr() ? 'select + ⌘C' : copied() ? 'copied' : 'copy'}
         </button>
       </div>
     </div>

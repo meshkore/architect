@@ -1089,8 +1089,17 @@ async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promis
   };
   log.info('chat dispatch →', _diagShape);
   setState('pendingReplyConvs', conv, Date.now());
+  // A-CHAT-GUARD-01 (V110) — capture the cluster this send belongs to.
+  const atCluster = activeClusterId();
   const res = await client.chatDispatch(body);
   if (!res.ok) {
+    // Swap-guard: if the operator switched projects before the dispatch
+    // resolved, the rollback + in-thread error must NOT land in the
+    // now-active cluster's slice (conv ids are shared across clusters).
+    if (activeClusterId() !== atCluster) {
+      log.debug('[swap-guard] dropping stale dispatch rollback', { conv, from: atCluster });
+      return { ok: false, status: res.status, error: 'cluster switched mid-dispatch' };
+    }
     const list = state.convMap[conv] ?? [];
     const idx = list.findIndex((m) => m._placeholder_user && m.ts === localTs);
     if (idx >= 0) {
@@ -1709,9 +1718,19 @@ function ingestQueueEvent(ev: DaemonEvent): void {
  *  have no queue, so we skip the round trip unless the user is about
  *  to interact with one). */
 async function hydrateQueue(client: DaemonClient, conv: string): Promise<void> {
+  // A-CHAT-GUARD-01 (V110) — swap-guard. Capture the active cluster at
+  // call start; if a project switch lands before the fetch resolves,
+  // drop the result instead of writing cluster A's queue into the
+  // now-active cluster B's slice. conv ids (e.g. _onboarding_v1) are
+  // shared across clusters, so this is a real cross-cluster bleed.
+  const atCluster = activeClusterId();
   try {
     const res = await client.queueList(conv);
     if (res.ok) {
+      if (activeClusterId() !== atCluster) {
+        log.debug('[swap-guard] dropping stale queue hydrate', { conv, from: atCluster });
+        return;
+      }
       setState('queues', conv, res.data.items ?? []);
     }
   } catch (e) {
