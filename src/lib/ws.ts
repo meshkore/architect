@@ -65,8 +65,27 @@ export class DaemonWS {
   /** Open the socket. Idempotent: ignored if already connecting / open. */
   connect(): void {
     if (this.state === 'connecting' || this.state === 'open') return;
+    // A-WS-01 (V109) — a connect() after we gave up (`fatal`) or after a
+    // clean `closed`/pending `reconnecting` must start a FRESH retry
+    // budget. Without this, retryStep was still ≥ MAX_RETRY_ATTEMPTS, so
+    // the next failure re-`fatal`ed immediately — a daemon that restarts
+    // on the SAME port (now the norm with stable ports) would never
+    // reconnect. Reset the counter + drop any pending backoff timer.
+    if (this.state === 'fatal' || this.state === 'closed' || this.state === 'reconnecting') {
+      this.retryStep = 0;
+      if (this.retryTimer !== null) {
+        clearTimeout(this.retryTimer);
+        this.retryTimer = null;
+      }
+    }
     this.wantClose = false;
     this.dial();
+  }
+
+  /** True when the socket has given up (no auto-reconnect). The health
+   *  poll uses this to revive via connect() once the daemon answers. */
+  isDead(): boolean {
+    return this.state === 'fatal' || this.state === 'closed';
   }
 
   /** Close the socket and stop reconnecting. */

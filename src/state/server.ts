@@ -177,19 +177,36 @@ function writeSlice(key: string, patch: Partial<ClusterSlice>): void {
 }
 
 async function doRefresh(client: DaemonClient, key: string): Promise<void> {
+  // A-BOOT-01 (V109) — retry a failed /state a couple of times with a
+  // short backoff before surfacing the error. A single transient drop
+  // (TLS hiccup, daemon mid-restart) used to leave snapshot=null with no
+  // retry → the boot gate hung. With the daemon now bounding requests,
+  // a quick retry almost always succeeds; the boot escape is the last
+  // resort, not the common path.
   writeSlice(key, { refreshing: true, error: null });
-  const res = await client.state();
-  if (!res.ok) {
-    log.warn('server.refresh failed', { cluster: key, status: res.status, body: res.body });
-    writeSlice(key, { refreshing: false, error: res.error ?? res.body.slice(0, 200) });
-    return;
+  let lastErr = '';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 400 * attempt));
+    }
+    const res = await client.state();
+    if (res.ok) {
+      writeSlice(key, {
+        snapshot: res.data as ServerSnapshot,
+        lastRefresh: new Date().toISOString(),
+        refreshing: false,
+        error: null,
+      });
+      return;
+    }
+    lastErr = res.error ?? res.body.slice(0, 200);
+    log.warn('server.refresh attempt failed', {
+      cluster: key,
+      attempt,
+      status: res.status,
+    });
   }
-  writeSlice(key, {
-    snapshot: res.data as ServerSnapshot,
-    lastRefresh: new Date().toISOString(),
-    refreshing: false,
-    error: null,
-  });
+  writeSlice(key, { refreshing: false, error: lastErr });
 }
 
 /** Debounced per-cluster refresh. Two back-to-back calls on the same

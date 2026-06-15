@@ -650,6 +650,10 @@ async function recheckHealth(): Promise<boolean> {
     // V107.14 — recheck after operator-triggered update also accounts for
     // the feature gate (a daemon at-or-above MIN can still lack features).
     outdated: !meetsMinimum(v) || isFeatureGapped(r.data.features),
+    // A-HEALTH-01 (V109) — recheck must also recompute `ahead`, else a
+    // now-AHEAD daemon keeps a stale flag and the DaemonAheadPanel gate
+    // never fires (refreshAllInstanceHealth already does this).
+    ahead: isDaemonAhead(v),
     supportsSelfUpdate,
   });
   syncFacade();
@@ -683,6 +687,17 @@ async function refreshAllInstanceHealth(): Promise<void> {
         ahead: isDaemonAhead(v),
         supportsSelfUpdate,
       });
+      // A-WS-01 (V109) — the daemon answered, so if its WS gave up
+      // (fatal/closed — e.g. a same-port restart that outlasted the
+      // 6-retry budget) revive it now. connect() resets the retry
+      // counter, so live chat/run streaming resumes within a poll cycle.
+      if (inst.ws && inst.ws.isDead()) {
+        try {
+          inst.ws.connect();
+        } catch {
+          /* ignore — next tick retries */
+        }
+      }
     } catch {
       // Per-instance failure is fine — the WS layer surfaces real
       // outages; we just skip the version refresh this tick.
@@ -690,7 +705,23 @@ async function refreshAllInstanceHealth(): Promise<void> {
   }
   syncFacade();
 }
-setInterval(() => { void refreshAllInstanceHealth(); }, HEALTH_POLL_MS);
+// A-HEALTH-01 (V109) — idempotent start so HMR / repeated imports don't
+// stack duplicate intervals (the old bare module-level setInterval leaked
+// a timer + fetch loop per reload). Exposed stop for app teardown.
+let _healthTimer: ReturnType<typeof setInterval> | null = null;
+function startHealthPoll(): void {
+  if (_healthTimer !== null) return;
+  _healthTimer = setInterval(() => {
+    void refreshAllInstanceHealth();
+  }, HEALTH_POLL_MS);
+}
+function stopHealthPoll(): void {
+  if (_healthTimer !== null) {
+    clearInterval(_healthTimer);
+    _healthTimer = null;
+  }
+}
+startHealthPoll();
 
 export const daemonStore = {
   state,
@@ -701,6 +732,7 @@ export const daemonStore = {
   setPhase,
   setAutoUpdate,
   recheckHealth,
+  stopHealthPoll,
   switchToPort,
   switchToPortDetailed,
   selectOffline,

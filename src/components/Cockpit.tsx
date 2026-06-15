@@ -97,8 +97,28 @@ export default function Cockpit(props: {
       onCleanup(() => clearTimeout(t));
     }
   });
+  // A-BOOT-01 (V109) — the roadmap snapshot was treated as MANDATORY for
+  // boot with no escape (only chat had a grace). If /state errors or
+  // hangs, `snapReady` never flips and BootingPanel bricked the whole
+  // project forever — the same dead-end as the chat hang, on the other
+  // leg. Two escapes: (1) `snapFailed` — the refresh reported an error;
+  // (2) a hard grace window. On escape we render the cockpit; the
+  // roadmap zone shows its empty/error state + a retry banner
+  // (A-ERR-SURFACE-01). Both reset per project switch (keyed on activeId).
+  const BOOT_HARD_GRACE_MS = 10000;
+  const [bootHardGraceElapsed, setBootHardGraceElapsed] = createSignal(false);
+  const snapFailed = createMemo(
+    () => serverStore.state.snapshot == null && serverStore.state.error != null,
+  );
+  createEffect(() => {
+    daemonStore.state.activeId; // reset the escape window on every switch
+    setBootHardGraceElapsed(false);
+    const t = setTimeout(() => setBootHardGraceElapsed(true), BOOT_HARD_GRACE_MS);
+    onCleanup(() => clearTimeout(t));
+  });
   const booted = (): boolean => {
-    if (!snapReady()) return false; // roadmap is mandatory
+    if (snapFailed() || bootHardGraceElapsed()) return true; // escape — never brick
+    if (!snapReady()) return false; // roadmap snapshot still loading
     if (chatReady()) return true; // both ready
     return chatGraceElapsed(); // chat slow/hung → fall through after grace
   };
@@ -142,6 +162,26 @@ export default function Cockpit(props: {
       <div class="flex-1 flex min-h-0">
         <ProjectsRail />
         <main class="flex-1 min-h-0 relative">
+          {/* A-ERR-SURFACE-01 (V109) — the roadmap /state failed but the
+              boot escape (A-BOOT-01) rendered the cockpit anyway. Surface
+              it with an inline retry instead of a silent console warning,
+              so the operator isn't left staring at an empty roadmap with
+              no explanation. */}
+          <Show when={booted() && serverStore.state.error}>
+            <div class="absolute top-0 inset-x-0 z-40 flex items-center justify-center gap-3 px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-amber-200 text-xs">
+              <span>No se pudo cargar el roadmap del daemon.</span>
+              <button
+                class="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 font-medium"
+                onClick={() => {
+                  const c = daemonStore.state.client;
+                  const id = daemonStore.state.activeId;
+                  if (c && id) void serverStore.refreshNow(c, id);
+                }}
+              >
+                Reintentar
+              </button>
+            </div>
+          </Show>
           {/* 2026-06-11 UX fix — when no daemon is connected (boot probe
               in flight, no-daemon, or unauthorized) the ConnectionGate
               replaces RailEmptyPanel in the main area. ProjectsRail stays
