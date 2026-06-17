@@ -1,5 +1,4 @@
 import { store } from '~/state/store';
-import { chatStore } from '~/state/chat';
 import type { ChatMsg } from '~/state/chat';
 import type { DaemonEvent } from '~/lib/daemon-client';
 
@@ -13,23 +12,6 @@ export function buildStream(conv: string, msgs: ChatMsg[]): {
 } {
   const liveIdx = msgs.findIndex((m) => m.kind === 'assistant' && m.streaming);
   const live: ChatMsg | null = liveIdx >= 0 ? msgs[liveIdx]! : null;
-  const liveTs = live?.ts ?? null;
-
-  // A-QUEUE-ORDER-01 (2026-06-16) — whether a turn is ACTIVE (so a freshly
-  // sent user msg should float ABOVE the live work as "queued · merges into
-  // next turn") is DAEMON-AUTHORITATIVE, not inferred from the transient
-  // streaming bubble. With py-1.17.0 turns finalize promptly, so `live`
-  // clears fast; a mid-turn message then fell BELOW the output (operator
-  // field 2026-06-16). Use convs[conv].live + pendingReply so the lift
-  // works whenever the daemon considers the conv busy, and use the turn's
-  // real start (bubble ts OR the pending-start stamp) as the threshold so
-  // the turn's own triggering prompt stays in sequence.
-  const pendingStartMs = chatStore.state.pendingReplyConvs[conv];
-  const convLive = chatStore.state.convs[conv]?.live === true;
-  const turnActive = !!live || convLive || pendingStartMs !== undefined;
-  const liveStartTs =
-    liveTs ??
-    (pendingStartMs !== undefined ? new Date(pendingStartMs).toISOString() : null);
 
   const events: DaemonEvent[] = (store.events() as DaemonEvent[])
     .filter((e) => String(e['conv'] ?? '') === conv);
@@ -37,15 +19,21 @@ export function buildStream(conv: string, msgs: ChatMsg[]): {
   const pre: StreamItem[] = [];
   let queued: StreamItem[] = [];
 
+  // A-QUEUE-ORDER-01 (revised 2026-06-17) — a user message is "queued ·
+  // merges into next turn" ONLY when there is an ACTUAL live streaming
+  // bubble AND the message sits AFTER it in convMap order (a trailing,
+  // not-yet-answered message). Using array position (`i > liveIdx`) — not
+  // a ts comparison, and NOT the daemon's sticky convs[].live / pendingReply
+  // flags. The earlier daemon-authoritative version regressed: those flags
+  // linger after a turn finalizes (py-1.17.0 finalizes promptly), so an
+  // ALREADY-ANSWERED message kept the "queued" badge and rendered BELOW its
+  // own response (operator field 2026-06-17). No live bubble ⇒ nothing is
+  // queued; trailing messages just flow in sequence and trigger the next turn.
   msgs.forEach((m, i) => {
     if (i === liveIdx) return;
     const ts = m.ts ?? '';
     const item: StreamItem = { kind: 'msg', ts, msg: m };
-    // While a turn is active, late chat.user events render above the live
-    // work — they fold into the next chained turn (daemon-authoritative,
-    // A-QUEUE-ORDER-01). `ts > liveStartTs` keeps the turn's OWN triggering
-    // prompt (sent before the turn started) in sequence below.
-    if (turnActive && m.kind === 'user' && liveStartTs && ts > liveStartTs) {
+    if (live && m.kind === 'user' && i > liveIdx) {
       queued.push({ ...item, prepend: true });
     } else {
       pre.push(item);
