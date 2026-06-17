@@ -107,7 +107,7 @@ export const MIN_DAEMON_VERSION = 'py-1.11.0';
 // the CDN doesn't serve. The modularize agent re-points this when it
 // publishes 1.14.4. Build this with `npx vite build` (skips the
 // prebuild sync) until then.
-export const EXPECTED_DAEMON_VERSION = 'py-1.17.0';
+export const EXPECTED_DAEMON_VERSION = 'py-1.17.1';
 
 /** Convenience: gate against the project's MIN. */
 export function meetsMinimum(actual: string | DaemonVersion | undefined | null): boolean {
@@ -180,5 +180,15 @@ export function isDaemonAhead(actual: string | DaemonVersion | undefined | null)
   const e = parseDaemonVersion(EXPECTED_DAEMON_VERSION);
   if (!a || !e) return false;
   if (a.major !== e.major) return a.major > e.major;
-  return a.minor > e.minor;
+  // A-VERSION-UNIFY-01 (2026-06-16) — a minor/patch-ahead daemon NO LONGER
+  // hard-blocks the cockpit. The daemon's semver policy is minor = ADDITIVE
+  // (new OPTIONAL wire fields), major = breaking; an older cockpit safely
+  // ignores unknown fields. Hard-blocking the full render on EVERY minor
+  // bump forced a redeploy+reload on each daemon upgrade (operator friction,
+  // 2026-06-15/16: the gate fired on py-1.16.1→1.17.0 even though the bump
+  // was purely additive). The "reload to pick up the matching cockpit
+  // bundle" nudge is handled separately + softly by cockpitOutdated
+  // (lib/cockpit-version.ts). Only a MAJOR-ahead daemon — a genuine wire
+  // break — trips the full-page DaemonAheadPanel now.
+  return false;
 }

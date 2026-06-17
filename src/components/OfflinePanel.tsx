@@ -28,6 +28,12 @@ import { liveClusters } from '~/components/projects-rail/discovery';
 import { daemonHttpBase } from '~/lib/transport';
 import { log } from '~/lib/log';
 import * as kp from '~/lib/known-projects';
+import CommandBlock from '~/components/CommandBlock';
+import {
+  agentPrompt as buildAgentPrompt,
+  cdCommandOrNull,
+  startCommand as buildStartCommand,
+} from '~/lib/start-command';
 
 const WATCH_INTERVAL_MS = 2000;
 const WATCH_TIMEOUT_MS = 800;
@@ -137,10 +143,17 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }): J
   });
 
   // ── Commands ─────────────────────────────────────────────────────
-  const cdCommand = (): string | null =>
-    props.repoPath ? `cd "${props.repoPath}"` : null;
-  const startCommand = (): string =>
-    `python3 .meshkore/scripts/daemon.py --port ${props.sel.port}`;
+  // A-STARTCMD-HELPER-01 — these now delegate to the shared
+  // `~/lib/start-command` module so ReviveList / OfflinePanel / NoDaemon
+  // all build the same strings.
+  const target = (): { port: number; repo_path: string | null; cluster_id?: string; cluster_name?: string } => ({
+    port: props.sel.port,
+    repo_path: props.repoPath,
+    cluster_id: props.sel.cluster_id ?? undefined,
+    cluster_name: props.sel.cluster_name ?? undefined,
+  });
+  const cdCommand = (): string | null => cdCommandOrNull(target());
+  const startCommand = (): string => buildStartCommand(target());
   const shutdownCommand = (): string =>
     `curl -s -X POST http://localhost:${props.sel.port}/shutdown -H "Authorization: Bearer $(cat .meshkore/credentials/portal-token)"`;
   const syncCommand = (): string => [
@@ -148,32 +161,7 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }): J
     'cp -R ~/Documents/Prj/asimovia/meshkore/.meshkore/scripts/tls .meshkore/scripts/tls',
   ].join(' && \\\n');
 
-  const agentPrompt = (): string => {
-    const port = props.sel.port;
-    const cid = props.sel.cluster_id ? ` (cluster_id=${props.sel.cluster_id})` : '';
-    return (
-`The MeshKore architect cockpit at https://architect.meshkore.com can't reach ` +
-`this project's daemon${cid} on port ${port}. Diagnose and fix:
-
-1. Check if a daemon is already listening:
-   \`lsof -iTCP:${port} -sTCP:LISTEN\`
-
-2a. If NO process owns the port → start the daemon:
-    \`python3 .meshkore/scripts/daemon.py --port ${port}\`
-
-2b. If a process IS bound → the daemon is alive but its TLS bundle is missing,
-    so the HTTPS-only cockpit can't speak to it. Repair:
-    - shutdown the running daemon:
-      \`curl -s -X POST http://localhost:${port}/shutdown -H "Authorization: Bearer $(cat .meshkore/credentials/portal-token)"\`
-    - copy a recent daemon.py + tls/ bundle from a peer project (e.g.
-      \`~/Documents/Prj/asimovia/meshkore/.meshkore/scripts/{daemon.py,tls/}\`)
-      into THIS project's \`.meshkore/scripts/\`.
-    - restart: \`python3 .meshkore/scripts/daemon.py --port ${port}\`
-
-The cockpit will auto-reconnect the moment /health responds over HTTPS at
-https://daemon.meshkore.com:${port}/health.`
-    );
-  };
+  const agentPrompt = (): string => buildAgentPrompt(target());
 
   const cluster = (): string =>
     props.sel.cluster_name ?? props.sel.display ?? `port ${props.sel.port}`;
@@ -310,40 +298,5 @@ function ManualSteps(props: {
         )}
       </For>
     </ol>
-  );
-}
-
-function CommandBlock(props: { children: string; multiline?: boolean; label?: string }): JSX.Element {
-  const [copied, setCopied] = createSignal(false);
-  const [copyErr, setCopyErr] = createSignal(false);
-  const copy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(props.children);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // A-OFFLINE-RACE-01 (V110) — surface the failure instead of
-      // swallowing it; clipboard is often denied without a user gesture
-      // / on insecure origins, and a silent no-op looks like a dead button.
-      setCopyErr(true);
-      setTimeout(() => setCopyErr(false), 2500);
-    }
-  };
-  return (
-    <div class="rounded-lg border border-gray-800 bg-gray-950 p-3 font-mono text-[11px] text-gray-200 overflow-x-auto">
-      <Show when={props.label}>
-        <p class="text-[10px] uppercase tracking-wider text-gray-500 mb-2 font-mono">{props.label}</p>
-      </Show>
-      <div class="flex items-start justify-between gap-2">
-        <code class={`whitespace-pre-wrap break-all leading-snug select-all ${props.multiline ? '' : ''}`}>{props.children}</code>
-        <button
-          type="button"
-          onClick={() => { void copy(); }}
-          class="flex-shrink-0 text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-gray-700 hover:border-gray-600 text-gray-400 hover:text-gray-200 transition-colors"
-        >
-          {copyErr() ? 'select + ⌘C' : copied() ? 'copied' : 'copy'}
-        </button>
-      </div>
-    </div>
   );
 }

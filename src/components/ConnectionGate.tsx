@@ -7,8 +7,12 @@
  * below; the gate itself just dispatches on `status.kind`.
  */
 
-import { Match, Switch } from 'solid-js';
+import { For, Match, Show, Switch, createMemo, createSignal } from 'solid-js';
 import type { ConnectionStatus } from '~/lib/connection';
+import * as kp from '~/lib/known-projects';
+import type { KnownProject } from '~/lib/known-projects';
+import CommandBlock from '~/components/CommandBlock';
+import { agentPrompt, startCommandLine } from '~/lib/start-command';
 
 export default function ConnectionGate(props: {
   status: ConnectionStatus;
@@ -76,17 +80,97 @@ function Probing(props: { message: string }) {
   );
 }
 
+/** Relative "x ago" for a known project's last_seen ISO timestamp. */
+function relativeLastSeen(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '—';
+  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (sec < 60) return 'just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  return `${day}d ago`;
+}
+
 function NoDaemon(props: { ports: number[]; onRetry: () => void }) {
+  // A-NODAEMON-GUIDE-01 — when the boot probe found zero daemons but the
+  // operator has known projects, show a "start me" row per project with
+  // the shared copyable start command (and a Claude Code prompt). Fall
+  // back to the generic `npx meshcore start` only when there are none.
+  const known = createMemo<KnownProject[]>(() => kp.list());
+  const probedRange = (): string => {
+    const lo = props.ports[0];
+    const hi = props.ports[props.ports.length - 1];
+    return lo === hi ? `localhost:${lo}` : `localhost:${lo}–${hi}`;
+  };
   return (
     <div>
       <h2 class="text-lg font-bold mb-2">No daemon detected</h2>
-      <p class="text-gray-400 text-sm leading-relaxed mb-3">
-        We probed <span class="font-mono text-emerald-300">localhost:{props.ports[0]}–{props.ports[props.ports.length - 1]}</span> and got no response. Start the daemon in your repo:
+      <p class="text-gray-400 text-sm leading-relaxed mb-4">
+        We probed <span class="font-mono text-emerald-300">{probedRange()}</span> and got no response.{' '}
+        <Show when={known().length > 0} fallback="Start the daemon in your repo:">
+          Start one of your known projects:
+        </Show>
       </p>
-      <pre class="bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs font-mono text-emerald-300 mb-3">npx meshcore start</pre>
+
+      <Show
+        when={known().length > 0}
+        fallback={
+          <pre class="bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs font-mono text-emerald-300 mb-4">npx meshcore start</pre>
+        }
+      >
+        <div class="space-y-2.5 mb-4">
+          <For each={known()}>
+            {(p) => <KnownProjectStartRow project={p} />}
+          </For>
+        </div>
+      </Show>
+
       <button type="button" onClick={props.onRetry} class="px-3 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-semibold text-xs transition-colors">
         Retry detection
       </button>
+    </div>
+  );
+}
+
+function KnownProjectStartRow(props: { project: KnownProject }) {
+  const [showAgent, setShowAgent] = createSignal(false);
+  const name = (): string =>
+    kp.getAlias(props.project) ||
+    props.project.cluster_name ||
+    props.project.cluster_id ||
+    `:${props.project.port}`;
+  return (
+    <div class="bg-[rgba(11,18,32,0.6)] border border-gray-700/35 rounded-lg p-3.5">
+      <div class="flex items-center gap-2.5 mb-2.5">
+        <div class="flex-1 min-w-0">
+          <div class="text-[13.5px] font-semibold text-gray-200 truncate">{name()}</div>
+          <div class="text-[11px] text-gray-500 mt-0.5">
+            <span class="font-mono text-emerald-300">:{props.project.port}</span>
+            {' · '}last seen {relativeLastSeen(props.project.last_seen)}
+            <Show when={props.project.repo_path}>
+              {(path) => <> · <span class="font-mono break-all">{path()}</span></>}
+            </Show>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowAgent((v) => !v)}
+          class="flex-shrink-0 text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-gray-700 hover:border-emerald-500/50 text-gray-400 hover:text-emerald-200 transition-colors"
+        >
+          {showAgent() ? 'hide prompt' : 'Claude Code'}
+        </button>
+      </div>
+      <CommandBlock>{startCommandLine(props.project)}</CommandBlock>
+      <Show when={showAgent()}>
+        <div class="mt-2.5">
+          <CommandBlock multiline label="Paste this into Claude Code / Cursor / Cline">
+            {agentPrompt(props.project)}
+          </CommandBlock>
+        </div>
+      </Show>
     </div>
   );
 }

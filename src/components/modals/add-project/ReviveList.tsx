@@ -6,19 +6,13 @@
  */
 import { For, Show, createSignal } from 'solid-js';
 import type { KnownProject } from '~/lib/known-projects';
+import { reviveCommand } from '~/lib/start-command';
 import WizardStep from './WizardStep';
 
 export default function ReviveList(props: { stopped: KnownProject[] }) {
   const [picked, setPicked] = createSignal<KnownProject | null>(null);
 
-  const cmd = (p: KnownProject) =>
-    [
-      p.repo_path ? `cd ${p.repo_path}` : '# cd <your project folder>',
-      'mkdir -p .meshkore/.runtime && \\',
-      '  nohup python3 .meshkore/scripts/daemon.py \\',
-      '    > .meshkore/.runtime/daemon.log 2>&1 & \\',
-      '  disown ; echo "✓ daemon launched on :5570-5589"',
-    ].join('\n');
+  const cmd = (p: KnownProject): string => reviveCommand(p);
 
   return (
     <WizardStep title="Pick the project to revive" subtitle="Click one to see the exact start command.">

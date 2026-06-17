@@ -496,6 +496,21 @@ function parseAttachments(raw: unknown): ChatAttachment[] | undefined {
     const url = typeof rec.url === 'string' ? rec.url : '';
     const media_type = typeof rec.media_type === 'string' ? rec.media_type : '';
     if (!url || !media_type) continue;
+    // A-UPLOAD-URL-01 (2026-06-16) — only render attachment urls that are a
+    // real served upload (`/chat/uploads/…`), an absolute http(s) url, or a
+    // local data: URL (optimistic bubble). Field 2026-06-16: a conv slug
+    // ("general-06132022-…") leaked into url and rendered as a broken
+    // <img>; parseAttachments accepted any non-empty string. Anything else
+    // is malformed → drop it instead of painting a broken image.
+    const validUrl =
+      url.startsWith('/chat/uploads/') ||
+      url.startsWith('http://') ||
+      url.startsWith('https://') ||
+      url.startsWith('data:');
+    if (!validUrl) {
+      log.warn('parseAttachments dropped malformed url', { url: url.slice(0, 80) });
+      continue;
+    }
     const kind = rec.kind === 'image' ? 'image' : 'file';
     out.push({
       kind,
@@ -1293,8 +1308,19 @@ function hydrateFromSnapshot(snap: ChatSnapshotResponse): void {
   let rehydratedTurns = 0;
   let rehydratedQueues = 0;
   for (const c of snap.convs) {
-    const ct = (c as ChatConvSummary & { current_turn?: { started_at?: string; stream_id?: string; partial_text?: string } }).current_turn;
-    if (ct && c.live && ct.stream_id) {
+    const cc = c as ChatConvSummary & {
+      current_turn?: { started_at?: string; stream_id?: string; partial_text?: string };
+      last_final_stream_id?: string;
+    };
+    const ct = cc.current_turn;
+    // A-LIVEBUBBLE-01 — never seed a live bubble for a turn the daemon has
+    // already finalized. The daemon (py-1.17.0) only reports current_turn
+    // for genuinely-running turns AND exposes last_final_stream_id; this
+    // belt-and-suspenders drops any seed whose stream matches the last
+    // final (a snapshot that raced a final), which is what stranded the
+    // "Recapping progress…" loader.
+    const isStaleSeed = !!ct && !!ct.stream_id && ct.stream_id === cc.last_final_stream_id;
+    if (ct && c.live && ct.stream_id && !isStaleSeed) {
       const partial = stripAnchorMarkers(stripRememberLines(ct.partial_text || ''));
       const existing = state.convMap[c.conv] ?? [];
       // If we already have a streaming bubble for this stream_id (rare —
@@ -1371,8 +1397,17 @@ async function loadConvMessagesPage(
     return { has_more: false, oldest_ts: '' };
   }
   // If we're loading the FIRST page (no `before`), reset convMap so a
-  // stale entry from a prior session doesn't double up.
-  if (!opts.before) setState('convMap', conv, []);
+  // stale entry from a prior session doesn't double up — BUT preserve any
+  // in-flight streaming bubble (A-CONVWINDOW-01). Wiping it unconditionally
+  // dropped a live message when a WS delta beat the history load on a fresh
+  // refresh (the "message disappeared" symptom). buildStream re-sorts by
+  // ts + extracts `live` separately, so keeping the live tail here is safe.
+  if (!opts.before) {
+    const liveTail = (state.convMap[conv] ?? []).filter(
+      (m) => m.kind === 'assistant' && m.streaming,
+    );
+    setState('convMap', conv, liveTail);
+  }
   hydrating = true;
   try {
     for (const ev of res.data.messages) {
@@ -1477,9 +1512,20 @@ function list_len(conv: string): number {
 function capConvWindow(conv: string): void {
   const list = state.convMap[conv] ?? [];
   if (list.length <= UI_MESSAGE_CAP) return;
-  setState('convMap', conv, list.slice(list.length - UI_MESSAGE_CAP));
+  // A-CONVWINDOW-01 — trim the rendered DOM window after a LIVE final, but
+  // do NOT set paging.capped: this is a live-trim of the OLDEST messages
+  // (still on disk), not a pagination boundary. Marking capped here made
+  // scroll-up permanently refuse to refetch messages that exist on disk.
+  // The trimmed tail's oldest ts becomes the new scroll-up cursor.
+  const next = list.slice(list.length - UI_MESSAGE_CAP);
+  setState('convMap', conv, next);
   const p = state.paging[conv];
-  if (p) setState('paging', conv, 'capped', true);
+  if (p) {
+    setState('paging', conv, {
+      hasMore: true,
+      oldestTs: next[0]?.ts ?? p.oldestTs,
+    });
+  }
 }
 
 /** Apply a WS `conv.*` event to the local convs map. Idempotent —
