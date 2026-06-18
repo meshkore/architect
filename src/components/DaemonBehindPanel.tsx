@@ -238,7 +238,7 @@ export default function DaemonBehindPanel(): JSX.Element {
 /** Shared "paste this into your terminal" block — same shape across
  *  the three sub-states (updating-stuck, failed, manual). */
 function ManualBlock(): JSX.Element {
-  const cmd = 'curl -fsSL https://meshkore.com/reference/cluster/scripts/daemon.py -o .meshkore/scripts/daemon.py && pkill -f \'\\.meshkore/scripts/daemon\\.py\' || true';
+  const cmd = 'curl -fsSL https://architect.meshkore.com/reference/cluster/scripts/daemon.py -o .meshkore/scripts/daemon.py && pkill -f \'\\.meshkore/scripts/daemon\\.py\' || true';
   const [copied, setCopied] = createSignal(false);
   const copy = async (): Promise<void> => {
     try {

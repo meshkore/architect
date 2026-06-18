@@ -47,11 +47,11 @@ export const SHELL_CMD =
   // self-update codepath — no-op on same-version — so a fresh repo
   // shipped without it. Unconditional refresh here.
   'mkdir -p .meshkore/scripts/tls .meshkore/.runtime && \\\n' +
-  'curl -fsSL https://meshkore.com/reference/cluster/scripts/daemon.py \\\n' +
+  'curl -fsSL https://architect.meshkore.com/reference/cluster/scripts/daemon.py \\\n' +
   '  -o .meshkore/scripts/daemon.py && \\\n' +
-  'curl -fsSL https://meshkore.com/reference/cluster/scripts/tls/fullchain.pem \\\n' +
+  'curl -fsSL https://architect.meshkore.com/reference/cluster/scripts/tls/fullchain.pem \\\n' +
   '  -o .meshkore/scripts/tls/fullchain.pem && \\\n' +
-  'curl -fsSL https://meshkore.com/reference/cluster/scripts/tls/privkey.pem \\\n' +
+  'curl -fsSL https://architect.meshkore.com/reference/cluster/scripts/tls/privkey.pem \\\n' +
   '  -o .meshkore/scripts/tls/privkey.pem && \\\n' +
   'chmod 600 .meshkore/scripts/tls/privkey.pem && \\\n' +
   'nohup python3 .meshkore/scripts/daemon.py \\\n' +

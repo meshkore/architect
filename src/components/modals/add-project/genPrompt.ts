@@ -56,7 +56,7 @@ export function genPrompt(answers: AddProjectAnswers): string {
   L.push('MeshKore is my local-first multi-agent cockpit. The folder layout,');
   L.push('file schemas and conventions are documented at:');
   L.push('  · https://meshkore.com/standard         (human)');
-  L.push('  · https://meshkore.com/standard.json    (machine-readable schema)');
+  L.push('  · https://api.meshkore.com/v1/standard.json    (machine-readable schema)');
   L.push('Use those as the source of truth for what to write where. Below');
   L.push('are the concrete actions; the URLs above are just for verifying');
   L.push('field names and folder structure.');
@@ -136,7 +136,7 @@ export function genPrompt(answers: AddProjectAnswers): string {
   L.push('   Standard v7 (§10.4) — also add a `daemon` block with');
   L.push('     daemon:');
   L.push('       auto_update: true');
-  L.push('       auto_update_source: https://meshkore.com/reference/cluster/scripts/daemon.py');
+  L.push('       auto_update_source: https://architect.meshkore.com/reference/cluster/scripts/daemon.py');
   L.push('   (or omit; the daemon writes the defaults on first boot).');
   L.push('   Ask me for cluster_description.');
   L.push('');
@@ -166,11 +166,11 @@ export function genPrompt(answers: AddProjectAnswers): string {
   L.push("   (the browser sees a TLS error and can't tell the difference");
   L.push('   between "missing TLS" and "daemon not running"):');
   L.push('     mkdir -p .meshkore/scripts/tls');
-  L.push('     curl -fsSL https://meshkore.com/reference/cluster/scripts/daemon.py \\');
+  L.push('     curl -fsSL https://architect.meshkore.com/reference/cluster/scripts/daemon.py \\');
   L.push('       -o .meshkore/scripts/daemon.py');
-  L.push('     curl -fsSL https://meshkore.com/reference/cluster/scripts/tls/fullchain.pem \\');
+  L.push('     curl -fsSL https://architect.meshkore.com/reference/cluster/scripts/tls/fullchain.pem \\');
   L.push('       -o .meshkore/scripts/tls/fullchain.pem');
-  L.push('     curl -fsSL https://meshkore.com/reference/cluster/scripts/tls/privkey.pem \\');
+  L.push('     curl -fsSL https://architect.meshkore.com/reference/cluster/scripts/tls/privkey.pem \\');
   L.push('       -o .meshkore/scripts/tls/privkey.pem');
   L.push('     chmod 600 .meshkore/scripts/tls/privkey.pem');
   L.push('   Verify all three landed (not HTML error pages):');

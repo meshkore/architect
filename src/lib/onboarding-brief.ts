@@ -99,7 +99,7 @@ export function onboardingBootstrapBrief(): string {
     '## Your job on this first turn',
     '',
     '1. Read the user\'s project description carefully.',
-    '2. Consult https://meshkore.com/standard.json for file shapes (initiative,',
+    '2. Consult https://api.meshkore.com/v1/standard.json for file shapes (initiative,',
     '   task_frontmatter, module layout).',
     '3. **Write first, talk after.** Don\'t fire a long list of clarifying',
     '   questions before writing anything. If the brief is at all actionable,',
