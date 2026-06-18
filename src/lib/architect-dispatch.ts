@@ -34,12 +34,28 @@
 import { chatStore } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
 import { uiStore } from '~/state/ui';
-import type { ServerInitiative } from '~/state/server';
 import { log } from './log';
 
-export type ArchitectScope =
-  | { mode: 'all'; list: ServerInitiative[] }
-  | { mode: 'single'; initiative: ServerInitiative };
+/** One initiative in an execution scope. */
+export interface ScopeInitiative {
+  id: string;
+  title: string;
+}
+
+/** How the front renders/controls this run — a DISPLAY hint only, NOT an
+ *  execution difference. Execution is always "run the ordered list".
+ *   • 'all'    → whole-roadmap Run All (Stop = stop the global pass)
+ *   • 'single' → one initiative's ▶ (its own spinner)
+ *   • 'subset' → an operator-chosen list (future multi-select) */
+export type RunDisplay = 'all' | 'single' | 'subset';
+
+/** Unified scope (py-1.21.0): ALWAYS an ordered list (length ≥ 1). Run All =
+ *  all active in roadmap order; ▶ = [that one]; future multi-select = the
+ *  chosen N in the chosen order. The operator's order is the contract. */
+export interface ArchitectScope {
+  initiatives: ScopeInitiative[];
+  display: RunDisplay;
+}
 
 /** Build the bootstrap turn the architect receives on Run All / Run
  *  initiative. Both variants speak the SAME SOP — the difference is
@@ -48,29 +64,18 @@ export type ArchitectScope =
  *  the system prompt (`AGENT_PROMPTS["roadmap-architect"]`) and stays
  *  unchanged so we don't drift the load-bearing instructions. */
 function buildBootstrap(scope: ArchitectScope): string {
-  if (scope.mode === 'all') {
-    const list = scope.list;
-    return [
-      `Run all.`,
-      ``,
-      `Active scope (${list.length} initiative${list.length === 1 ? '' : 's'}, lower-id first):`,
-      ...list.map((it, i) => `${i + 1}. ${it.id} — ${it.title}`),
-      ``,
-      `Follow your SOP exactly. The chain on every blocker: DECISION CATALOG → STUB-AND-FLAG → DECISION MATRIX → CONSULT-A001. Never halt mid-pass. The single voluntary halt is the end-of-pass 4-bucket summary.`,
-      ``,
-      `Start now. Your very first line MUST be \`═══ VALIDATION GREEN ═══\` or \`═══ VALIDATION RED ═══\`. Be terse.`,
-    ].join('\n');
-  }
-  const it = scope.initiative;
+  const list = scope.initiatives;
+  const head = list[0]; // caller guarantees ≥1; `head &&` narrows for TS
+  const one = list.length === 1;
   return [
-    `Run initiative \`${it.id}\`.`,
+    one && head ? `Run initiative \`${head.id}\`.` : `Run all.`,
     ``,
-    `Scope: this initiative ONLY (1 of N).`,
-    `1. ${it.id} — ${it.title}`,
+    `Scope — process these ${list.length} initiative${one ? '' : 's'} IN THIS ORDER. The operator's order is the contract: do NOT reorder by id, and do NOT dispatch into any initiative outside this list.`,
+    ...list.map((it, i) => `${i + 1}. ${it.id} — ${it.title}`),
     ``,
-    `Process \`${it.id}\` end-to-end. Do NOT dispatch into other initiatives — linear-init Invariant 3 refuses 409 server-side if you try, so wasted dispatches just bounce. When every task of \`${it.id}\` is \`done\` or \`blocked\`, emit a per-initiative summary (shipped / blocked / decisions / questions) and stop. Do NOT auto-continue to the next initiative; the operator will pick what's next.`,
+    `For each: run it end-to-end; when every task is \`done\` set the initiative \`status: done\` (the daemon archives it — confirm "closed + archived" in the transition block), then continue to the NEXT in this list. After the LAST, emit the end-of-pass 4-bucket summary and stop. linear-init Invariant 3 refuses 409 on cross-initiative dispatch while one still has live work.`,
     ``,
-    `Follow your SOP exactly. The chain on every blocker: DECISION CATALOG → STUB-AND-FLAG → DECISION MATRIX → CONSULT-A001. Never halt mid-task.`,
+    `Follow your SOP exactly. The chain on every blocker: DECISION CATALOG → STUB-AND-FLAG → DECISION MATRIX → CONSULT-A001. Never halt mid-pass; the single voluntary halt is the end-of-pass summary.`,
     ``,
     `Start now. Your very first line MUST be \`═══ VALIDATION GREEN ═══\` or \`═══ VALIDATION RED ═══\`. Be terse.`,
   ].join('\n');
@@ -105,8 +110,8 @@ export async function runArchitectOnScope(scope: ArchitectScope): Promise<void> 
     log.warn('[architect-dispatch] no daemon client — abort');
     return;
   }
-  if (scope.mode === 'all' && scope.list.length === 0) {
-    log.info('[architect-dispatch] mode=all but scope is empty — nothing to do');
+  if (scope.initiatives.length === 0) {
+    log.info('[architect-dispatch] empty scope — nothing to do');
     return;
   }
 
@@ -123,25 +128,26 @@ export async function runArchitectOnScope(scope: ArchitectScope): Promise<void> 
   const text = buildBootstrap(scope);
 
   void import('./debug-transport').then(({ debugEmit }) => {
-    if (scope.mode === 'all') {
-      debugEmit('ux.run-all', `Run All clicked (${scope.list.length} initiative(s))`, {
+    debugEmit(
+      'ux.run-architect',
+      `Run architect (${scope.display}, ${scope.initiatives.length} initiative(s))`,
+      {
         conv,
         data: {
-          scope_size: scope.list.length,
-          initiative_ids: scope.list.map((it) => it.id),
+          display: scope.display,
+          scope_size: scope.initiatives.length,
+          initiative_ids: scope.initiatives.map((it) => it.id),
           reused_architect: !!existing,
         },
-      });
-    } else {
-      debugEmit('ux.run-initiative', `Run initiative ${scope.initiative.id} clicked`, {
-        conv,
-        data: { initiative_id: scope.initiative.id, reused_architect: !!existing },
-      });
-    }
+      },
+    );
   });
 
-  const dispatchScope =
-    scope.mode === 'single' ? { initiative: scope.initiative.id } : undefined;
+  // Per-conv initiative_id is belt-and-braces only for a single-initiative run
+  // (a multi-initiative scope spans many → no single id belongs on the conv).
+  const onlyOne =
+    scope.initiatives.length === 1 ? scope.initiatives[0] : undefined;
+  const dispatchScope = onlyOne ? { initiative: onlyOne.id } : undefined;
   const res = await chatStore.dispatchMessage(client, {
     conv,
     text,

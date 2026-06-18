@@ -43,7 +43,10 @@ const repoRoot = resolve(__dirname, '..', '..');
 //   2. .meshkore/scripts/daemon.py — fallback for workspaces that
 //      have only the cluster's local copy. Warning emitted because
 //      stale risk reappears.
-const canonicalDaemonPath = join(repoRoot, 'daemon', 'daemon.py');
+// py-1.19.0 daemon-architecture-v2 moved DAEMON_VERSION out of the daemon.py
+// god-file into the leaf daemon/constants.py (the single-line source of truth;
+// the bundle's dist/daemon.py keeps an early marker too). Read constants.py.
+const canonicalDaemonPath = join(repoRoot, 'daemon', 'constants.py');
 const fallbackDaemonPath = join(repoRoot, '.meshkore', 'scripts', 'daemon.py');
 const daemonPath = existsSync(canonicalDaemonPath)
   ? canonicalDaemonPath

@@ -20,7 +20,7 @@
 
 import { For, Show, createEffect, createMemo, createResource } from 'solid-js';
 import type { ServerInitiative, ServerTask } from '~/state/server';
-import { activeEntriesByInitiative } from '~/state/server';
+import { activeEntriesByInitiative, activeTaskIds } from '~/state/server';
 import { sortTasks } from '~/components/initiative/task-grouping';
 import { chatStore } from '~/state/chat';
 import { viewStore } from '~/state/view';
@@ -153,7 +153,10 @@ export default function InitiativeCard(props: {
     }
     if (otherActivityLive()) return;
     if (vstate() === 'done' || vstate() === 'backlog') return;
-    void runArchitectOnScope({ mode: 'single', initiative: props.initiative });
+    void runArchitectOnScope({
+      initiatives: [{ id: props.initiative.id, title: props.initiative.title }],
+      display: 'single',
+    });
   };
 
   const onRowKey = (e: KeyboardEvent) => {
@@ -166,6 +169,11 @@ export default function InitiativeCard(props: {
   const statusLabel = (): string => {
     const s = vstate();
     if (s === 'done') return 'DONE';
+    // V107.43 — terminology unified with the chat rail + AgentCard, which
+    // both label a live conv "working". The roadmap previously said
+    // RUNNING; the operator asked for ONE word everywhere. Internal
+    // state name + CSS class stay `running` (theme vars, .is-running).
+    if (s === 'running') return 'WORKING';
     return s.toUpperCase();
   };
 
@@ -343,18 +351,125 @@ export default function InitiativeCard(props: {
   );
 }
 
+/* V107.43 — Task-row redesign (operator field report 2026-06-13).
+ *
+ * Reading left → right (people scan from the left):
+ *
+ *   [state]  [code]   task title …………………………………   [module] [module]
+ *
+ *   - state  — an explicit glyph (the FIRST thing the eye meets):
+ *                pending  → hollow square (checkbox)
+ *                active   → hollow ring (ready / up next)
+ *                working  → SPINNER, and the title softly blinks
+ *                blocked  → "!"
+ *                done     → ✓
+ *   - code   — fixed-width, dimmed (the title carries the meaning, the
+ *              code "no aporta mucha información" per the operator).
+ *   - title  — the star; blinks softly in the working hue while live.
+ *   - module — moved to the FAR RIGHT (was the ACTIVE/BACKLOG/DONE
+ *              label). One badge per module; usually one (a task owns a
+ *              single module, Standard §4), but the runner can fan out
+ *              several workers across modules at once, so we render a
+ *              list.
+ *
+ * "working" is DERIVED LIVE from `activeTaskIds()` (a daemon-authoritative
+ * set of task_ids with a streaming conv), NOT from the on-disk status.
+ * Because every row checks the set independently, N tasks across N
+ * modules can all show the spinner + blink simultaneously. */
+
+type TaskVState = 'done' | 'working' | 'active' | 'blocked' | 'pending';
+
+function taskVState(task: ServerTask, live: boolean): TaskVState {
+  if (live) return 'working';
+  const s = (task.status || '').toLowerCase();
+  if (s === 'done') return 'done';
+  if (s === 'blocked') return 'blocked';
+  if (s === 'active' || s === 'in_progress' || s === 'in-progress') return 'active';
+  return 'pending'; // next, planned, backlog, draft, pending_operator, …
+}
+
+function taskModules(task: ServerTask): string[] {
+  const raw = task as Record<string, unknown>;
+  const arr = Array.isArray(raw.modules) ? (raw.modules as unknown[]) : null;
+  if (arr) {
+    return arr
+      .map((m) => (typeof m === 'string' ? m : (m as { id?: string })?.id))
+      .filter((x): x is string => typeof x === 'string' && x.length > 0);
+  }
+  const single = (task.module || task.category || '').trim();
+  return single ? [single] : [];
+}
+
+const TASK_STATE_TITLE: Record<TaskVState, string> = {
+  working: 'En curso — un agente está trabajando en esta tarea ahora',
+  done: 'Completada',
+  active: 'Activa — lista para arrancar',
+  blocked: 'Bloqueada',
+  pending: 'Pendiente',
+};
+
 function TaskRow(props: { task: ServerTask }) {
-  const status = () => props.task.status || 'next';
+  const live = (): boolean => activeTaskIds().has(props.task.id);
+  const vstate = (): TaskVState => taskVState(props.task, live());
+  const mods = (): string[] => taskModules(props.task);
+  const stateTitle = (): string => TASK_STATE_TITLE[vstate()];
   return (
-    <li class="rt-task">
-      <span class={`rt-task-node is-${status()}`} aria-hidden="true" />
-      <span class="rt-task-code">{displayTaskId(props.task.id)}</span>
+    <li class={`rt-task is-${vstate()}`}>
+      {/* Timeline thread marker — neutral, lights up only where work is
+       *  live so the eye lands on the exact point of the roadmap that is
+       *  active right now. */}
+      <span class="rt-task-node" aria-hidden="true" />
+
+      {/* Explicit status glyph — first thing read on the row. */}
+      <span class="rt-task-state" title={stateTitle()} aria-label={stateTitle()}>
+        <Show when={vstate() === 'working'}>
+          <span class="rt-task-spinner" aria-hidden="true" />
+        </Show>
+        <Show when={vstate() === 'done'}>
+          <svg
+            class="rt-task-check"
+            viewBox="0 0 24 24"
+            width="12"
+            height="12"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="3"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M5 12.5l4.5 4.5L19 7" />
+          </svg>
+        </Show>
+        <Show when={vstate() === 'blocked'}>
+          <span class="rt-task-bang" aria-hidden="true">!</span>
+        </Show>
+        <Show when={vstate() === 'active'}>
+          <span class="rt-task-ring" aria-hidden="true" />
+        </Show>
+        <Show when={vstate() === 'pending'}>
+          <span class="rt-task-box" aria-hidden="true" />
+        </Show>
+      </span>
+
+      <span class="rt-task-code" title={props.task.id}>
+        {displayTaskId(props.task.id)}
+      </span>
       <span class="rt-task-text" title={props.task.title}>
         {props.task.title}
       </span>
-      <span class={`rt-task-status is-${status()}`}>
-        {status().replace('_', ' ')}
-      </span>
+
+      <Show when={mods().length > 0}>
+        <span class="rt-task-mods">
+          <For each={mods()}>
+            {(m) => (
+              <span class="rt-task-mod" title={`Módulo: ${m}`}>
+                {m}
+              </span>
+            )}
+          </For>
+        </span>
+      </Show>
     </li>
   );
 }

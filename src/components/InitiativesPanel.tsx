@@ -198,7 +198,10 @@ export default function InitiativesPanel() {
       if (tasks.length === 0) return false;
       return tasks.some((t) => t.status !== 'done' && t.status !== 'cancelled');
     });
-    await runArchitectOnScope({ mode: 'all', list });
+    await runArchitectOnScope({
+      initiatives: list.map((it) => ({ id: it.id, title: it.title })),
+      display: 'all',
+    });
   };
 
   return (
