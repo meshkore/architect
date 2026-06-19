@@ -1647,7 +1647,10 @@
     }
 
     .subtab-bar      { display: flex; align-items: stretch; border-bottom: 1px solid var(--border-bar); padding: 0 var(--col-pad-x); flex-shrink: 0; height: 38px; background: var(--bg-bar); box-shadow: var(--shadow-bar); position: relative; z-index: 2; }
-    .subtab          { position: relative; display: flex; align-items: center; padding: 0 14px; font-size: var(--fs-button, 12.5px); color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; transition: color 120ms, background 120ms; }
+    /* 2026-06-19: tabs unified with the column titles (.col-bar-title) —
+       same size (--fs-title 11px), colour (gray-500) + 0.18em. The active
+       tab keeps a brighter colour + the accent underline as its cue. */
+    .subtab          { position: relative; display: flex; align-items: center; padding: 0 14px; font-size: var(--fs-title, 11px); color: #6b7280; text-transform: uppercase; letter-spacing: 0.18em; cursor: pointer; transition: color 120ms, background 120ms; }
     .subtab:hover    { color: #f3f4f6; }
 
     /* V41 — Bump readability of small uppercase section labels across
@@ -1703,7 +1706,7 @@
     .col-bar-title:hover { color: #6ee7b7; }
     .col-bar-lead { display: flex; align-items: center; min-width: 0; }
     .subtab:hover { color: #d1d5db; }
-    .subtab.active { color: #f3f4f6; background: linear-gradient(180deg, color-mix(in srgb, var(--theme-accent) 6%, transparent) 0%, color-mix(in srgb, var(--theme-accent) 0%, transparent) 100%); }
+    .subtab.active { color: #d1d5db; background: linear-gradient(180deg, color-mix(in srgb, var(--theme-accent) 6%, transparent) 0%, color-mix(in srgb, var(--theme-accent) 0%, transparent) 100%); }
     .subtab.active::after { content: ''; position: absolute; bottom: -1px; left: 8px; right: 8px; height: 2px; background: linear-gradient(90deg,var(--theme-accent-bright, #34d399),#6ee7b7); border-radius: 1px 1px 0 0; box-shadow: 0 0 8px color-mix(in srgb, var(--theme-accent-bright) 50%, transparent); }
 
     /* Task card — two clear rows.
