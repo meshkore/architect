@@ -1,97 +1,111 @@
 /**
- * BootingPanel — full-body block that covers the workspace area
- * while the cockpit is hydrating the active cluster's data
- * (CBO1, initiative `cockpit-boot-overlay`).
+ * BootingPanel — brief loader that covers the workspace area while the
+ * cockpit connects + hydrates the active cluster (CBO1).
  *
- * Why this exists: the moment a daemon WS opens, `Cockpit.tsx`
- * enters its workspace branch (3-col layout). Modules tree,
- * ChatRail, ChatPanel all render with placeholder data while
- * `serverStore.refreshNow()` + `client.chatSnapshot()` are still
- * in flight. The operator sees a UI that looks ready but isn't —
- * the modules collapse button doesn't respond, agent rows are
- * empty, chat shows "Loading chat history…" skeletons.
+ * 2026-06-19 operator rewrite: drop the verbose checklist ("Inicializando
+ * / Snapshot del roadmap / Historial…") for a SHORT spinner on a BLACK
+ * surface (the same near-black as the dashboard panels, never the bluish
+ * --bg-canvas gap colour). If it stalls (or /state errors), surface two
+ * actions — retry, or hand off to OfflinePanel (the existing screen with
+ * "start it myself" / "hand it to Claude Code").
  *
- * The fix: cover the workspace area with this panel until both
- * snapshots have hydrated. ProjectsRail (column to the left of
- * `<main>`) is OUTSIDE this panel by construction — the operator
- * can switch clusters at any moment.
- *
- * UX: matches the shape of DaemonOutdatedPanel / DaemonAheadPanel
- * (centered card, dark background, same paddings). No buttons —
- * dismisses itself when both stores hydrate.
+ * ProjectsRail lives OUTSIDE this panel — the operator can switch projects
+ * at any moment.
  */
 
 import type { JSX } from 'solid-js';
-import { Show } from 'solid-js';
+import { Show, createSignal, createMemo, onMount, onCleanup } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { serverStore } from '~/state/server';
-import { chatStore } from '~/state/chat';
 
-function Step(props: { done: boolean; pending: boolean; label: string }): JSX.Element {
-  return (
-    <li class="flex items-center gap-3 py-1.5">
-      <Show
-        when={props.done}
-        fallback={
-          <span
-            class="inline-flex items-center justify-center w-4 h-4 rounded-full border border-emerald-500/30"
-            aria-hidden="true"
-          >
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400/60 animate-pulse-soft" />
-          </span>
-        }
-      >
-        <span
-          class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold"
-          aria-hidden="true"
-        >
-          ✓
-        </span>
-      </Show>
-      <span class={props.done ? 'text-gray-300 text-sm' : 'text-gray-400 text-sm'}>
-        {props.label}
-      </span>
-    </li>
-  );
-}
+const SLOW_AFTER_MS = 12_000;
 
 export default function BootingPanel(): JSX.Element {
   const cluster = (): string =>
     daemonStore.state.health?.cluster_name
     ?? daemonStore.state.health?.identity
-    ?? 'this project';
-  const snapshotDone = (): boolean => serverStore.state.snapshot != null;
-  const chatDone = (): boolean => chatStore.state.convsHydratedAt != null;
+    ?? 'el proyecto';
+
+  const [slow, setSlow] = createSignal(false);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = (): void => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => setSlow(true), SLOW_AFTER_MS);
+  };
+  onMount(arm);
+  onCleanup(() => { if (timer) clearTimeout(timer); });
+
+  // Something's wrong if the snapshot errored or it's just taking too long.
+  const failed = createMemo(() => slow() || !!serverStore.state.error);
+
+  const retry = (): void => {
+    const c = daemonStore.state.client;
+    const id = daemonStore.state.activeId;
+    if (c && id) void serverStore.refreshNow(c, id);
+    setSlow(false);
+    arm();
+  };
+
+  // Hand off to OfflinePanel (the existing manual / Claude-Code start screen).
+  const startOptions = (): void => {
+    const h = daemonStore.state.health;
+    const id = daemonStore.state.activeId;
+    if (!id) return;
+    daemonStore.selectOffline({
+      key: id,
+      port: h?.port ?? 0,
+      cluster_id: h?.cluster_id ?? null,
+      cluster_name: h?.cluster_name ?? null,
+      display: h?.cluster_name ?? h?.identity ?? 'el proyecto',
+      reason: 'unknown',
+    });
+  };
 
   return (
-    <section class="h-full flex items-center justify-center px-6 py-12 overflow-auto">
-      <div class="max-w-md w-full">
-        <header class="mb-6 text-center">
-          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-medium mb-4">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft" />
-            Inicializando
+    <section
+      class="h-full w-full flex items-center justify-center px-6"
+      style={{ background: '#0a0d12' }}
+    >
+      <Show
+        when={!failed()}
+        fallback={
+          <div class="flex flex-col items-center gap-4 text-center max-w-sm">
+            <p class="text-sm text-gray-300">
+              Tarda más de lo normal en conectar con{' '}
+              <span class="font-mono text-emerald-200">{cluster()}</span>.
+            </p>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={retry}
+                class="px-3 py-1.5 rounded-md text-xs border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 transition-colors"
+              >
+                Reintentar
+              </button>
+              <button
+                type="button"
+                onClick={startOptions}
+                class="px-3 py-1.5 rounded-md text-xs border border-gray-700 text-gray-300 hover:bg-gray-800/60 transition-colors"
+              >
+                Opciones de arranque
+              </button>
+            </div>
+            <p class="text-[11px] text-gray-600">
+              Arranca el daemon tú mismo o deja que Claude Code lo haga.
+            </p>
           </div>
-          <h1 class="text-2xl md:text-3xl font-semibold tracking-tight mb-2">
-            Conectando con <span class="font-mono text-emerald-200">{cluster()}</span>
-          </h1>
-          <p class="text-gray-400 leading-relaxed text-sm">
-            Hidratando roadmap, módulos y conversaciones del daemon. Suele
-            tardar menos de un segundo.
+        }
+      >
+        <div class="flex flex-col items-center gap-4">
+          <span
+            class="w-8 h-8 rounded-full border-2 border-emerald-500/25 border-t-emerald-400 animate-spin"
+            aria-hidden="true"
+          />
+          <p class="text-sm text-gray-400">
+            Conectando con <span class="font-mono text-emerald-200">{cluster()}</span>…
           </p>
-        </header>
-
-        <section class="bg-gray-900/50 border border-gray-800 rounded-2xl p-6">
-          <ul class="space-y-1">
-            <Step done={true} pending={false} label="Daemon conectado" />
-            <Step done={snapshotDone()} pending={!snapshotDone()} label="Snapshot del roadmap" />
-            <Step done={chatDone()} pending={!chatDone()} label="Historial de conversaciones" />
-          </ul>
-          <p class="text-gray-500 text-[11px] leading-relaxed mt-5">
-            Puedes saltar a otro proyecto en cualquier momento desde la
-            barra de la izquierda.
-          </p>
-        </section>
-      </div>
+        </div>
+      </Show>
     </section>
   );
 }

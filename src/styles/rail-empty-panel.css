@@ -10,7 +10,8 @@
   align-items: center;
   justify-content: center;
   padding: 32px 24px;
-  background: var(--bg-canvas);
+  /* 2026-06-19: black dashboard surface (not the bluish --bg-canvas gap). */
+  background: #0a0d12;
   color: var(--text-body);
 }
 .rail-empty-panel__inner {
