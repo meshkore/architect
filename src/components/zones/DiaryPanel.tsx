@@ -31,12 +31,10 @@ import { createStore } from 'solid-js/store';
 import { daemonStore } from '~/state/daemon';
 import { ensureMarked } from '~/lib/cdn-loaders';
 import { uiStore } from '~/state/ui';
-import { log } from '~/lib/log';
 import type { LogEntry } from '~/lib/daemon-client';
 
 const DEFAULT_EXPANDED = 3;     // expand this many newest days by default
 const BATCH_SIZE = 5;            // load this many bodies per IO trigger
-const PREVIEW_LINES = 30;        // collapsed-card preview line count
 
 interface BodyState { loading: boolean; body: string | null; error: string | null; html: string | null; }
 
@@ -112,14 +110,10 @@ export default function DiaryPanel() {
       });
       return;
     }
-    let html: string | null = null;
-    try {
-      const marked = await ensureMarked();
-      html = marked.parse(r.body, { gfm: true });
-    } catch (e) {
-      log.warn('diary marked render failed', e instanceof Error ? e.message : String(e));
-    }
-    setBodies(name, { loading: false, body: r.body, error: null, html });
+    // QX6 — we no longer pre-render the whole day to one HTML blob; the
+    // diary parses each day into `## HH:MM · …` headlines and renders a
+    // section's markdown lazily only when the operator expands it.
+    setBodies(name, { loading: false, body: r.body, error: null, html: null });
   };
 
   // Whenever the index lands or batchHead grows, pre-fetch the bodies
@@ -172,8 +166,7 @@ export default function DiaryPanel() {
         <div>
           <h1 class="text-base font-semibold text-gray-100">Diary</h1>
           <p class="text-xs text-gray-500">
-            Daily narrative log · newest first · loaded from{' '}
-            <code class="font-mono text-amber-300/80">.meshkore/log/</code>
+            What got done, newest first — headlines you can skim, detail on tap
           </p>
         </div>
         <div class="ml-auto flex items-center gap-2">
@@ -234,6 +227,88 @@ export default function DiaryPanel() {
   );
 }
 
+interface DaySection { time: string; title: string; body: string; }
+
+/** Split a day's log markdown into its `## HH:MM · summary` sections.
+ *  Everything before the first `##` (after the `# <date>` H1) is the
+ *  lead. Each section keeps its time (when the heading is `HH:MM · …`)
+ *  and its body markdown for on-demand rendering. */
+function splitDaySections(md: string): { lead: string; sections: DaySection[] } {
+  const text = md.replace(/^#\s+.*\n?/, ''); // strip the `# <date>` H1
+  const lead: string[] = [];
+  const sections: DaySection[] = [];
+  let cur: { heading: string; body: string[] } | null = null;
+  const flush = (): void => {
+    if (!cur) return;
+    const h = cur.heading.replace(/^##\s+/, '').trim();
+    const tm = /^(\d{1,2}:\d{2})\s*·\s*(.*)$/.exec(h);
+    sections.push({
+      time: tm ? tm[1]! : '',
+      title: tm ? tm[2]!.trim() : h,
+      body: cur.body.join('\n').trim(),
+    });
+  };
+  for (const ln of text.split('\n')) {
+    if (/^##\s+/.test(ln)) { flush(); cur = { heading: ln, body: [] }; }
+    else if (cur) cur.body.push(ln);
+    else lead.push(ln);
+  }
+  flush();
+  return { lead: lead.join('\n').trim(), sections };
+}
+
+/** Lazily renders a markdown string to HTML (marked loaded on demand);
+ *  falls back to a mono pre-block while/if the renderer is unavailable. */
+function MarkdownBlock(props: { text: string }) {
+  const [html] = createResource(
+    () => props.text,
+    async (text) => {
+      if (!text.trim()) return '';
+      try {
+        const marked = await ensureMarked();
+        return marked.parse(text, { gfm: true }) as string;
+      } catch {
+        return '';
+      }
+    },
+  );
+  return (
+    <Show
+      when={html()}
+      fallback={<pre class="whitespace-pre-wrap text-[12px] text-gray-400 font-mono leading-relaxed">{props.text}</pre>}
+    >
+      <div class="md prose prose-invert max-w-none text-[13px] leading-relaxed" innerHTML={html() ?? ''} />
+    </Show>
+  );
+}
+
+/** One headline row — `▸ HH:MM  summary`; expands to the section detail. */
+function SectionRow(props: { section: DaySection }) {
+  const [open, setOpen] = createSignal(false);
+  const hasBody = (): boolean => props.section.body.length > 0;
+  return (
+    <li class="border-b border-gray-800/40 last:border-0">
+      <button
+        type="button"
+        onClick={() => hasBody() && setOpen(!open())}
+        class="w-full flex items-baseline gap-2 py-1.5 px-1 text-left rounded hover:bg-gray-900/40 transition-colors"
+        classList={{ 'cursor-default': !hasBody() }}
+      >
+        <span class="text-gray-600 text-[10px] w-3 flex-shrink-0">{hasBody() ? (open() ? '▾' : '▸') : '·'}</span>
+        <Show when={props.section.time}>
+          <span class="font-mono text-[11px] text-amber-300/80 tabular-nums flex-shrink-0">{props.section.time}</span>
+        </Show>
+        <span class="text-[13px] text-gray-200 leading-snug">{props.section.title}</span>
+      </button>
+      <Show when={open() && hasBody()}>
+        <div class="pl-6 pr-1 pb-3 pt-1">
+          <MarkdownBlock text={props.section.body} />
+        </div>
+      </Show>
+    </li>
+  );
+}
+
 function DayCard(props: {
   entry: LogEntry;
   expanded: boolean;
@@ -250,12 +325,9 @@ function DayCard(props: {
     props.onToggle();
   };
 
-  const previewText = createMemo<string>(() => {
-    const body = props.state.body;
-    if (!body) return '';
-    const lines = body.split('\n').slice(0, PREVIEW_LINES);
-    return lines.join('\n') + (body.split('\n').length > PREVIEW_LINES ? '\n…' : '');
-  });
+  const parsed = createMemo(() =>
+    props.state.body ? splitDaySections(props.state.body) : { lead: '', sections: [] },
+  );
 
   return (
     <li class="bg-gray-900/40 border border-gray-800/70 rounded-lg overflow-hidden">
@@ -268,15 +340,9 @@ function DayCard(props: {
           <span class="text-sm font-semibold text-gray-100">
             {props.entry.date ?? props.entry.name.replace(/\.md$/, '')}
           </span>
-          <Show when={props.entry.mtime}>
+          <Show when={props.state.body && parsed().sections.length > 0}>
             <span class="text-[10px] text-gray-600 font-mono">
-              updated <time>{formatMtime(props.entry.mtime!)}</time>
-              {props.entry.size !== null && (
-                <>
-                  <span class="text-gray-700"> · </span>
-                  {formatSize(props.entry.size)}
-                </>
-              )}
+              {parsed().sections.length} entr{parsed().sections.length === 1 ? 'y' : 'ies'}
             </span>
           </Show>
         </div>
@@ -289,20 +355,27 @@ function DayCard(props: {
       </button>
 
       <Show when={props.expanded}>
-        <div class="px-4 pb-4 pt-2 border-t border-gray-800/60">
+        <div class="px-4 pb-3 pt-1 border-t border-gray-800/60">
           <Show when={props.state.loading}>
             <p class="text-xs text-gray-500 font-mono">loading…</p>
           </Show>
           <Show when={props.state.error}>
-            <p class="text-xs text-red-400 font-mono">
-              load failed — {props.state.error}
-            </p>
+            <p class="text-xs text-red-400 font-mono">load failed — {props.state.error}</p>
           </Show>
-          <Show when={props.state.html}>
-            <div class="md prose prose-invert max-w-none text-[13px] leading-relaxed" innerHTML={props.state.html ?? ''} />
-          </Show>
-          <Show when={!props.state.html && props.state.body && !props.state.loading}>
-            <pre class="whitespace-pre-wrap text-[12px] text-gray-300 font-mono leading-relaxed">{previewText()}</pre>
+          <Show when={props.state.body && !props.state.loading}>
+            <Show when={parsed().lead}>
+              <div class="pb-2 mb-1 border-b border-gray-800/40 opacity-80">
+                <MarkdownBlock text={parsed().lead} />
+              </div>
+            </Show>
+            <Show
+              when={parsed().sections.length > 0}
+              fallback={<MarkdownBlock text={props.state.body!} />}
+            >
+              <ul>
+                <For each={parsed().sections}>{(s) => <SectionRow section={s} />}</For>
+              </ul>
+            </Show>
           </Show>
         </div>
       </Show>
@@ -342,17 +415,3 @@ function EmptyNotice() {
   );
 }
 
-function formatMtime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
