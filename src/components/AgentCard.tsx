@@ -62,40 +62,16 @@ export default function AgentCard(props: AgentCardProps) {
   // regardless of stored agent_type.
   const typeInfo = () => agentVisualInfo(props.conv, props.meta);
 
-  const narrowChars = (): string => title().trim().slice(0, 3);
-
-  // 2026-06-13 — progressive metadata disclosure by rail width. The
-  // recent model badge + L/R made row 2 wide enough to overflow and
-  // CLIP (hard cut) at mid widths. Now we shed pills by width:
-  //   < 130 px → type pill only
-  //   130–185  → type · model
-  //   ≥ 185 px → type · model · L/R
-  // The type pill is the always-visible anchor (colour-coded). The row
-  // is overflow-hidden + nowrap so a sub-pixel overrun never wraps.
+  // Rail width — drives the "idle" hint visibility (the metadata row now
+  // shows model + L/R always; no per-pill width gating).
   const w = (): number => props.railWidth ?? (props.medium ? 130 : 200);
-  const showModelPill = (): boolean => w() >= 130;
-  const showLocPill = (): boolean => w() >= 185;
-
-  /** 1-2 character abbreviation derived from the agent type's
-   *  `shortLabel` (or `label`). Replaces the emoji in the metadata
-   *  row — operator field report 2026-06-10: "el icono amarillo,
-   *  rosita de la barra no me gusta nada, usa una letra o 2."
-   *  Rule: ≤2-char labels (e.g. "DB") kept verbatim and uppercased;
-   *  longer labels collapse to their first letter uppercased.
-   *  Single letters are easier to scan than emojis at this size. */
-  const typeInitials = (): string => {
-    const src = (typeInfo().shortLabel ?? typeInfo().label).trim();
-    if (!src) return '·';
-    if (src.length <= 2) return src.toUpperCase();
-    return src[0]!.toUpperCase();
-  };
 
   const cardClasses = (): string => {
     if (props.compact) {
       const base = [
         'group relative w-full text-left',
         'transition-colors cursor-grab active:cursor-grabbing',
-        'flex items-center justify-center',
+        'flex items-center justify-start',
         'tracking-tight select-none',
         'border-l-[3px]',
         'py-1 px-2',
@@ -167,26 +143,26 @@ export default function AgentCard(props: AgentCardProps) {
       <Show
         when={!props.compact}
         fallback={
-          /* Narrow: 3-char truncation of the NAME at the SAME font-size
-           * as the expanded body — operator 2026-06-10: "la columna de
-           * agentes debe seguir con la mismo tamaño de fuente al
-           * reducirse. Dejemos 3 letras minimo." */
+          /* Narrow: show AS MUCH of the name as fits, clipped at the edge
+           * with NO ellipsis (operator 2026-06-19: "una letra y tres
+           * puntos es absurdo — quita los puntos y aprovecha el espacio").
+           * Same font-size as the expanded body. */
           <span
             aria-label={`${title()} ${props.status}`}
-            style={{ 'font-size': 'var(--fs-body, 13px)' }}
-            class="leading-tight"
+            style={{ 'font-size': 'var(--fs-body, 13px)', 'text-overflow': 'clip' }}
+            class="w-full leading-tight overflow-hidden whitespace-nowrap"
           >
-            {narrowChars()}
+            {title()}
           </span>
         }
       >
         {/* ROW 1 — name (primary anchor) + status indicator */}
         <span class="flex items-center gap-2 min-w-0">
           <span
-            class={`flex-1 min-w-0 leading-tight truncate ${
+            class={`flex-1 min-w-0 leading-tight overflow-hidden whitespace-nowrap ${
               props.active ? 'text-gray-50 font-semibold' : 'text-gray-200'
             }`}
-            style={{ 'font-size': 'var(--fs-body, 13px)' }}
+            style={{ 'font-size': 'var(--fs-body, 13px)', 'text-overflow': 'clip' }}
           >
             {title()}
           </span>
@@ -210,11 +186,11 @@ export default function AgentCard(props: AgentCardProps) {
           </Show>
         </span>
 
-        {/* ROW 2 — metadata pills. 2026-06-12 operator rewrite: the
-         *  agent ID (A001…) is HIDDEN from the rail — the operator
-         *  navigates by name; the ID stays internal (diaries, logs,
-         *  WS). Pills now show: type letter · MODEL (short) · L/R.
-         *  "local"/"remote" collapse to single chars L / R. */}
+        {/* ROW 2 — metadata pills. 2026-06-19 operator rewrite: drop the
+         *  agent-type letter entirely. FIRST column is ALWAYS the model;
+         *  then the L/R (local/remote) badge — and L/R is now the COLOURED
+         *  cue (emerald = local on this machine, sky = remote). The agent
+         *  ID stays internal (navigate by name). */}
         {(() => {
           const pillBorder = props.active
             ? 'rgba(170, 180, 200, 0.65)'
@@ -224,41 +200,26 @@ export default function AgentCard(props: AgentCardProps) {
             <span class="flex items-center gap-1 font-mono overflow-hidden flex-nowrap"
               style={{ 'font-size': 'var(--fs-meta, 10px)' }}
             >
+              {/* Model — always the first column. */}
               <span
-                class="inline-flex items-center justify-center flex-shrink-0 px-1.5 py-px rounded border"
+                class="inline-flex items-center px-1.5 py-px rounded border flex-shrink-0"
+                style={{ 'border-color': pillBorder, color: dimColor }}
+                title={`Model: ${props.meta.model ?? 'auto'}`}
+              >
+                {modelShort(props.meta.model)}
+              </span>
+              {/* Local / Remote — the coloured cue. */}
+              <span
+                class="inline-flex items-center justify-center px-1.5 py-px rounded border flex-shrink-0"
                 style={{
-                  color: typeInfo().color,
+                  color: isRemote() ? '#7dd3fc' : '#34d399',
                   'border-color': pillBorder,
                   'min-width': '16px',
                 }}
-                title={`Agent type: ${typeInfo().label}`}
+                title={isRemote() ? 'remote — runs off this machine' : 'local — runs on this machine'}
               >
-                {typeInitials()}
+                {isRemote() ? 'R' : 'L'}
               </span>
-              <Show when={showModelPill()}>
-                <span
-                  class="inline-flex items-center px-1.5 py-px rounded border flex-shrink-0"
-                  style={{ 'border-color': pillBorder, color: dimColor }}
-                  title={`Model: ${props.meta.model ?? 'auto'}`}
-                >
-                  {modelShort(props.meta.model)}
-                </span>
-              </Show>
-              <Show when={showLocPill()}>
-                <span
-                  class="inline-flex items-center justify-center px-1.5 py-px rounded border flex-shrink-0"
-                  style={{
-                    color: isRemote()
-                      ? '#7dd3fc'
-                      : (props.active ? '#cbd5e1' : '#9ca3af'),
-                    'border-color': pillBorder,
-                    'min-width': '16px',
-                  }}
-                  title={isRemote() ? 'remote' : 'local'}
-                >
-                  {isRemote() ? 'R' : 'L'}
-                </span>
-              </Show>
             </span>
           );
         })()}

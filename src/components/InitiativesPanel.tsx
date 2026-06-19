@@ -32,7 +32,7 @@ import { viewStore } from '~/state/view';
 import { chatStore } from '~/state/chat';
 import { daemonStore, daemonHealth } from '~/state/daemon';
 import { runArchitectOnScope, stopArchitect } from '~/lib/architect-dispatch';
-import { isQueuedStatus, stageAll, clearQueue as clearQueueWall } from '~/lib/queue';
+import { isQueuedStatus, clearQueue as clearQueueWall } from '~/lib/queue';
 import { log } from '~/lib/log';
 
 type VisibilityFilter = 'all' | 'active' | 'backlog' | 'archived' | 'queue';
@@ -49,6 +49,8 @@ const VISIBILITY_FILTERS: { id: VisibilityFilter; label: string; title: string }
 export default function InitiativesPanel() {
   const [visibility, setVisibility] = createSignal<VisibilityFilter>('active');
   const [query, setQuery] = createSignal('');
+  // Two-step confirm for the queue Reset (no destructive one-click wipe).
+  const [confirmingReset, setConfirmingReset] = createSignal(false);
   // Accordion — only one story open at a time. `null` means all collapsed.
   const [openId, setOpenId] = createSignal<string | null>(null);
   const toggleOpen = (id: string) => setOpenId((cur) => (cur === id ? null : id));
@@ -201,20 +203,6 @@ export default function InitiativesPanel() {
     return !!s && (s.live || s.coordinating);
   });
 
-  const anyStoryRunLive = createMemo<boolean>(() => {
-    const archConv = activeArchConv();
-    for (const c of Object.values(chatStore.state.convs)) {
-      if (!c.live && !c.coordinating) continue;
-      if (c.conv === archConv) continue;
-      // Operator-opened convs (master, custom user chats) have no
-      // parent_conv. They shouldn't block a roadmap dispatch — only
-      // SUBAGENT convs (work-*, deploy-*, …) count as "a story is live".
-      if (!c.parent_conv) continue;
-      return true;
-    }
-    return false;
-  });
-
   // ── Queue wall — derived state ──────────────────────────────────────
   /** Initiatives shown on the wall: staged by the operator OR live now,
    *  in roadmap order. Source of truth for the wall's progress + run. */
@@ -236,49 +224,6 @@ export default function InitiativesPanel() {
     }
     return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
   });
-
-  /** Whole-roadmap completion (done tasks / all tasks) — drives the RUN
-   *  ALL node's outer progress ring so the operator reads overall project
-   *  progress at a glance. */
-  const overallProgress = createMemo<{ done: number; total: number; frac: number; pct: number }>(() => {
-    const ts = allTasks();
-    const total = ts.length;
-    const done = ts.filter((t) => t.status === 'done').length;
-    return { done, total, frac: total ? done / total : 0, pct: total ? Math.round((done / total) * 100) : 0 };
-  });
-
-  /** RUN ALL only makes sense on the operative walls — active (the
-   *  roadmap you run) and queue (what's staged/running). It's noise on
-   *  all / backlog / archived. */
-  const showRunAll = (): boolean => visibility() === 'active' || visibility() === 'queue';
-
-  /** Every initiative the architect could actually run: not manually
-   *  archived, not backlog, and with ≥1 incomplete task. */
-  const eligibleForRun = (): ServerInitiative[] =>
-    allInitiatives().filter((it) => {
-      if (viewStore.isInitiativeArchived(it.id)) return false;
-      if (it.status === 'backlog') return false;
-      const tasks = tasksByInitiative().get(it.id) ?? [];
-      if (tasks.length === 0) return false;
-      return tasks.some((t) => t.status !== 'done' && t.status !== 'cancelled');
-    });
-
-  // RUN ALL (operator spec 2026-06-19): stage EVERY eligible initiative,
-  // flip the view to the wall, and start the pass — the wall is now the
-  // single place the operator watches execution. While the architect is
-  // live the same button is the global Stop.
-  const onRunAll = async (): Promise<void> => {
-    if (architectLive()) { await stopArchitect(); return; }
-    const list = eligibleForRun();
-    setVisibility('queue');
-    if (list.length === 0) return;
-    // Stage everything into the shared `next` wall, then run the pass.
-    await stageAll(list.map((it) => it.id));
-    await runArchitectOnScope({
-      initiatives: list.map((it) => ({ id: it.id, title: it.title })),
-      display: 'all',
-    });
-  };
 
   // "Ejecutar cola" — run exactly what the operator staged (a curated
   // subset), in roadmap order, skipping anything already complete.
@@ -347,41 +292,9 @@ export default function InitiativesPanel() {
               onInput={(e) => setQuery((e.currentTarget as HTMLInputElement).value)}
               class="initiatives-filter-input bg-gray-800/70 border border-gray-600 rounded-md px-3 py-1 text-xs text-gray-100 placeholder-gray-400 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-500/40 w-44 min-w-0"
             />
-            {/* RUN ALL — node-style control (circle + play + outer ring
-                showing WHOLE-roadmap completion) + label. Only on the
-                operative walls: active + queue. */}
-            <Show when={showRunAll()}>
-              <div class="ml-auto flex items-center flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => { void onRunAll(); }}
-                  disabled={!architectLive() && (eligibleForRun().length === 0 || anyStoryRunLive())}
-                  title={
-                    architectLive()
-                      ? 'Parar el Roadmap Architect en marcha'
-                      : anyStoryRunLive()
-                        ? 'Hay otras iniciativas en marcha. Páralas primero.'
-                        : eligibleForRun().length === 0
-                          ? 'No hay iniciativas elegibles para Run all'
-                          : `Run all — ${overallProgress().pct}% del roadmap completado`
-                  }
-                  class={`rt-runall${architectLive() ? ' is-live' : ''}`}
-                >
-                  <span
-                    class="rt-node rt-runall-node"
-                    style={{ '--progress': String(overallProgress().frac) }}
-                  >
-                    <Show
-                      when={architectLive()}
-                      fallback={<span class="rt-play" aria-hidden="true" />}
-                    >
-                      <span class="rt-stop" aria-hidden="true" />
-                    </Show>
-                  </span>
-                  <span class="rt-runall-label">{architectLive() ? 'Stop' : 'Run all'}</span>
-                </button>
-              </div>
-            </Show>
+            {/* RUN ALL removed 2026-06-19 — redundant with the queue's
+                "Ejecutar cola"; execution now happens only from the Queue
+                wall. Staging is per-story ▶. */}
           </header>
 
           <RateLimitBanner />
@@ -418,15 +331,34 @@ export default function InitiativesPanel() {
                     ⏹ Parar
                   </button>
                 </Show>
-                <button
-                  type="button"
-                  onClick={() => { void clearQueueWall(); }}
-                  disabled={queueInitiatives().length === 0}
-                  class="rt-qbtn rt-qbtn-clear"
-                  title="Vaciar la cola (no afecta a lo que ya se está ejecutando)"
+                <Show
+                  when={!confirmingReset()}
+                  fallback={
+                    <span class="inline-flex items-center gap-1.5">
+                      <span class="rt-qbar-stat">¿Vaciar la cola?</span>
+                      <button
+                        type="button"
+                        class="rt-qbtn rt-qbtn-stop"
+                        onClick={() => { void clearQueueWall(); setConfirmingReset(false); }}
+                      >Sí</button>
+                      <button
+                        type="button"
+                        class="rt-qbtn rt-qbtn-clear"
+                        onClick={() => setConfirmingReset(false)}
+                      >No</button>
+                    </span>
+                  }
                 >
-                  Borrar cola
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingReset(true)}
+                    disabled={queueInitiatives().length === 0}
+                    class="rt-qbtn rt-qbtn-clear"
+                    title="Vaciar la cola (pide confirmación; no afecta a lo que ya se está ejecutando)"
+                  >
+                    Reset
+                  </button>
+                </Show>
               </div>
             </div>
           </Show>
@@ -493,7 +425,7 @@ function QueueEmpty() {
     <div class="text-center py-16 text-gray-500">
       <p class="text-sm">La cola está vacía.</p>
       <p class="text-xs text-gray-600 mt-2">
-        Pulsa ▶ en una historia para añadirla a la cola, o <span class="text-cyan-300/80">Run all</span> para encolar todo y arrancar.
+        Pulsa ▶ en una historia (en <span class="text-amber-300/80">active</span> o <span class="text-gray-400">backlog</span>) para añadirla a la cola; luego <span class="text-cyan-300/80">Ejecutar cola</span>.
       </p>
     </div>
   );

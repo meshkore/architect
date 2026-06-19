@@ -21,12 +21,9 @@ import ProjectsRail from '~/components/ProjectsRail';
 import OfflinePanel from '~/components/OfflinePanel';
 import RailEmptyPanel from '~/components/RailEmptyPanel';
 import ModulesTree from '~/components/ModulesTree';
-import RoadmapList from '~/components/RoadmapList';
 import InitiativesPanel from '~/components/InitiativesPanel';
 import ChatPanel from '~/components/ChatPanel';
 import ChatRail from '~/components/ChatRail';
-import ContextPanel from '~/components/ContextPanel';
-import DiagramsPanel from '~/components/DiagramsPanel';
 import AgentsPanel from '~/components/zones/AgentsPanel';
 import DaemonOutdatedPanel from '~/components/DaemonOutdatedPanel';
 import DaemonAheadPanel from '~/components/DaemonAheadPanel';
@@ -332,12 +329,7 @@ function Slot(props: SlotProps) {
         />
       </Match>
       <Match when={props.id === 'ws'}>
-        <WorkspaceColumn
-          selectedModule={props.selectedModule}
-          onSelectModule={props.onSelectModule}
-          tab={props.tab}
-          setTab={props.setTab}
-        />
+        <WorkspaceColumn />
       </Match>
       <Match when={props.id === 'chat'}>
         <ChatColumn selectedModule={props.selectedModule} />
@@ -381,38 +373,22 @@ function NavColumn(props: {
   );
 }
 
-function WorkspaceColumn(props: {
-  selectedModule: string | null;
-  onSelectModule: (id: string | null) => void;
-  tab: () => Tab;
-  setTab: (t: Tab) => void;
-}) {
-  const { tab, setTab } = props;
+function WorkspaceColumn() {
+  // 2026-06-19 — the Tasks/Context/Diagrams sub-tabs were PARKED (the
+  // per-module Tasks view was confusing; that filter belongs in the
+  // roadmap itself). The workspace column is roadmap-only now, with a
+  // static title header that matches the MODULES/AGENTS columns. The
+  // parked panels are preserved (not deleted) in `src/_parked/` — see the
+  // context decision `parked-workspace-subtabs` for the restore plan.
   return (
     <aside data-panel-id="ws" class="left-col col">
-      <div class="subtab-bar">
-        <ColumnDragGrip panelId="ws" />
-        <SubTab id="roadmap"  label="Roadmap"  active={tab() === 'roadmap'}  onSelect={setTab} global />
-        <span class="subtab-divider" aria-hidden="true">›</span>
-        <SubTab id="tasks"    label="Tasks"    active={tab() === 'tasks'}    onSelect={setTab} />
-        <SubTab id="context"  label="Context"  active={tab() === 'context'}  onSelect={setTab} />
-        <SubTab id="diagrams" label="Diagrams" active={tab() === 'diagrams'} onSelect={setTab} />
-        <div class="flex-1" />
+      <div class="col-header-row">
+        <div class="col-bar-lead">
+          <ColumnDragGrip panelId="ws" />
+          <span class="col-bar-title" style={{ cursor: 'default' }}>Roadmap</span>
+        </div>
       </div>
-      <Switch>
-        <Match when={tab() === 'roadmap'}>
-          <div class="ws-panel"><InitiativesPanel /></div>
-        </Match>
-        <Match when={tab() === 'tasks'}>
-          <div class="ws-panel"><RoadmapList moduleId={props.selectedModule} onSelectModule={props.onSelectModule} /></div>
-        </Match>
-        <Match when={tab() === 'context'}>
-          <div class="ws-panel"><ContextPanel moduleId={props.selectedModule} /></div>
-        </Match>
-        <Match when={tab() === 'diagrams'}>
-          <div class="ws-panel"><DiagramsPanel moduleId={props.selectedModule} /></div>
-        </Match>
-      </Switch>
+      <div class="ws-panel"><InitiativesPanel /></div>
     </aside>
   );
 }
@@ -563,24 +539,9 @@ function DaemonAheadBanner() {
   );
 }
 
-function SubTab(props: {
-  id: Tab;
-  label: string;
-  active: boolean;
-  onSelect: (id: Tab) => void;
-  global?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      data-wstab={props.id}
-      onClick={() => props.onSelect(props.id)}
-      class={`subtab ws-tab ${props.active ? 'active' : ''} ${props.global ? 'subtab-global' : ''}`}
-    >
-      {props.label}
-    </button>
-  );
-}
+// SubTab (Roadmap/Tasks/Context/Diagrams) parked 2026-06-19 — the
+// workspace column is roadmap-only now. See src/_parked/ + the context
+// decision `parked-workspace-subtabs`.
 
 function ZoneView(props: { zone: Zone }) {
   return (
