@@ -21,8 +21,6 @@ export default function ModuleNode(props: {
   const kids = () => (props.tree.byParent.get(props.mod.id) ?? []).filter((k) => props.passes(k.id));
   const isExpanded = () => props.expanded.has(props.mod.id);
   const isActive = () => props.selectedId === props.mod.id;
-  const counts = () => props.tree.agg.get(props.mod.id) ?? { total: 0, active: 0 };
-  const count = () => (counts().active > 0 ? counts().active : counts().total);
   // V86i — context + diagram presence flags. The module is "documented"
   // if the daemon serves a README under docs/modules/<id>.md; that doc
   // can carry an inline `diagrams:` block that we surface as the orange
@@ -38,13 +36,11 @@ export default function ModuleNode(props: {
         style={{ 'padding-left': `${0.5 + props.depth * 0.75}rem` }}
         onClick={() => props.onSelect(props.mod.id)}
       >
-        {/* Status dot: live (active tasks) vs idle (no tasks moving).
-            Title makes it screen-reader friendly. */}
-        <span
-          aria-label={counts().active > 0 ? `${counts().active} active tasks` : 'no active tasks'}
-          title={counts().active > 0 ? `${counts().active} active task${counts().active === 1 ? '' : 's'}` : 'no active tasks'}
-          class={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${counts().active > 0 ? 'bg-emerald-400' : 'bg-transparent'}`}
-        />
+        {/* Neutral row marker. The old green "has active tasks" tint lit
+            up almost every module, so it read as decoration, not signal —
+            now a plain bullet. Meaningful colour is reserved for the
+            context (blue) / diagram (orange) indicators on the right. */}
+        <span aria-hidden="true" class="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-gray-600" />
         <span class="truncate flex-1" title={props.mod.id}>{props.mod.name ?? props.mod.id}</span>
 
         {/* Context indicator — blue. Module has a README under docs/. */}
@@ -77,7 +73,6 @@ export default function ModuleNode(props: {
             </svg>
           </button>
         </Show>
-        <span class="font-mono text-[10px] text-gray-500">{count()}</span>
       </div>
       <Show when={kids().length > 0 && isExpanded()}>
         <For each={kids()}>

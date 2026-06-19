@@ -1,5 +1,5 @@
 import { createMemo, For, Show } from 'solid-js';
-import { allModules, allTasks } from '~/state/server';
+import { allModules } from '~/state/server';
 import { uiStore } from '~/state/ui';
 import { viewStore } from '~/state/view';
 import ModuleNode from './ModuleNode';
@@ -36,14 +36,13 @@ export default function ModulesTree(props: { selected: string | null; onSelect: 
         <button
           type="button"
           onClick={() => props.onSelect(null)}
-          class={`w-full text-left px-2 py-1.5 rounded-md flex items-center justify-between gap-2 transition-colors ${
+          class={`w-full text-left px-2 py-1.5 rounded-md flex items-center gap-2 transition-colors ${
             props.selected === null
               ? 'bg-emerald-500/10 text-emerald-300'
               : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
           }`}
         >
-          <span>All</span>
-          <span class="font-mono text-[10px] text-gray-500">{allTasks().length}</span>
+          <span class="truncate">All</span>
         </button>
         <For each={rootKids()}>
           {(m) => (
