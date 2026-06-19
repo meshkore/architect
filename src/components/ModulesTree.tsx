@@ -37,13 +37,17 @@ export default function ModulesTree(props: { selected: string | null; onSelect: 
         <button
           type="button"
           onClick={() => props.onSelect(null)}
-          class={`w-full text-left px-2 py-1.5 rounded-md flex items-center justify-between gap-2 transition-colors ${
+          class={`w-full text-left px-2 py-1.5 rounded-md flex items-center gap-1.5 transition-colors ${
             props.selected === null
               ? 'bg-emerald-500/10 text-emerald-300'
               : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
           }`}
         >
-          <span class="truncate">All</span>
+          {/* Leading spacers keep "All" aligned with the module names
+              (chevron column + dot column). */}
+          <span class="w-3.5 flex-shrink-0" aria-hidden="true" />
+          <span class="w-1.5 flex-shrink-0" aria-hidden="true" />
+          <span class="truncate flex-1">All</span>
           <Show when={uiStore.state.modulesRailWidth >= MODULES_COUNT_MIN_PX}>
             <span class="font-mono text-[10px] text-gray-500 flex-shrink-0">{allTasks().length}</span>
           </Show>
@@ -81,12 +85,13 @@ export default function ModulesTree(props: { selected: string | null; onSelect: 
                 <button
                   type="button"
                   onClick={() => props.onSelect(d.scopeId)}
-                  class={`w-full text-left px-2 py-1.5 rounded-md flex items-center gap-2 transition-colors ${
+                  class={`w-full text-left px-2 py-1.5 rounded-md flex items-center gap-1.5 transition-colors ${
                     props.selected === d.scopeId
                       ? 'bg-emerald-500/10 text-emerald-300'
                       : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
                   }`}
                 >
+                  <span class="w-3.5 flex-shrink-0" aria-hidden="true" />
                   <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-blue-400/80"
                     title="Has context — open in CONTEXT tab"
                     aria-label="has context doc" />

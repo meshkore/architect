@@ -1176,6 +1176,19 @@
       color: var(--theme-accent-bright, #34d399);
       background: color-mix(in srgb, var(--theme-accent) 5%, transparent);
     }
+    /* Live dot — a module with work in progress. Soft emerald pulse so
+       it reads as "moving" without shouting. */
+    .mod-dot-live {
+      box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55);
+      animation: mod-dot-pulse 1.8s ease-in-out infinite;
+    }
+    @keyframes mod-dot-pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.50); }
+      70%  { box-shadow: 0 0 0 5px rgba(52, 211, 153, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+    }
+    /* Chevron rotates 90° when its module is expanded. */
+    .mod-chevron { transition: transform 120ms ease, color 120ms ease; }
 
     /* V29 — chat rail subcolumn. Always full cards (3 lines), no compact
        mode. Selected card gets stripe + color tint; others stay flat. */
