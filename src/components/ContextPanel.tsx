@@ -158,7 +158,7 @@ function SpawnBadge(props: {
       <span class={`font-mono px-2 py-0.5 rounded border ${cls()}`} title="Lo que el daemon inyecta en cada spawn: mapa skeleton + cuerpos pinned">
         spawn {props.tree.spawn_tokens.toLocaleString()} / {props.tree.budget_tokens.toLocaleString()} tok · {pct()}%
       </span>
-      <Show when={props.tree.skeleton_tokens != null && props.tree.pinned_tokens != null}>
+      <Show when={props.tree.skeleton_tokens !== undefined && props.tree.pinned_tokens !== undefined}>
         <span class="text-gray-500 font-mono">
           {props.tree.skeleton_tokens!.toLocaleString()} skeleton + {props.tree.pinned_tokens!.toLocaleString()} pinned
         </span>
@@ -218,15 +218,6 @@ const LINE = 'bg-emerald-500/70';
 const VW = '2px';
 const HH = '2px';
 
-function multiSentence(desc: string | undefined): boolean {
-  if (!desc) return false;
-  return desc.trim().split(/\.\s/).filter(Boolean).length > 1;
-}
-function firstSentence(desc: string | undefined): string {
-  if (!desc) return '';
-  return desc.trim().split(/\.\s/)[0] ?? desc.trim();
-}
-
 function TreeNode(props: {
   node: KnowledgeNode;
   depth: number;
@@ -234,27 +225,29 @@ function TreeNode(props: {
   ancestorLines: boolean[];
 }) {
   const hasChildren = () => !!props.node.children && props.node.children.length > 0;
-  const expandable = () => hasChildren() || props.node.has_body || multiSentence(props.node.desc);
-  const isExpanded = () => viewStore.isContextNodeExpanded(props.node.id);
+  const hasBody = () => props.node.has_body;
+  // The tree STRUCTURE (titles + descriptions + children) is ALWAYS shown.
+  // The toggle only opens/closes a node's on-demand BODY (the file content).
+  const isBodyOpen = () => viewStore.isContextNodeExpanded(props.node.id);
 
   const toggle = () => {
-    if (!expandable()) return;
+    if (!hasBody()) return;
     viewStore.toggleContextNode(props.node.id);
   };
 
   const childLines = (): boolean[] => [...props.ancestorLines, !props.isLast];
 
-  // Body fetched when expanded AND the node carries a body; refetched on a
+  // Body fetched when opened AND the node carries a body; refetched on a
   // contextRev bump so an open body updates live.
   const [bodyHtml] = createResource(
-    () => (props.node.has_body && isExpanded() ? `${props.node.id}|${contextRev()}` : null),
+    () => (hasBody() && isBodyOpen() ? `${props.node.id}|${contextRev()}` : null),
     async (key: string | null) => {
       if (!key) return '';
       const sep = key.lastIndexOf('|');
       const id = key.slice(0, sep);
       const rev = Number(key.slice(sep + 1));
       const raw = await loadNodeBody(id, rev);
-      if (raw == null) return null;
+      if (raw === null) return null;
       try {
         const m = await ensureMarked();
         return m.parse(raw, { gfm: true }) as string;
@@ -266,7 +259,9 @@ function TreeNode(props: {
 
   const rowPad = () => `${4 + props.depth * INDENT}px`;
   const ownX = (props.depth - 1) * INDENT + HALF;
-  const boxIndent = () => `${props.depth * INDENT + 26}px`;
+  // Align the description (and body) under the TITLE's first letter:
+  // rowPad (4 + depth*INDENT) + toggle 16 + gap 6 + dot 8 + gap 6 ≈ +40.
+  const descIndent = () => `${props.depth * INDENT + 40}px`;
 
   return (
     <li class="relative">
@@ -300,25 +295,25 @@ function TreeNode(props: {
       <div
         onClick={toggle}
         class={`group relative flex items-center gap-1.5 px-2 min-h-[26px] rounded transition-colors ${
-          expandable() ? 'cursor-pointer' : 'cursor-default'
-        } ${isExpanded() ? 'text-emerald-100' : 'hover:bg-gray-800/40 text-gray-300'}`}
+          hasBody() ? 'cursor-pointer' : 'cursor-default'
+        } ${isBodyOpen() ? 'text-emerald-100' : 'hover:bg-gray-800/40 text-gray-300'}`}
         style={{ 'padding-left': rowPad() }}
       >
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); toggle(); }}
-          disabled={!expandable()}
+          disabled={!hasBody()}
           class={`w-4 h-4 flex-shrink-0 inline-flex items-center justify-center rounded font-mono text-[11px] leading-none transition-colors ${
-            !expandable()
-              ? 'text-gray-700 cursor-default'
-              : isExpanded()
+            !hasBody()
+              ? 'text-transparent cursor-default'
+              : isBodyOpen()
                 ? 'text-emerald-300 bg-emerald-500/10'
                 : 'text-gray-500 bg-gray-900/60 hover:text-emerald-300 hover:bg-emerald-500/10'
           }`}
-          title={isExpanded() ? 'colapsar' : 'expandir'}
-          aria-label={isExpanded() ? 'collapse' : 'expand'}
+          title={hasBody() ? (isBodyOpen() ? 'cerrar contenido' : 'abrir contenido') : ''}
+          aria-label={hasBody() ? (isBodyOpen() ? 'collapse body' : 'open body') : ''}
         >
-          {expandable() ? (isExpanded() ? '−' : '+') : '·'}
+          {hasBody() ? (isBodyOpen() ? '−' : '+') : ''}
         </button>
 
         {/* load policy dot */}
@@ -328,11 +323,6 @@ function TreeNode(props: {
         <span class={`flex-shrink-0 ${hasChildren() ? 'font-semibold text-gray-100' : 'text-gray-200'}`}>
           {props.node.title}
         </span>
-
-        {/* 1-line description */}
-        <Show when={props.node.desc}>
-          <span class="truncate text-[12px] text-gray-500">— {firstSentence(props.node.desc)}</span>
-        </Show>
 
         {/* feeds pill */}
         <Show when={props.node.feeds}>
@@ -351,57 +341,59 @@ function TreeNode(props: {
         </span>
       </div>
 
-      {/* expanded → section intro + body + children */}
-      <Show when={isExpanded()}>
-        {/* full section description (1-3 lines) */}
-        <Show when={multiSentence(props.node.desc)}>
-          <p class="text-[12px] text-gray-400 italic leading-relaxed my-1.5 mr-2" style={{ 'margin-left': boxIndent() }}>
-            {props.node.desc}
-          </p>
-        </Show>
+      {/* Description — ALWAYS below the title (no box), smaller, left-aligned
+          under the title's first letter, 1-3 lines, within the branch lines. */}
+      <Show when={props.node.desc}>
+        <p
+          class="text-[12px] text-gray-500 leading-relaxed pr-3 pb-1"
+          style={{ 'margin-left': descIndent() }}
+        >
+          {props.node.desc}
+        </p>
+      </Show>
 
-        {/* processed body box */}
-        <Show when={props.node.has_body}>
-          <div
-            class="my-1.5 mr-2 rounded-lg border border-gray-800/70 bg-gray-950/40 overflow-hidden"
-            style={{ 'margin-left': boxIndent() }}
-          >
-            <div class="flex items-center gap-3 px-4 py-2 border-b border-gray-800/60 bg-gray-900/30 text-[10px] text-gray-500">
-              <span class="font-mono uppercase tracking-wider text-gray-400">{props.node.title}</span>
-              <Show when={props.node.updated}><span>updated: {props.node.updated}</span></Show>
-              <span class="ml-auto font-mono text-gray-600">{props.node.load}</span>
-            </div>
-            <div class="px-4 py-3">
-              <Show
-                when={bodyHtml.state === 'ready' || bodyHtml.state === 'refreshing'}
-                fallback={<p class="text-[11px] text-gray-500 italic">cargando…</p>}
-              >
-                <Show
-                  when={bodyHtml()}
-                  fallback={<p class="text-[11px] text-amber-300/70 italic">no se pudo cargar el contenido</p>}
-                >
-                  <div class={PROSE} innerHTML={bodyHtml() ?? ''} />
-                </Show>
-              </Show>
-            </div>
+      {/* On-demand body (the file content) — opens on click, for nodes that
+          carry one. */}
+      <Show when={hasBody() && isBodyOpen()}>
+        <div
+          class="my-1.5 mr-2 rounded-lg border border-gray-800/70 bg-gray-950/40 overflow-hidden"
+          style={{ 'margin-left': descIndent() }}
+        >
+          <div class="flex items-center gap-3 px-4 py-2 border-b border-gray-800/60 bg-gray-900/30 text-[10px] text-gray-500">
+            <span class="font-mono uppercase tracking-wider text-gray-400">{props.node.title}</span>
+            <Show when={props.node.updated}><span>updated: {props.node.updated}</span></Show>
+            <span class="ml-auto font-mono text-gray-600">{props.node.load}</span>
           </div>
-        </Show>
+          <div class="px-4 py-3">
+            <Show
+              when={bodyHtml.state === 'ready' || bodyHtml.state === 'refreshing'}
+              fallback={<p class="text-[11px] text-gray-500 italic">cargando…</p>}
+            >
+              <Show
+                when={bodyHtml()}
+                fallback={<p class="text-[11px] text-amber-300/70 italic">no se pudo cargar el contenido</p>}
+              >
+                <div class={PROSE} innerHTML={bodyHtml() ?? ''} />
+              </Show>
+            </Show>
+          </div>
+        </div>
+      </Show>
 
-        {/* child concepts */}
-        <Show when={hasChildren()}>
-          <ul>
-            <For each={props.node.children}>
-              {(child, i) => (
-                <TreeNode
-                  node={child}
-                  depth={props.depth + 1}
-                  isLast={i() === props.node.children.length - 1}
-                  ancestorLines={childLines()}
-                />
-              )}
-            </For>
-          </ul>
-        </Show>
+      {/* Child concepts — ALWAYS visible (the structure is open). */}
+      <Show when={hasChildren()}>
+        <ul>
+          <For each={props.node.children}>
+            {(child, i) => (
+              <TreeNode
+                node={child}
+                depth={props.depth + 1}
+                isLast={i() === props.node.children!.length - 1}
+                ancestorLines={childLines()}
+              />
+            )}
+          </For>
+        </ul>
       </Show>
     </li>
   );
