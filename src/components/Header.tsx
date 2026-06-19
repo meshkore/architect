@@ -84,7 +84,7 @@ const ZONES: { id: Zone; label: string; title: string }[] = [
   { id: 'bookmarks', label: 'Bookmarks', title: 'Bookmarks — quick-access shelf' },
   { id: 'crons',     label: 'Crons',     title: 'Crons — scheduled jobs' },
   { id: 'links',     label: 'Links',     title: 'Links — deployment registry' },
-  { id: 'protocols', label: 'Protocols', title: 'Protocols — reusable runbooks' },
+  // Protocols moved 2026-06-19 into the Roadmap column's sub-tabs.
   { id: 'diary',     label: 'Diary',     title: 'Diary — chronological activity blog' },
   { id: 'config',    label: 'Config',    title: 'Config — cluster settings' },
 ];

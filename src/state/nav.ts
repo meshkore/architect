@@ -10,7 +10,8 @@
 import { createSignal } from 'solid-js';
 import { chatStore } from '~/state/chat';
 
-export type CockpitTab = 'roadmap' | 'tasks' | 'context' | 'diagrams';
+// 2026-06-19: Tasks parked; Protocols moved into the Roadmap column.
+export type CockpitTab = 'roadmap' | 'context' | 'diagrams' | 'protocols';
 
 const [cockpitTab, setCockpitTab] = createSignal<CockpitTab>('roadmap');
 

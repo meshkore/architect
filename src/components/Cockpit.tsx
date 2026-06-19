@@ -22,6 +22,8 @@ import OfflinePanel from '~/components/OfflinePanel';
 import RailEmptyPanel from '~/components/RailEmptyPanel';
 import ModulesTree from '~/components/ModulesTree';
 import InitiativesPanel from '~/components/InitiativesPanel';
+import ContextPanel from '~/components/ContextPanel';
+import DiagramsPanel from '~/components/DiagramsPanel';
 import ChatPanel from '~/components/ChatPanel';
 import ChatRail from '~/components/ChatRail';
 import AgentsPanel from '~/components/zones/AgentsPanel';
@@ -50,7 +52,8 @@ import { nav } from '~/state/nav';
 import { uiStore, type Zone } from '~/state/ui';
 import { layoutStore, type ColumnId } from '~/state/layout';
 
-type Tab = 'roadmap' | 'tasks' | 'context' | 'diagrams';
+// 2026-06-19: Tasks parked; Protocols moved in from the header zone.
+type Tab = 'roadmap' | 'context' | 'diagrams' | 'protocols';
 
 const HASH_ZONES: readonly Zone[] = ['architect', 'agents', 'bookmarks', 'crons', 'links', 'protocols', 'diary', 'config'];
 
@@ -329,7 +332,11 @@ function Slot(props: SlotProps) {
         />
       </Match>
       <Match when={props.id === 'ws'}>
-        <WorkspaceColumn />
+        <WorkspaceColumn
+          selectedModule={props.selectedModule}
+          tab={props.tab}
+          setTab={props.setTab}
+        />
       </Match>
       <Match when={props.id === 'chat'}>
         <ChatColumn selectedModule={props.selectedModule} />
@@ -373,22 +380,40 @@ function NavColumn(props: {
   );
 }
 
-function WorkspaceColumn() {
-  // 2026-06-19 — the Tasks/Context/Diagrams sub-tabs were PARKED (the
-  // per-module Tasks view was confusing; that filter belongs in the
-  // roadmap itself). The workspace column is roadmap-only now, with a
-  // static title header that matches the MODULES/AGENTS columns. The
-  // parked panels are preserved (not deleted) in `src/_parked/` — see the
-  // context decision `parked-workspace-subtabs` for the restore plan.
+function WorkspaceColumn(props: {
+  selectedModule: string | null;
+  tab: () => Tab;
+  setTab: (t: Tab) => void;
+}) {
+  // 2026-06-19 — sub-tabs: Roadmap · Context · Diagrams · Protocols.
+  // (Tasks parked → src/_parked/RoadmapList.tsx.bak; Protocols moved in
+  // from the header zone per operator.)
+  const { tab, setTab } = props;
   return (
     <aside data-panel-id="ws" class="left-col col">
-      <div class="col-header-row">
-        <div class="col-bar-lead">
-          <ColumnDragGrip panelId="ws" />
-          <span class="col-bar-title" style={{ cursor: 'default' }}>Roadmap</span>
-        </div>
+      <div class="subtab-bar">
+        <ColumnDragGrip panelId="ws" />
+        <SubTab id="roadmap"   label="Roadmap"   active={tab() === 'roadmap'}   onSelect={setTab} global />
+        <span class="subtab-divider" aria-hidden="true">›</span>
+        <SubTab id="context"   label="Context"   active={tab() === 'context'}   onSelect={setTab} />
+        <SubTab id="diagrams"  label="Diagrams"  active={tab() === 'diagrams'}  onSelect={setTab} />
+        <SubTab id="protocols" label="Protocols" active={tab() === 'protocols'} onSelect={setTab} />
+        <div class="flex-1" />
       </div>
-      <div class="ws-panel"><InitiativesPanel /></div>
+      <Switch>
+        <Match when={tab() === 'roadmap'}>
+          <div class="ws-panel"><InitiativesPanel /></div>
+        </Match>
+        <Match when={tab() === 'context'}>
+          <div class="ws-panel"><ContextPanel moduleId={props.selectedModule} /></div>
+        </Match>
+        <Match when={tab() === 'diagrams'}>
+          <div class="ws-panel"><DiagramsPanel moduleId={props.selectedModule} /></div>
+        </Match>
+        <Match when={tab() === 'protocols'}>
+          <div class="ws-panel"><ProtocolsPanel /></div>
+        </Match>
+      </Switch>
     </aside>
   );
 }
@@ -539,9 +564,24 @@ function DaemonAheadBanner() {
   );
 }
 
-// SubTab (Roadmap/Tasks/Context/Diagrams) parked 2026-06-19 — the
-// workspace column is roadmap-only now. See src/_parked/ + the context
-// decision `parked-workspace-subtabs`.
+function SubTab(props: {
+  id: Tab;
+  label: string;
+  active: boolean;
+  onSelect: (id: Tab) => void;
+  global?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      data-wstab={props.id}
+      onClick={() => props.onSelect(props.id)}
+      class={`subtab ws-tab ${props.active ? 'active' : ''} ${props.global ? 'subtab-global' : ''}`}
+    >
+      {props.label}
+    </button>
+  );
+}
 
 function ZoneView(props: { zone: Zone }) {
   return (

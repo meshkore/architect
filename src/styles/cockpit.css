@@ -1647,10 +1647,10 @@
     }
 
     .subtab-bar      { display: flex; align-items: stretch; border-bottom: 1px solid var(--border-bar); padding: 0 var(--col-pad-x); flex-shrink: 0; height: 38px; background: var(--bg-bar); box-shadow: var(--shadow-bar); position: relative; z-index: 2; }
-    /* 2026-06-19: tabs unified with the column titles (.col-bar-title) —
-       same size (--fs-title 11px), colour (gray-500) + 0.18em. The active
-       tab keeps a brighter colour + the accent underline as its cue. */
-    .subtab          { position: relative; display: flex; align-items: center; padding: 0 14px; font-size: var(--fs-title, 11px); color: #6b7280; text-transform: uppercase; letter-spacing: 0.18em; cursor: pointer; transition: color 120ms, background 120ms; }
+    /* 2026-06-19 (reverted): the ROADMAP tab style (12.5px, bright, accent
+       underline) is the nice one — keep it; the column TITLES were raised
+       UP to match it instead (see .col-bar-title). */
+    .subtab          { position: relative; display: flex; align-items: center; padding: 0 14px; font-size: var(--fs-button, 12.5px); color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; transition: color 120ms, background 120ms; }
     .subtab:hover    { color: #f3f4f6; }
 
     /* V41 — Bump readability of small uppercase section labels across
@@ -1687,26 +1687,39 @@
     .col-subheader-row { height: 38px; padding: 0 var(--col-pad-x); display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border-bar); flex-shrink: 0; background: var(--bg-bar); }
 
     /* 2026-06-19 — unified column-header chrome across the 3 columns
-       (modules · agents/chat · roadmap). One title style, one grip→text
-       gap (the grip's own 6px margin-right is the single spacer, so the
-       lead cluster adds NO extra gap → 6px everywhere). */
+       (modules · agents/chat · roadmap). The column TITLES adopt the nice
+       ROADMAP active-tab look: bright text, 12.5px / 0.08em, + the accent
+       underline. Grip→text gap is a single 6px (the grip's own margin;
+       .col-bar-lead adds none). */
     .col-bar-title {
+      position: relative;
       font-family: 'JetBrains Mono', monospace;
-      font-size: var(--fs-title, 11px);
-      letter-spacing: 0.18em;
+      font-size: var(--fs-button, 12.5px);
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       font-weight: 600;
-      color: #6b7280;
+      color: #f3f4f6;
       background: transparent;
       border: 0;
-      padding: 0;
+      padding: 2px 0 8px;
       cursor: pointer;
       transition: color .15s ease;
     }
-    .col-bar-title:hover { color: #6ee7b7; }
+    /* The accent underline that marked the selected ROADMAP tab, applied to
+       the column titles so MODULES/AGENTS read as "the active view" too. */
+    .col-bar-title::after {
+      content: '';
+      position: absolute;
+      left: 0; right: 0; bottom: -1px;
+      height: 2px;
+      background: linear-gradient(90deg, var(--theme-accent-bright, #34d399), #6ee7b7);
+      border-radius: 1px 1px 0 0;
+      box-shadow: 0 0 8px color-mix(in srgb, var(--theme-accent-bright) 50%, transparent);
+    }
+    .col-bar-title:hover { color: #ffffff; }
     .col-bar-lead { display: flex; align-items: center; min-width: 0; }
     .subtab:hover { color: #d1d5db; }
-    .subtab.active { color: #d1d5db; background: linear-gradient(180deg, color-mix(in srgb, var(--theme-accent) 6%, transparent) 0%, color-mix(in srgb, var(--theme-accent) 0%, transparent) 100%); }
+    .subtab.active { color: #f3f4f6; background: linear-gradient(180deg, color-mix(in srgb, var(--theme-accent) 6%, transparent) 0%, color-mix(in srgb, var(--theme-accent) 0%, transparent) 100%); }
     .subtab.active::after { content: ''; position: absolute; bottom: -1px; left: 8px; right: 8px; height: 2px; background: linear-gradient(90deg,var(--theme-accent-bright, #34d399),#6ee7b7); border-radius: 1px 1px 0 0; box-shadow: 0 0 8px color-mix(in srgb, var(--theme-accent-bright) 50%, transparent); }
 
     /* Task card — two clear rows.
