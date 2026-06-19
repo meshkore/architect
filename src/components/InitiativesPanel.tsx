@@ -80,22 +80,39 @@ export default function InitiativesPanel() {
     };
     // QUEUE — the ephemeral, in-memory execution list (NOT a wall). Items
     // here are still wherever they live on the roadmap; this is just "what
-    // will run". Order = the operator's insertion order. Live-but-not-
-    // queued initiatives are appended so a running item stays visible.
+    // will run". Base order = the operator's insertion order; live-but-not-
+    // queued initiatives are appended so a running item stays visible; and
+    // anything freshly anchor-created (within its NEW-badge TTL) is included
+    // even if it briefly isn't live yet.
+    //
+    // THEN: imminent items — running RIGHT NOW or just created on the fly —
+    // float to the TOP. Before the queue wall existed this "fresh at the top"
+    // behaviour lived on the ACTIVE roadmap (scroll + ✨); it was lost when the
+    // queue became the operator's execution view. (stable sort keeps the
+    // within-band order: queued-insertion, then appended.)
     if (vis === 'queue') {
       const order = queuedIds();
       const inQ = new Set(order);
       const byId = new Map(allInitiatives().map((it) => [it.id, it] as const));
+      const seen = new Set<string>();
       const out: ServerInitiative[] = [];
-      for (const id of order) {
-        const it = byId.get(id);
-        if (it && matchesQuery(it)) out.push(it);
-      }
+      const add = (it: ServerInitiative | undefined): void => {
+        if (it && !seen.has(it.id) && matchesQuery(it)) {
+          seen.add(it.id);
+          out.push(it);
+        }
+      };
+      for (const id of order) add(byId.get(id));
       for (const it of allInitiatives()) {
         if (inQ.has(it.id)) continue;
-        if ((liveByInit[it.id]?.length ?? 0) > 0 && matchesQuery(it)) out.push(it);
+        const isLive = (liveByInit[it.id]?.length ?? 0) > 0;
+        const isFresh = viewStore.isRecentlyCreatedInit(it.id);
+        if (isLive || isFresh) add(it);
       }
-      return out;
+      const imminent = (it: ServerInitiative): boolean =>
+        (liveByInit[it.id]?.length ?? 0) > 0 ||
+        viewStore.isRecentlyCreatedInit(it.id);
+      return out.slice().sort((a, b) => Number(imminent(b)) - Number(imminent(a)));
     }
 
     const list = allInitiatives().filter((it) => {

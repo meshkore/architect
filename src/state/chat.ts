@@ -1627,7 +1627,12 @@ function ingestConvEvent(ev: DaemonEvent): void {
     // files, so allInitiatives() + allTasks() will pick them up via
     // the existing state.rebuilt event — no explicit serverStore
     // refresh needed here.
-    if (ev.is_new_init && typeof ev.initiative_id === 'string') {
+    // A freshly-created OR a reactivated (reused-from-archive) initiative both
+    // count as "just happened" — flash + ✨ + float to the top of the QUEUE.
+    if (
+      (ev.is_new_init || ev.reactivated) &&
+      typeof ev.initiative_id === 'string'
+    ) {
       viewStore.markRecentlyCreatedInit(ev.initiative_id);
     }
     if (ev.is_new_task && typeof ev.task_id === 'string') {
