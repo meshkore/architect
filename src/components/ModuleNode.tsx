@@ -1,6 +1,8 @@
 import { For, Show } from 'solid-js';
 import type { ServerModule } from '~/state/server';
 import { moduleDocFlags } from '~/components/modules-tree/doc-index';
+import { MODULES_COUNT_MIN_PX } from '~/components/modules-tree/widths';
+import { uiStore } from '~/state/ui';
 
 export interface ModuleTreeIndex {
   byParent: Map<string, ServerModule[]>;
@@ -21,6 +23,11 @@ export default function ModuleNode(props: {
   const kids = () => (props.tree.byParent.get(props.mod.id) ?? []).filter((k) => props.passes(k.id));
   const isExpanded = () => props.expanded.has(props.mod.id);
   const isActive = () => props.selectedId === props.mod.id;
+  const counts = () => props.tree.agg.get(props.mod.id) ?? { total: 0, active: 0 };
+  const count = () => (counts().active > 0 ? counts().active : counts().total);
+  // Task count is shown only in the wide rail; when the operator
+  // squeezes the rail it's hidden so the name keeps the space.
+  const showCount = () => uiStore.state.modulesRailWidth >= MODULES_COUNT_MIN_PX;
   // V86i — context + diagram presence flags. The module is "documented"
   // if the daemon serves a README under docs/modules/<id>.md; that doc
   // can carry an inline `diagrams:` block that we surface as the orange
@@ -72,6 +79,9 @@ export default function ModuleNode(props: {
               <path d="M9 5l7 7-7 7" />
             </svg>
           </button>
+        </Show>
+        <Show when={showCount()}>
+          <span class="font-mono text-[10px] text-gray-500 flex-shrink-0">{count()}</span>
         </Show>
       </div>
       <Show when={kids().length > 0 && isExpanded()}>

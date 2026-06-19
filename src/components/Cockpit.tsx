@@ -43,6 +43,7 @@ import DiaryPanel from '~/components/zones/DiaryPanel';
 // card's Activity tab. A floating sticky banner duplicates that
 // signal and steals attention.
 import Splitter, { setLayoutWidth } from '~/components/Splitter';
+import { MODULES_COLLAPSE_PX } from '~/components/modules-tree/widths';
 import ColumnDragGrip from '~/components/ColumnDragGrip';
 import { openNewAgentWizard } from '~/components/modals/NewAgentWizard';
 import { daemonStore } from '~/state/daemon';
@@ -55,10 +56,8 @@ import { layoutStore, type ColumnId } from '~/state/layout';
 // 2026-06-19: Tasks parked; Protocols moved in from the header zone.
 type Tab = 'roadmap' | 'context' | 'diagrams' | 'protocols';
 
-// Below this rail width the modules list collapses to a vertical
-// "Modules" strip (reclaims width for the roadmap). Expand width the
-// click restores it to.
-const MODULES_COLLAPSE_PX = 72;
+// Width the collapsed modules strip expands to on click. The collapse
+// threshold itself is shared with the tree (widths.ts).
 const MODULES_EXPAND_PX = 220;
 
 const HASH_ZONES: readonly Zone[] = ['architect', 'agents', 'bookmarks', 'crons', 'links', 'protocols', 'diary', 'config'];
