@@ -225,6 +225,46 @@ export interface ContextTreeResponse {
   tree: ContextNode[];
 }
 
+// knowledge-tree-unified KT3 — the unified knowledge tree, served by the
+// daemon's /knowledge endpoint (py-1.24.0+). A conceptual overlay over
+// context/+docs/+modules/ defined in context/_index.yaml. Each node is a
+// CONCEPT (never a filename); load policy decides what the agent gets at
+// spawn (pinned = full body, skeleton = map line only, on-demand = fetched).
+export type KnowledgeLoad = 'pinned' | 'skeleton' | 'on-demand';
+export interface KnowledgeNode {
+  id: string;
+  title: string;
+  desc: string;
+  load: KnowledgeLoad;
+  words: number;
+  has_body: boolean;
+  src?: string;
+  updated?: string;
+  feeds?: string;
+  children: KnowledgeNode[];
+}
+export interface KnowledgeTreeResponse {
+  exists: boolean;
+  root: string;
+  version?: number;
+  spawn_tokens: number;
+  skeleton_tokens?: number;
+  pinned_tokens?: number;
+  budget_tokens: number;
+  over_budget: boolean;
+  warnings: string[];
+  tree: KnowledgeNode[];
+}
+export interface KnowledgeNodeBody {
+  id: string;
+  title: string;
+  desc: string;
+  has_body: boolean;
+  body?: string | null;
+  src?: string;
+  error?: string;
+}
+
 
 export interface InitiativeActivityCommit {
   repo?: string;
@@ -688,6 +728,19 @@ export class DaemonClient {
     } catch (e) {
       return { ok: false, status: 0, error: e instanceof Error ? e.message : String(e) };
     }
+  }
+
+  /** knowledge-tree-unified KT3 — the unified knowledge tree. GET
+   *  /knowledge returns the manifest-driven concept tree (overlay over
+   *  context/+docs/+modules/; per-node load policy + spawn-token budget).
+   *  GET /knowledge/<id> serves a single node's processed body, lazily.
+   *  Daemon must be at py-1.24.0+. */
+  async knowledgeTree(signal?: AbortSignal): Promise<Result<KnowledgeTreeResponse>> {
+    return this.request<KnowledgeTreeResponse>('GET', '/knowledge', undefined, signal);
+  }
+
+  async knowledgeNode(id: string, signal?: AbortSignal): Promise<Result<KnowledgeNodeBody>> {
+    return this.request<KnowledgeNodeBody>('GET', '/knowledge/' + encodeURIComponent(id), undefined, signal);
   }
 
   /** V107.22 — fetch ANY file under the cluster root as raw markdown

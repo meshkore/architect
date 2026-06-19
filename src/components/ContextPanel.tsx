@@ -1,34 +1,28 @@
 /**
- * ContextPanel — V107.41 (live-synced single-column tree).
+ * ContextPanel — knowledge-tree-unified KT3 (the unified knowledge viewer).
  *
- * Real-time: the daemon broadcasts `context.changed` when any
- * `.meshkore/context/` file changes (an agent it spawned edited the
- * project context); the event-bus bumps `contextRev`, and this panel
- * re-fetches the tree + any expanded bodies live. No manual sync button
- * — context is presumed always in sync with the daemon.
+ * Renders the project's UNIFIED KNOWLEDGE TREE (daemon `/knowledge`,
+ * py-1.24.0+) as ONE full-width column of CONCEPTS — never filenames. The
+ * tree is a manifest-driven overlay over context/+docs/+modules/; each node
+ * is a concept with a 1-line description, a load policy, and (optionally) a
+ * processed body fetched lazily on expand.
  *
+ *   • A circled-C ROOT sits at the top; bold emerald guides (├─ │ └─) drop
+ *     from it so the tree reads as one connected whole.
+ *   • Every node shows its concept title + 1-line description + a load
+ *     badge (● pinned / ● skeleton / ● on-demand) + an optional ◆ feeds pill.
+ *   • Expanding a node reveals its FULL section description (1-3 lines) as an
+ *     intro, then its processed body (if any, lazy) and/or its child concepts.
  *
- * Renders the project's context tree (`.meshkore/context/`, daemon
- * `/context`, py-1.14.1+) as ONE full-width column:
+ * The top budget badge shows the SPAWN PAYLOAD — the skeleton map + pinned
+ * bodies the daemon injects into every agent at onboarding — vs the §3.5
+ * 4500-token budget. That is the whole point: what you pin here is what
+ * every agent pays for on every turn.
  *
- *   • A circled-C ROOT node sits at the top; its spine drops straight
- *     down and EVERY top-level branch elbows off it (bold emerald 2px
- *     guides: ├─ │ └─), so the tree reads as one connected whole.
- *   • Every node — folders AND files — carries a +/− toggle.
- *   • Expanding a FOLDER reveals its children (README.md included).
- *   • Expanding a FILE reveals its FULL markdown body inline, in a
- *     bordered box that spans the container's full width (respecting
- *     the column's padding + a small per-depth indent for hierarchy).
- *
- * No right panel — the tree IS the document. The operator unfolds the
- * skeleton (idea → product → stack → architecture → constraints →
- * decisions → criteria) top-to-bottom and reads each node in place.
- * Expand state persists per cluster (viewStore).
- *
- * Data source: daemon `/context` (tree + word/token counts + budget
- * warnings) and `/context/<path>` (per-file markdown body, lazy +
- * cached). `moduleId` is accepted for Cockpit wiring but ignored —
- * context is module-independent (standard v14 §3.5).
+ * Live: the daemon broadcasts `context.changed` on any context/ edit; the
+ * event-bus bumps `contextRev` and this panel refetches the tree + expanded
+ * bodies. `moduleId` is accepted for Cockpit wiring but ignored (knowledge
+ * is project-wide).
  */
 
 import { createResource, For, Show } from 'solid-js';
@@ -37,40 +31,31 @@ import { ensureMarked } from '~/lib/cdn-loaders';
 import { viewStore } from '~/state/view';
 import { contextRev } from '~/state/context-sync';
 import { log } from '~/lib/log';
-import type { ContextNode } from '~/lib/daemon-client';
+import type { KnowledgeNode, KnowledgeLoad } from '~/lib/daemon-client';
 
 interface Props {
-  // Accepted for layout compatibility; deliberately unused — context is
-  // a project-wide surface and decouples from per-module selection.
+  // Accepted for layout compatibility; deliberately unused — knowledge is a
+  // project-wide surface and decouples from per-module selection.
   moduleId?: string | null;
 }
 
-// Body cache keyed by `${rev}|${path}`. A new context revision (daemon
-// `context.changed` WS event) is a fresh key → fresh fetch, so expanded
-// bodies update live without manual cache-busting.
+// Body cache keyed by `${rev}|${id}`. A new revision (daemon `context.changed`
+// WS event) is a fresh key → fresh fetch, so expanded bodies update live.
 const bodyCache = new Map<string, string>();
 
-// Shared body loader. Strips YAML frontmatter (the body is what the
-// operator reads) and memoizes by (rev, path).
-async function loadContextBody(path: string, rev: number): Promise<string | null> {
-  const key = `${rev}|${path}`;
+async function loadNodeBody(id: string, rev: number): Promise<string | null> {
+  const key = `${rev}|${id}`;
   const cached = bodyCache.get(key);
   if (cached !== undefined) return cached;
   const client = daemonStore.state.client;
   if (!client) return null;
-  const r = await client.contextFile(path);
-  if (!r.ok) return null;
-  let body = r.body;
-  if (body.startsWith('---\n')) {
-    const end = body.indexOf('\n---\n', 4);
-    if (end !== -1) body = body.slice(end + 5);
-  }
-  body = body.trim();
+  const r = await client.knowledgeNode(id);
+  if (!r.ok || !r.data.has_body || !r.data.body) return null;
+  const body = r.data.body.trim();
   bodyCache.set(key, body);
   return body;
 }
 
-// Markdown class set for the inline body.
 const PROSE = [
   'prose prose-sm prose-invert max-w-none text-[13px] text-gray-300 leading-relaxed',
   '[&_h1]:hidden',
@@ -86,23 +71,20 @@ const PROSE = [
 ].join(' ');
 
 export default function ContextPanel(_props: Props) {
-  // Fetch the tree on mount, refetch when the cluster changes OR when the
-  // daemon signals a `.meshkore/context/` change (contextRev bump). No
-  // manual sync — context is presumed always in sync with the daemon.
   const [treeRes] = createResource(
     () => `${daemonStore.state.activeId ?? ''}|${contextRev()}`,
     async () => {
       const client = daemonStore.state.client;
       if (!client) return null;
       try {
-        const r = await client.contextTree();
+        const r = await client.knowledgeTree();
         if (!r.ok) {
-          log.warn('contextTree fetch failed', { status: r.status });
+          log.warn('knowledgeTree fetch failed', { status: r.status });
           return null;
         }
         return r.data;
       } catch (e) {
-        log.warn('contextTree threw', e instanceof Error ? e.message : String(e));
+        log.warn('knowledgeTree threw', e instanceof Error ? e.message : String(e));
         return null;
       }
     },
@@ -113,7 +95,7 @@ export default function ContextPanel(_props: Props) {
       <Show when={treeRes()}
         fallback={
           <div class="text-gray-500 text-sm px-4 py-6">
-            <Show when={!daemonStore.state.client} fallback={<>Loading context tree…</>}>
+            <Show when={!daemonStore.state.client} fallback={<>Loading knowledge tree…</>}>
               No daemon connected.
             </Show>
           </div>
@@ -121,30 +103,24 @@ export default function ContextPanel(_props: Props) {
       >
         {(t) => (
           <>
-            <BudgetBadge tree={t()} />
-            {/* SINGLE COLUMN — the tree IS the document */}
+            <SpawnBadge tree={t()} />
+            <Legend />
             <div class="flex-1 overflow-y-auto px-4 py-3">
               <Show when={t().exists && t().tree.length > 0} fallback={<EmptyTree />}>
-                {/* Everything hangs off ONE common origin: a circled-C
-                    root node at the top. Its spine drops straight down
-                    and every top-level branch elbows off it, so the tree
-                    reads as a single connected whole (not N loose roots). */}
                 <div class="relative">
                   <div class="relative flex items-center" style={{ height: '30px' }}>
-                    {/* spine: from the badge centre down into the children */}
                     <div
                       class={`absolute rounded-full ${LINE}`}
                       style={{ left: `${HALF - 1}px`, top: '15px', bottom: '0', width: VW }}
                     />
-                    {/* circled-C origin marker (border + black fill) */}
                     <span
                       class="relative z-10 inline-flex items-center justify-center rounded-full border-2 border-emerald-500/80 bg-black text-emerald-400 text-[10px] font-bold leading-none"
                       style={{ width: '18px', height: '18px', 'margin-left': `${HALF - 9}px` }}
-                      title="context root"
+                      title="knowledge root"
                     >
                       C
                     </span>
-                    <span class="ml-2 text-[11px] font-mono uppercase tracking-wider text-gray-500">context</span>
+                    <span class="ml-2 text-[11px] font-mono uppercase tracking-wider text-gray-500">conocimiento</span>
                   </div>
                   <ul class="text-[13px]">
                     <For each={t().tree}>
@@ -168,8 +144,10 @@ export default function ContextPanel(_props: Props) {
   );
 }
 
-function BudgetBadge(props: { tree: { token_estimate: number; budget_tokens: number; over_budget: boolean; warnings: string[] } }) {
-  const pct = (): number => Math.min(100, Math.round((props.tree.token_estimate / props.tree.budget_tokens) * 100));
+function SpawnBadge(props: {
+  tree: { spawn_tokens: number; skeleton_tokens?: number; pinned_tokens?: number; budget_tokens: number; over_budget: boolean; warnings: string[] };
+}) {
+  const pct = (): number => Math.min(100, Math.round((props.tree.spawn_tokens / props.tree.budget_tokens) * 100));
   const cls = (): string => {
     if (props.tree.over_budget) return 'text-red-300 border-red-500/40 bg-red-500/10';
     if (pct() >= 80) return 'text-amber-300 border-amber-500/40 bg-amber-500/10';
@@ -177,17 +155,20 @@ function BudgetBadge(props: { tree: { token_estimate: number; budget_tokens: num
   };
   return (
     <div class="flex items-center gap-3 px-4 py-2 border-b border-gray-800/60 text-[11px]">
-      <span class={`font-mono px-2 py-0.5 rounded border ${cls()}`}>
-        {props.tree.token_estimate.toLocaleString()} / {props.tree.budget_tokens.toLocaleString()} tokens · {pct()}%
+      <span class={`font-mono px-2 py-0.5 rounded border ${cls()}`} title="Lo que el daemon inyecta en cada spawn: mapa skeleton + cuerpos pinned">
+        spawn {props.tree.spawn_tokens.toLocaleString()} / {props.tree.budget_tokens.toLocaleString()} tok · {pct()}%
       </span>
+      <Show when={props.tree.skeleton_tokens != null && props.tree.pinned_tokens != null}>
+        <span class="text-gray-500 font-mono">
+          {props.tree.skeleton_tokens!.toLocaleString()} skeleton + {props.tree.pinned_tokens!.toLocaleString()} pinned
+        </span>
+      </Show>
       <Show when={props.tree.warnings.length > 0}>
         <span class="text-amber-300/80 truncate" title={props.tree.warnings.join('\n')}>
           ⚠ {props.tree.warnings.length} warning{props.tree.warnings.length > 1 ? 's' : ''}
         </span>
       </Show>
       <div class="flex-1" />
-      {/* No manual sync — the daemon pushes `context.changed` and the
-          tree refetches live. A quiet "live" dot communicates that. */}
       <span class="flex items-center gap-1.5 text-gray-500" title="Sincronizado en vivo con el daemon">
         <span class="relative flex h-1.5 w-1.5">
           <span class="absolute inline-flex h-full w-full rounded-full bg-emerald-400/60 animate-ping" />
@@ -199,90 +180,98 @@ function BudgetBadge(props: { tree: { token_estimate: number; budget_tokens: num
   );
 }
 
-function EmptyTree() {
+function Legend() {
   return (
-    <div class="text-[12px] text-gray-500 italic px-4 py-3 leading-relaxed">
-      <p class="mb-2">No <code class="font-mono text-gray-400">.meshkore/context/</code> tree yet.</p>
-      <p>Have the Roadmap Author bootstrap it, or create the canonical files manually per standard v14 §3.5:</p>
-      <ul class="list-disc pl-5 mt-2 space-y-0.5 text-[11px]">
-        <li>overview.md · product.md · stack.md</li>
-        <li>architecture.md · constraints.md</li>
-        <li>glossary.md (optional)</li>
-        <li>decisions/README.md + entries</li>
-        <li>criteria/README.md + entries (optional)</li>
-      </ul>
+    <div class="flex items-center gap-4 px-4 py-1.5 border-b border-gray-800/40 text-[10px] text-gray-500">
+      <span class="flex items-center gap-1.5"><Dot load="pinned" />pinned — cuerpo en cada spawn</span>
+      <span class="flex items-center gap-1.5"><Dot load="skeleton" />skeleton — solo título + descripción</span>
+      <span class="flex items-center gap-1.5"><Dot load="on-demand" />on-demand — se pide al daemon</span>
+      <span class="text-violet-300/70">◆ alimenta otra superficie</span>
     </div>
   );
 }
 
-// ── Tree-guide geometry ───────────────────────────────────────────────
-// The connector skeleton (├─ │ └─) is drawn with absolutely-positioned
-// 1px divs rather than borders/masks, so it stays correct at any depth
-// and never depends on the (themeable) background colour.
-const INDENT = 18;     // px per nesting level
-const HALF = 12;       // px — the vertical drops under the parent's +/−
-                       //      toggle centre (rowPad 4 + toggle half 8 = 12)
-const ROWCENTER = 13;  // px — vertical centre of a row; where the elbow sits
-// Bold, high-contrast emerald guides — the operator wants the tree
-// skeleton to read CLEARLY, no subtle hairlines. 2px wide.
+const DOT_CLS: Record<KnowledgeLoad, string> = {
+  pinned: 'bg-emerald-400',
+  skeleton: 'bg-sky-400',
+  'on-demand': 'bg-gray-500',
+};
+function Dot(props: { load: KnowledgeLoad }) {
+  return <span class={`inline-block w-2 h-2 rounded-sm flex-shrink-0 ${DOT_CLS[props.load]}`} aria-hidden="true" />;
+}
+
+function EmptyTree() {
+  return (
+    <div class="text-[12px] text-gray-500 italic px-4 py-3 leading-relaxed">
+      <p class="mb-2">No <code class="font-mono text-gray-400">.meshkore/context/_index.yaml</code> manifest yet.</p>
+      <p>Author the knowledge manifest (knowledge-tree-unified) — a flat list of concept nodes mapping titles to real files under context/ docs/ modules/.</p>
+    </div>
+  );
+}
+
+// ── Tree-guide geometry (unchanged — drawn with absolute 1px divs so it
+// stays correct at any depth, independent of background colour) ──
+const INDENT = 18;
+const HALF = 12;
+const ROWCENTER = 13;
 const LINE = 'bg-emerald-500/70';
-const VW = '2px';      // vertical line width
-const HH = '2px';      // horizontal elbow thickness
+const VW = '2px';
+const HH = '2px';
+
+function multiSentence(desc: string | undefined): boolean {
+  if (!desc) return false;
+  return desc.trim().split(/\.\s/).filter(Boolean).length > 1;
+}
+function firstSentence(desc: string | undefined): string {
+  if (!desc) return '';
+  return desc.trim().split(/\.\s/)[0] ?? desc.trim();
+}
 
 function TreeNode(props: {
-  node: ContextNode;
+  node: KnowledgeNode;
   depth: number;
   isLast: boolean;
-  ancestorLines: boolean[]; // slots 0..depth-2: draw a through-line iff that ancestor has more siblings below
+  ancestorLines: boolean[];
 }) {
-  const isFile = () => props.node.kind === 'file';
-  const isDir = () => props.node.kind === 'dir';
-  const isExpanded = () => viewStore.isContextNodeExpanded(props.node.path);
-  const hasChildren = () => isDir() && !!props.node.children && props.node.children.length > 0;
+  const hasChildren = () => !!props.node.children && props.node.children.length > 0;
+  const expandable = () => hasChildren() || props.node.has_body || multiSentence(props.node.desc);
+  const isExpanded = () => viewStore.isContextNodeExpanded(props.node.id);
 
   const toggle = () => {
-    if (isDir() && !hasChildren()) return;
-    viewStore.toggleContextNode(props.node.path);
+    if (!expandable()) return;
+    viewStore.toggleContextNode(props.node.id);
   };
 
-  // Lines handed to THIS node's children: my ancestors' lines + my own
-  // continuation (true iff I have a sibling below me, so the spine keeps
-  // dropping past my subtree to the next sibling). Nodes start at depth
-  // 1 — the circled-C root above the tree owns depth 0's spine.
   const childLines = (): boolean[] => [...props.ancestorLines, !props.isLast];
 
-  // Full body — fetched when the file node is expanded, and re-fetched
-  // when the daemon signals a context change (contextRev bump) so an
-  // expanded body updates live, not just on collapse/re-expand.
+  // Body fetched when expanded AND the node carries a body; refetched on a
+  // contextRev bump so an open body updates live.
   const [bodyHtml] = createResource(
-    () => (isFile() && isExpanded() ? `${props.node.path}|${contextRev()}` : null),
+    () => (props.node.has_body && isExpanded() ? `${props.node.id}|${contextRev()}` : null),
     async (key: string | null) => {
       if (!key) return '';
       const sep = key.lastIndexOf('|');
-      const path = key.slice(0, sep);
+      const id = key.slice(0, sep);
       const rev = Number(key.slice(sep + 1));
-      const raw = await loadContextBody(path, rev);
-      if (raw == null) return null; // null → render an error hint
+      const raw = await loadNodeBody(id, rev);
+      if (raw == null) return null;
       try {
         const m = await ensureMarked();
         return m.parse(raw, { gfm: true }) as string;
       } catch {
-        return raw; // fall back to raw markdown text
+        return raw;
       }
     },
   );
 
   const rowPad = () => `${4 + props.depth * INDENT}px`;
-  const ownX = (props.depth - 1) * INDENT + HALF; // x of this node's connector slot
+  const ownX = (props.depth - 1) * INDENT + HALF;
   const boxIndent = () => `${props.depth * INDENT + 26}px`;
 
   return (
     <li class="relative">
-      {/* ── tree-guide rails (absolute, full li height, above the row's
-            hover bg so they never get painted over) ── */}
       <Show when={props.depth >= 1}>
         <div class="absolute inset-0 z-10 pointer-events-none">
-          {/* through-lines for ancestors that still have siblings below */}
           <For each={props.ancestorLines}>
             {(on, i) => (
               <Show when={on}>
@@ -293,9 +282,6 @@ function TreeNode(props: {
               </Show>
             )}
           </For>
-          {/* this node's vertical: from the top down to the elbow; it
-              continues to the bottom only if a sibling follows (else it
-              becomes a └ corner) */}
           <div
             class={`absolute rounded-full ${LINE}`}
             style={
@@ -304,7 +290,6 @@ function TreeNode(props: {
                 : { left: `${ownX - 1}px`, top: '0', bottom: '0', width: VW }
             }
           />
-          {/* horizontal elbow into the row */}
           <div
             class={`absolute rounded-full ${LINE}`}
             style={{ left: `${ownX - 1}px`, top: `${ROWCENTER - 1}px`, width: `${INDENT + 2}px`, height: HH }}
@@ -314,18 +299,17 @@ function TreeNode(props: {
 
       <div
         onClick={toggle}
-        class={`group relative flex items-center gap-1.5 px-2 min-h-[26px] cursor-pointer rounded transition-colors ${
-          isExpanded() && isFile() ? 'text-emerald-200' : 'hover:bg-gray-800/40 text-gray-300'
-        }`}
+        class={`group relative flex items-center gap-1.5 px-2 min-h-[26px] rounded transition-colors ${
+          expandable() ? 'cursor-pointer' : 'cursor-default'
+        } ${isExpanded() ? 'text-emerald-100' : 'hover:bg-gray-800/40 text-gray-300'}`}
         style={{ 'padding-left': rowPad() }}
       >
-        {/* +/− toggle on EVERY node. A childless dir shows a disabled glyph. */}
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); toggle(); }}
-          disabled={isDir() && !hasChildren()}
+          disabled={!expandable()}
           class={`w-4 h-4 flex-shrink-0 inline-flex items-center justify-center rounded font-mono text-[11px] leading-none transition-colors ${
-            isDir() && !hasChildren()
+            !expandable()
               ? 'text-gray-700 cursor-default'
               : isExpanded()
                 ? 'text-emerald-300 bg-emerald-500/10'
@@ -334,73 +318,90 @@ function TreeNode(props: {
           title={isExpanded() ? 'colapsar' : 'expandir'}
           aria-label={isExpanded() ? 'collapse' : 'expand'}
         >
-          {isExpanded() ? '−' : '+'}
+          {expandable() ? (isExpanded() ? '−' : '+') : '·'}
         </button>
 
-        {/* Type glyph */}
-        <span class={`flex-shrink-0 text-[11px] ${isDir() ? 'text-amber-300/70' : 'text-gray-600'}`} aria-hidden="true">
-          {isDir() ? '▸' : '·'}
+        {/* load policy dot */}
+        <Dot load={props.node.load} />
+
+        {/* concept title */}
+        <span class={`flex-shrink-0 ${hasChildren() ? 'font-semibold text-gray-100' : 'text-gray-200'}`}>
+          {props.node.title}
         </span>
 
-        <span class={`truncate text-[12.5px] ${isDir() ? 'font-medium' : ''}`}>{props.node.title}</span>
+        {/* 1-line description */}
+        <Show when={props.node.desc}>
+          <span class="truncate text-[12px] text-gray-500">— {firstSentence(props.node.desc)}</span>
+        </Show>
 
-        {/* word / over-cap badge, right-aligned */}
+        {/* feeds pill */}
+        <Show when={props.node.feeds}>
+          <span class="flex-shrink-0 text-[9px] text-violet-300/80 border border-violet-500/30 bg-violet-500/10 rounded-full px-1.5 leading-tight py-0.5" title="alimenta otra superficie">
+            ◆ {props.node.feeds}
+          </span>
+        </Show>
+
+        {/* token weight (pinned only — that's the spawn cost) */}
         <span class="ml-auto flex items-center gap-1.5 flex-shrink-0 pl-2">
-          <Show when={props.node.over_cap}>
-            <span class="text-[9px] text-amber-300 font-mono" title={`over the ${props.node.words}w cap`}>!</span>
-          </Show>
-          <Show when={isFile() && props.node.words}>
-            <span class={`text-[10px] font-mono ${isExpanded() ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity ${props.node.over_cap ? 'text-amber-300/80' : 'text-gray-600'}`}>
-              {props.node.words}w
+          <Show when={props.node.load === 'pinned' && props.node.words}>
+            <span class="text-[10px] font-mono text-emerald-400/70" title="cuerpo inyectado en cada spawn">
+              {Math.round(props.node.words * 1.5)}t
             </span>
           </Show>
         </span>
       </div>
 
-      {/* FILE expanded → full-width body box */}
-      <Show when={isFile() && isExpanded()}>
-        <div
-          class="my-1.5 mr-2 rounded-lg border border-gray-800/70 bg-gray-950/40 overflow-hidden"
-          style={{ 'margin-left': boxIndent() }}
-        >
-          <div class="flex items-center gap-3 px-4 py-2 border-b border-gray-800/60 bg-gray-900/30 text-[10px] text-gray-500">
-            <span class="font-mono uppercase tracking-wider text-gray-400">{props.node.name}</span>
-            <Show when={props.node.updated}><span>updated: {props.node.updated}</span></Show>
-            <Show when={props.node.status}><span>status: {props.node.status}</span></Show>
-            <Show when={props.node.words}>
-              <span class={`ml-auto font-mono ${props.node.over_cap ? 'text-amber-300' : ''}`}>{props.node.words}w</span>
-            </Show>
-          </div>
-          <div class="px-4 py-3">
-            <Show
-              when={bodyHtml.state === 'ready' || bodyHtml.state === 'refreshing'}
-              fallback={<p class="text-[11px] text-gray-500 italic">loading…</p>}
-            >
-              <Show
-                when={bodyHtml()}
-                fallback={<p class="text-[11px] text-amber-300/70 italic">no se pudo cargar el contenido</p>}
-              >
-                <div class={PROSE} innerHTML={bodyHtml() ?? ''} />
-              </Show>
-            </Show>
-          </div>
-        </div>
-      </Show>
+      {/* expanded → section intro + body + children */}
+      <Show when={isExpanded()}>
+        {/* full section description (1-3 lines) */}
+        <Show when={multiSentence(props.node.desc)}>
+          <p class="text-[12px] text-gray-400 italic leading-relaxed my-1.5 mr-2" style={{ 'margin-left': boxIndent() }}>
+            {props.node.desc}
+          </p>
+        </Show>
 
-      {/* DIR expanded → children (README included) */}
-      <Show when={isDir() && isExpanded() && hasChildren()}>
-        <ul>
-          <For each={props.node.children!}>
-            {(child, i) => (
-              <TreeNode
-                node={child}
-                depth={props.depth + 1}
-                isLast={i() === props.node.children!.length - 1}
-                ancestorLines={childLines()}
-              />
-            )}
-          </For>
-        </ul>
+        {/* processed body box */}
+        <Show when={props.node.has_body}>
+          <div
+            class="my-1.5 mr-2 rounded-lg border border-gray-800/70 bg-gray-950/40 overflow-hidden"
+            style={{ 'margin-left': boxIndent() }}
+          >
+            <div class="flex items-center gap-3 px-4 py-2 border-b border-gray-800/60 bg-gray-900/30 text-[10px] text-gray-500">
+              <span class="font-mono uppercase tracking-wider text-gray-400">{props.node.title}</span>
+              <Show when={props.node.updated}><span>updated: {props.node.updated}</span></Show>
+              <span class="ml-auto font-mono text-gray-600">{props.node.load}</span>
+            </div>
+            <div class="px-4 py-3">
+              <Show
+                when={bodyHtml.state === 'ready' || bodyHtml.state === 'refreshing'}
+                fallback={<p class="text-[11px] text-gray-500 italic">cargando…</p>}
+              >
+                <Show
+                  when={bodyHtml()}
+                  fallback={<p class="text-[11px] text-amber-300/70 italic">no se pudo cargar el contenido</p>}
+                >
+                  <div class={PROSE} innerHTML={bodyHtml() ?? ''} />
+                </Show>
+              </Show>
+            </div>
+          </div>
+        </Show>
+
+        {/* child concepts */}
+        <Show when={hasChildren()}>
+          <ul>
+            <For each={props.node.children}>
+              {(child, i) => (
+                <TreeNode
+                  node={child}
+                  depth={props.depth + 1}
+                  isLast={i() === props.node.children.length - 1}
+                  ancestorLines={childLines()}
+                />
+              )}
+            </For>
+          </ul>
+        </Show>
       </Show>
     </li>
   );
