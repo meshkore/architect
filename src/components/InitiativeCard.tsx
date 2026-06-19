@@ -18,7 +18,7 @@
  * Pre-V108 version preserved as InitiativeCard.legacy.tsx.bak.
  */
 
-import { For, Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
+import { For, Show, createEffect, createMemo, createResource, createRoot, createSignal } from 'solid-js';
 import type { ServerInitiative, ServerTask } from '~/state/server';
 import { activeEntriesByInitiative, activeTaskIds, activeAgentByTask, convForTask } from '~/state/server';
 import { sortTasks } from '~/components/initiative/task-grouping';
@@ -32,6 +32,24 @@ import { CollapsibleText } from '~/components/ChatBubbles';
 import { parseInitiativeBody, displayTaskId } from '~/lib/task-id';
 
 type VisualState = 'active' | 'next' | 'running' | 'backlog' | 'done';
+
+// Task-detail open state lives at MODULE level, keyed by task id — NOT
+// inside TaskRow. The cockpit re-polls /state every ~2s and the roadmap
+// `<For>` recreates the task rows on each refresh; a per-component signal
+// would reset (the detail auto-collapsed after 2s — operator 2026-06-19).
+// A module signal survives the recreation, exactly like the story's
+// `openId` in the parent panel.
+const [expandedTaskIds, setExpandedTaskIds] = createRoot(() => createSignal<Set<string>>(new Set()));
+const isTaskOpen = (id: string): boolean => expandedTaskIds().has(id);
+function toggleTaskOpen(id: string): void {
+  const next = new Set(expandedTaskIds());
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  setExpandedTaskIds(next);
+}
+// Body cache (task path → markdown) so a row recreated by the 2s poll
+// shows its detail instantly instead of re-fetching + flickering.
+const taskBodyCache = new Map<string, string>();
 
 export default function InitiativeCard(props: {
   initiative: ServerInitiative;
@@ -432,17 +450,16 @@ function TaskRow(props: { task: ServerTask; archived?: boolean }) {
   const vstate = (): TaskVState => taskVState(props.task, live());
   const mods = (): string[] => taskModules(props.task);
   const stateTitle = (): string => TASK_STATE_TITLE[vstate()];
-  // Click a task to drop its detail (description; + execution summary +
-  // files when archived) inline — without collapsing the parent story.
-  const [open, setOpen] = createSignal(false);
+  // Toggle the inline detail from the TITLE only (operator 2026-06-19) —
+  // open state is module-level so it survives the 2s /state poll.
+  const open = (): boolean => isTaskOpen(props.task.id);
   const toggle = (e: MouseEvent): void => {
     e.stopPropagation();
-    setOpen(!open());
+    toggleTaskOpen(props.task.id);
   };
   return (
     <li
       class={`rt-task is-${vstate()}${props.archived ? ' rt-task-archived' : ''}${open() ? ' rt-task-open' : ''}`}
-      onClick={toggle}
     >
       {/* Timeline thread marker — neutral, lights up only where work is
        *  live so the eye lands on the exact point of the roadmap that is
@@ -484,7 +501,14 @@ function TaskRow(props: { task: ServerTask; archived?: boolean }) {
       <span class="rt-task-code" title={props.task.id}>
         {displayTaskId(props.task.id)}
       </span>
-      <span class="rt-task-text" title={props.task.title}>
+      <span
+        class="rt-task-text rt-task-toggle"
+        title={props.task.title}
+        role="button"
+        tabIndex={0}
+        onClick={toggle}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e as unknown as MouseEvent); } }}
+      >
         {props.task.title}
       </span>
 
@@ -560,12 +584,16 @@ function TaskDetail(props: { task: ServerTask; archived?: boolean }) {
     () => (props.task.path ? { path: props.task.path } : null),
     async (input) => {
       const client = daemonStore.state.client;
-      if (!client) return '';
+      if (!client) return taskBodyCache.get(input.path) ?? '';
       const r = await client.readMarkdownFile(input.path);
-      return r.ok ? r.body : '';
+      const text = r.ok ? r.body : '';
+      if (text) taskBodyCache.set(input.path, text);
+      return text;
     },
   );
-  const body = (): string => bodyRes() ?? '';
+  // Fall back to the cached body while a poll-recreated row re-fetches —
+  // no flicker, no collapse.
+  const body = (): string => bodyRes() ?? (props.task.path ? taskBodyCache.get(props.task.path) ?? '' : '');
 
   // Fallback summary: the live conv's final message, for tasks resolved
   // before the daemon began persisting `## Resolution` (graceful).
@@ -599,7 +627,7 @@ function TaskDetail(props: { task: ServerTask; archived?: boolean }) {
         </div>
       </Show>
 
-      {/* description — shown in every view */}
+      {/* description — plain text under the title, no label / no rule */}
       <Show
         when={description()}
         fallback={
@@ -608,10 +636,7 @@ function TaskDetail(props: { task: ServerTask; archived?: boolean }) {
           </Show>
         }
       >
-        <div class="rt-arch-block">
-          <span class="rt-arch-label">descripción</span>
-          <div class="rt-arch-body"><CollapsibleText text={description()} markdown /></div>
-        </div>
+        <div class="rt-task-desc"><CollapsibleText text={description()} markdown /></div>
       </Show>
 
       {/* execution summary + files — only for archived (the registry) */}

@@ -529,13 +529,19 @@
   align-items: center;
   gap: 9px;
   padding: 5px 0;
-  /* Click a task to drop its detail inline (no story collapse). */
-  cursor: pointer;
-  border-radius: 6px;
 }
-.rt-task:hover .rt-task-text { color: #fff; }
+/* Only the TITLE toggles the inline detail (operator 2026-06-19). */
+.rt-task-toggle { cursor: pointer; }
+.rt-task-toggle:hover { color: #fff; }
 /* When open (or archived), the inline detail wraps to its own line. */
 .rt-task-archived, .rt-task-open { flex-wrap: wrap; }
+/* Description = plain text under the title — no label, no rule, no box.
+   (The parent .rt-arch-detail already indents under the title.) */
+.rt-task-desc {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #c2c8d0;
+}
 
 /* Timeline thread marker — neutral dot on the vertical line. Lights up
  * (fuchsia + pulse) ONLY while a worker is live on this task, so the
@@ -907,9 +913,8 @@
   color: #64748b;
 }
 .rt-arch-body {
-  padding: 7px 10px;
-  border-left: 2px solid rgba(52, 211, 153, .30);
-  border-radius: 0 6px 6px 0;
+  padding: 6px 10px;
+  border-radius: 6px;
   background: rgba(15, 23, 32, .5);
   font-size: 11.5px;
   line-height: 1.55;
