@@ -212,7 +212,7 @@ export default function AgentCard(props: AgentCardProps) {
               <span
                 class="inline-flex items-center justify-center px-1.5 py-px rounded border flex-shrink-0"
                 style={{
-                  color: isRemote() ? '#7dd3fc' : '#34d399',
+                  color: isRemote() ? 'var(--theme-byline-user, #7dd3fc)' : 'var(--theme-accent-bright, #34d399)',
                   'border-color': pillBorder,
                   'min-width': '16px',
                 }}

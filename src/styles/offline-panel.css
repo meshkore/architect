@@ -292,7 +292,7 @@
 }
 .offline-panel__watch-dot {
   width: 8px; height: 8px; border-radius: 50%;
-  background: #34d399;
+  background: var(--theme-accent-bright, #34d399);
   box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55);
   animation: offline-watch-pulse 1.6s ease-in-out infinite;
   flex-shrink: 0;
@@ -340,7 +340,7 @@
 .offline-panel__watch-btn.is-primary {
   background: rgba(52, 211, 153, 0.14);
   border-color: rgba(52, 211, 153, 0.45);
-  color: #6ee7b7;
+  color: var(--theme-accent-bright, #6ee7b7);
 }
 .offline-panel__watch-btn.is-primary:hover {
   background: rgba(52, 211, 153, 0.22);

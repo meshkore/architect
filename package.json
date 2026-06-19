@@ -2,7 +2,7 @@
   "name": "@meshkore/architect",
   "version": "0.2.0-alpha",
   "private": true,
-  "description": "MeshKore architect cockpit — Solid.js SPA. Talks to the local meshcore daemon over HTTP+WS.",
+  "description": "MeshKore architect cockpit \u2014 Solid.js SPA. Talks to the local meshcore daemon over HTTP+WS.",
   "type": "module",
   "scripts": {
     "dev": "vite --port 4173",
@@ -14,7 +14,8 @@
     "lint": "eslint .",
     "check": "npm run typecheck && npm run lint",
     "deploy:preview": "npm run build && npx wrangler pages deploy dist --project-name meshkore-portal --branch preview-solid --commit-dirty=true",
-    "deploy:prod": "npm run build && npx wrangler pages deploy dist --project-name meshkore-portal --branch main --commit-dirty=true"
+    "deploy:prod": "npm run build && npx wrangler pages deploy dist --project-name meshkore-portal --branch main --commit-dirty=true",
+    "gen:accent": "python3 scripts/gen_accent_remap.py"
   },
   "engines": {
     "node": ">=20"

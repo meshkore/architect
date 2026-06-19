@@ -6,6 +6,10 @@
 @import './styles/offline-panel.css';
 @import './styles/rail-empty-panel.css';
 @import './styles/roadmap-timeline.css';
+/* GENERATED — routes every hardcoded emerald-* accent utility to the live
+   --theme-accent* vars so a theme change recolours the whole cockpit
+   (theme-consistency). Regenerate: npm run gen:accent */
+@import './styles/theme-accent-remap.css';
 
 @tailwind base;
 @tailwind components;
