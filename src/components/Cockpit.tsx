@@ -42,7 +42,7 @@ import DiaryPanel from '~/components/zones/DiaryPanel';
 // StoryProgressPill on the initiative card, (c) the expanded
 // card's Activity tab. A floating sticky banner duplicates that
 // signal and steals attention.
-import Splitter from '~/components/Splitter';
+import Splitter, { setLayoutWidth } from '~/components/Splitter';
 import ColumnDragGrip from '~/components/ColumnDragGrip';
 import { openNewAgentWizard } from '~/components/modals/NewAgentWizard';
 import { daemonStore } from '~/state/daemon';
@@ -54,6 +54,12 @@ import { layoutStore, type ColumnId } from '~/state/layout';
 
 // 2026-06-19: Tasks parked; Protocols moved in from the header zone.
 type Tab = 'roadmap' | 'context' | 'diagrams' | 'protocols';
+
+// Below this rail width the modules list collapses to a vertical
+// "Modules" strip (reclaims width for the roadmap). Expand width the
+// click restores it to.
+const MODULES_COLLAPSE_PX = 72;
+const MODULES_EXPAND_PX = 220;
 
 const HASH_ZONES: readonly Zone[] = ['architect', 'agents', 'bookmarks', 'crons', 'links', 'protocols', 'diary', 'config'];
 
@@ -350,8 +356,30 @@ function RoadmapColumn(props: {
         <div class="flex-1" />
       </div>
       <div class="roadmap-body flex-1 flex min-h-0">
-        <aside class="modules-rail">
-          <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
+        {/* Modules rail. Below MODULES_COLLAPSE_PX the list collapses to
+            a vertical "Modules" strip — drag the splitter wider, or
+            click the strip, to bring it back. Width-driven, symmetric
+            with how the old top-level Modules column collapsed. */}
+        <aside
+          class="modules-rail"
+          classList={{ collapsed: uiStore.state.modulesRailWidth < MODULES_COLLAPSE_PX }}
+        >
+          <Show
+            when={uiStore.state.modulesRailWidth >= MODULES_COLLAPSE_PX}
+            fallback={
+              <button
+                type="button"
+                class="modules-rail-label"
+                onClick={() => setLayoutWidth('modules-rail', MODULES_EXPAND_PX)}
+                title="Expand modules"
+                aria-label="Expand modules rail"
+              >
+                Modules
+              </button>
+            }
+          >
+            <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
+          </Show>
         </aside>
         <Splitter resize="modules-rail" title="Drag to resize modules rail" />
         <div class="ws-content flex-1 flex flex-col min-h-0">

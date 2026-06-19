@@ -1158,6 +1158,24 @@
       background: linear-gradient(180deg, rgba(0,0,0,0.20) 0%, rgba(0,0,0,0.05) 100%);
     }
     .ws-content { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+    /* Collapsed modules rail — a thin vertical "Modules" strip that
+       reclaims width for the roadmap. Click (or drag the splitter
+       wider) to expand. Mirrors the old top-level Modules collapse. */
+    .modules-rail.collapsed { overflow: hidden; }
+    .modules-rail-label {
+      display: flex; align-items: center; justify-content: center;
+      flex: 1; width: 100%;
+      cursor: pointer; user-select: none;
+      background: transparent; border: none; padding: 12px 0;
+      color: #828b9a;
+      font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
+      writing-mode: vertical-rl; transform: rotate(180deg);
+      transition: color 140ms, background 140ms;
+    }
+    .modules-rail-label:hover {
+      color: var(--theme-accent-bright, #34d399);
+      background: color-mix(in srgb, var(--theme-accent) 5%, transparent);
+    }
 
     /* V29 — chat rail subcolumn. Always full cards (3 lines), no compact
        mode. Selected card gets stripe + color tint; others stay flat. */

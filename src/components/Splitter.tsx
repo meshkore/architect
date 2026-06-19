@@ -39,9 +39,12 @@ const BOUNDS: Record<string, LayoutBounds> = {
   // the wide ceiling lets operators on big monitors give the right
   // column a lot of room without breaking the layout.
   'col-main':  { min: 320, max: 1400, default: 620 },
-  // Modules rail inside the roadmap column. Min low enough that it can
-  // squeeze to a thin strip (text truncates) like the agents rail.
-  'modules-rail': { min: 56, max: 420, default: 220 },
+  // Modules rail inside the roadmap column. Min 36 so it can squeeze
+  // to a thin vertical "Modules" strip (RoadmapColumn swaps the list
+  // for a vertical label below MODULES_COLLAPSE_PX) — same collapse
+  // gesture the old top-level Modules column had, now driven purely by
+  // width.
+  'modules-rail': { min: 36, max: 420, default: 220 },
   // Agents rail inside the agents column. Min 50 so it can collapse to
   // just the A001-style id chip + status dot (AgentCard drops chips +
   // body title below its compact threshold).
@@ -104,6 +107,21 @@ export function applyStoredLayout(): void {
   if (typeof layout['modules-rail'] === 'number') {
     uiStore.setModulesRailWidth(layout['modules-rail']);
   }
+}
+
+/** Programmatically set a track width (clamped, persisted, mirrored to
+ *  uiStore + the CSS var). Used by collapse/expand affordances that
+ *  aren't a drag — e.g. clicking the collapsed modules rail to expand
+ *  it back to a usable width. Keeps the Splitter's in-memory `layout`
+ *  in sync so the next drag starts from the right value. */
+export function setLayoutWidth(key: 'col-main' | 'modules-rail' | 'chat-rail', px: number): void {
+  applyStoredLayout();
+  const next = clamp(key, px);
+  layout[key] = next;
+  document.documentElement.style.setProperty(VAR[key]!, `${next}px`);
+  saveLayout(layout);
+  if (key === 'chat-rail') uiStore.setChatRailWidth(next);
+  else if (key === 'modules-rail') uiStore.setModulesRailWidth(next);
 }
 
 export default function Splitter(props: { resize: 'col-main' | 'modules-rail' | 'chat-rail'; class?: string; title?: string }) {
