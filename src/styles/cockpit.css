@@ -966,35 +966,33 @@
     .projects-rail[data-mode="num"]  .projects-rail-foot-label,
     .projects-rail[data-mode="mini"] .projects-rail-foot-label { display: none; }
 
-    .three-col {
+    /* 2026-06-19 — 2-column cockpit. Two MAIN columns (roadmap, agents),
+       each internally split into [secondary rail | splitter | content].
+       Slot-0 (left) is the flexible `1fr` track; slot-2 (right) is the
+       fixed `--col-side` track that the single `col-main` splitter
+       resizes. The COLUMN CONTENT moves between slots on reorder; the
+       grid tracks stay positional. */
+    .two-col {
       display: grid;
       grid-template-columns:
-        var(--col-nav, 200px)
-        var(--splitter-w, 8px)
         minmax(0, 1fr)
         var(--splitter-w, 8px)
-        var(--col-chat, 380px);
+        var(--col-side, 620px);
       gap: 0;
-      /* V25 — float the 3 panels on the canvas. Inner padding gives the
+      /* V25 — float the panels on the canvas. Inner padding gives the
          "card" effect; splitters become transparent gaps. */
       padding: var(--panel-gap);
       box-sizing: border-box;
       height: calc(100vh - 2.75rem);
       overflow: hidden;
     }
-    @media (max-width: 1279px) {
-      .three-col {
-        grid-template-columns: var(--col-nav, 220px) var(--splitter-w, 8px) minmax(0, 1fr);
-      }
-      .three-col > .center-col,
-      .three-col > .splitter-col-chat { display: none; }
-      .three-col > .center-col.open { display: flex; position: fixed; inset: 3.5rem 0 0 0; z-index: 30; background: #020617; }
-    }
-    @media (max-width: 768px) {
-      .three-col { grid-template-columns: 1fr; }
-      .three-col > .nav-col, .three-col > .left-col, .three-col > .center-col,
-      .three-col > .splitter { display: none; }
-      .three-col > .left-col.active, .three-col > .center-col.active { display: flex; }
+    @media (max-width: 1023px) {
+      /* Narrow viewports: collapse to the flexible column only; the
+         operator drags the agents column back by widening the window.
+         (Desktop cockpit — mobile is not a primary target.) */
+      .two-col { grid-template-columns: minmax(0, 1fr); }
+      .two-col > .splitter-col-main,
+      .two-col > [data-panel-id]:last-child { display: none; }
       .mobile-bottom { display: flex !important; }
     }
 
@@ -1090,19 +1088,19 @@
 
     .col { overflow: hidden; padding: 0; display: flex; flex-direction: column; min-height: 0; }
     .col-body { flex: 1; overflow-y: auto; padding: 12px var(--col-pad-x); min-height: 0; }
-    /* V25 — three floating panels. Same panel bg, soft radius, drop
-       shadow → each reads as a discrete object on the canvas. The
-       splitter columns sit between them as transparent gaps. */
-    .nav-col, .left-col, .center-col, .zone-host {
+    /* V25 — floating panels. Same panel bg, soft radius, drop shadow →
+       each MAIN column reads as a discrete object on the canvas. The
+       splitter track between them is a transparent gap. */
+    .roadmap-col, .center-col {
       background: var(--bg-panel);
       border-radius: var(--panel-radius);
       box-shadow: var(--panel-shadow);
       border: none;
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
     }
-    .nav-col    { display: flex; flex-direction: column; min-width: 0; }
-    .left-col   { display: flex; flex-direction: column; min-width: 0; }
-    .center-col { display: flex; flex-direction: column; min-width: 0; }
     /* 2026-06-10 — operator follow-up: "todos los bordes iguales, sin
        importar el ancho de cada columna." The previous override that
        dropped the collapsed rails to 5 px while expanded panels stayed
@@ -1137,58 +1135,29 @@
     .ws-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overflow-x: hidden; }
     .ws-panel.hidden { display: none; }
 
-    /* Collapsible columns. Each side can shrink to a 36px rail with a
-       vertical label that the user clicks to expand back.
-         .nav-collapsed  → modules nav on the left
-         .chat-collapsed → chat on the right
-         .context-mode   → temporary chat-collapse driven by Context/Diagrams
-                          (doesn't touch the persisted chat preference)
-       Layouts override grid-template-columns to swap the affected col
-       for a 36 px rail; the matching splitter stays at its normal
-       `--splitter-w` width so the rail keeps its right-edge gap from
-       the neighbour (operator field report 2026-06-10: "al comprimir
-       en una vertical la columna de modulos quiero que mantenga su
-       margen derecho"). */
-    .three-col.chat-collapsed,
-    .three-col.context-mode { grid-template-columns: var(--col-nav) var(--splitter-w, 8px) 1fr var(--splitter-w, 8px) 36px; }
-    .three-col.nav-collapsed { grid-template-columns: 36px var(--splitter-w, 8px) 1fr var(--splitter-w, 8px) var(--col-chat); }
-    .three-col.nav-collapsed.chat-collapsed,
-    .three-col.nav-collapsed.context-mode { grid-template-columns: 36px var(--splitter-w, 8px) 1fr var(--splitter-w, 8px) 36px; }
-    /* When a splitter's grid track shrinks to 0, prevent its 4px CSS
-       width from leaking out of the cell. min-width:0 lets the grid
-       constrain it; overflow:hidden hides any internal background.
-       Keep display:block so the children downstream stay aligned with
-       the grid columns (display:none would shift them and put the chat
-       on the 0-width track instead of the rail track). */
+    /* When a splitter's grid track shrinks, keep its 4px CSS width
+       constrained to the cell. */
     .splitter { min-width: 0; overflow: hidden; }
-    .three-col.chat-collapsed   .splitter-col-chat,
-    .three-col.context-mode      .splitter-col-chat,
-    .three-col.nav-collapsed    .splitter-col-nav { pointer-events: none; }
 
-    .center-col.collapsed > .chat-body,
-    .three-col.context-mode .center-col > .chat-body { display: none; }
-    .nav-col .nav-rail,
-    .center-col .chat-rail { display: none; align-items: center; justify-content: center; cursor: pointer; padding: 12px 0; flex: 1; color: #6b7280; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; writing-mode: vertical-rl; transform: rotate(180deg); user-select: none; }
-    .nav-col.collapsed > .nav-body { display: none; }
-    .nav-col.collapsed .nav-rail { display: flex; }
-    .center-col.collapsed .chat-rail,
-    .three-col.context-mode .center-col .chat-rail { display: flex; }
-    .nav-col .nav-rail:hover,
-    .center-col.collapsed .chat-rail:hover { color: var(--theme-accent-bright, #34d399); background: color-mix(in srgb, var(--theme-accent) 5%, transparent); }
-    .center-col.collapsed .chat-rail:hover { color: var(--theme-accent-bright, #34d399); background: color-mix(in srgb, var(--theme-accent) 5%, transparent); }
-    /* V67 — bright + visible background by default so the chevron
-       button is unmistakable on any monitor. */
-    .chat-collapse-btn { color: #e5e7eb; padding: 4px 7px; border-radius: 5px; cursor: pointer; background: rgba(75,85,99,0.15); border: 1px solid rgba(75,85,99,0.30); transition: color 140ms, background 140ms, border-color 140ms; }
-    .chat-collapse-btn:hover:not(:disabled) { color: #ffffff; background: rgba(75,85,99,0.40); border-color: rgba(148,163,184,0.55); }
-    .chat-collapse-btn svg { stroke-width: 2.6; }
-    /* V30.11 — collapse buttons go disabled when their panel is not at
-       the matching edge (positional CSS rules can't follow a panel into
-       the middle slot). The operator drags the panel back to its edge
-       to re-enable. */
-    #nav-collapse:disabled,
-    #chat-collapse:disabled { opacity: 0.25; cursor: not-allowed; }
-    #nav-collapse:disabled:hover,
-    #chat-collapse:disabled:hover { background: transparent !important; }
+    /* ── Inner column layout ─────────────────────────────────────────
+       Both MAIN columns share one shape: a 38px header bar, then a
+       body that is a horizontal flex of [secondary rail | splitter |
+       primary content]. The roadmap column carries the modules rail;
+       the agents column carries the chat rail (`.chat-body`, below).
+       Each rail is `flex: 0 0 var(--…-rail-w)` and resizes via its own
+       splitter — drag it narrow to reclaim width for the content, the
+       same gesture on both columns. */
+    .roadmap-body { flex: 1; display: flex; min-width: 0; min-height: 0; }
+    .modules-rail {
+      flex: 0 0 var(--modules-rail-w, 220px);
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      border-right: 1px solid rgba(75, 85, 99, 0.18);
+      background: linear-gradient(180deg, rgba(0,0,0,0.20) 0%, rgba(0,0,0,0.05) 100%);
+    }
+    .ws-content { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 
     /* V29 — chat rail subcolumn. Always full cards (3 lines), no compact
        mode. Selected card gets stripe + color tint; others stay flat. */

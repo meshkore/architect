@@ -1,17 +1,18 @@
 /**
- * Splitter — 4 px drag handle between V80 .three-col tracks.
+ * Splitter — 4 px drag handle between cockpit tracks.
  *
- * V80 stores the column widths in CSS custom properties on :root
- * (`--col-nav`, `--col-chat`, `--chat-rail-w`). The three-col grid
- * template reads from those. We replicate the same scheme — drag
- * updates the var, persisted to localStorage so widths survive
- * reloads.
+ * Column widths live in CSS custom properties on :root. The grids read
+ * from those; drag updates the var, persisted to localStorage so widths
+ * survive reloads.
  *
- * Sign convention (V80):
- *   - `col-nav`  → drag right grows the leftmost column.
- *   - `col-chat` → drag right SHRINKS the chat (it lives on the
- *                  right edge); sign flipped.
- *   - `chat-rail`→ drag right grows the rail; sign +1.
+ * 2026-06-19 (2-col rearchitecture) — three handles:
+ *   - `col-main`     → boundary between the two MAIN columns. The right
+ *                      column is the fixed `--col-side` track, so drag
+ *                      right SHRINKS it; sign flipped (-1).
+ *   - `modules-rail` → width of the modules rail inside the roadmap
+ *                      column; drag right grows it (+1).
+ *   - `chat-rail`    → width of the agents rail inside the agents
+ *                      column; drag right grows it (+1).
  */
 
 import { onMount, onCleanup } from 'solid-js';
@@ -19,8 +20,8 @@ import { uiStore } from '~/state/ui';
 import { layoutStore } from '~/state/layout';
 
 const VAR: Record<string, string> = {
-  'col-nav': '--col-nav',
-  'col-chat': '--col-chat',
+  'col-main': '--col-side',
+  'modules-rail': '--modules-rail-w',
   'chat-rail': '--chat-rail-w',
 };
 
@@ -33,23 +34,17 @@ interface LayoutBounds {
 }
 
 const BOUNDS: Record<string, LayoutBounds> = {
-  'col-nav':   { min: 160, max: 360, default: 220 },
-  // V86z — col-chat max raised 700 → 960 so the operator can expand
-  // the chat panel further and shrink the central roadmap column by
-  // the same amount (roadmap is the flex middle, has no explicit min).
-  // V107.39 — raised again 960 → 1400 (+45%). Operator field report
-  // 2026-06-08: hit the 960 ceiling and couldn't shrink the roadmap
-  // any further to give the chat more room. The roadmap is the `1fr`
-  // middle column with no min, so it shrinks gracefully as col-chat
-  // grows; the new ceiling lets operators on wider monitors reclaim
-  // a lot more chat real estate without breaking the layout
-  // (collapses to 36 px chat icon are handled by .chat-collapsed
-  // independently of this max).
-  'col-chat':  { min: 280, max: 1400, default: 420 },
-  // V86z — agents-rail min lowered 70 → 50 so the column can collapse
-  // to just the A001-style id chip + status dot (~44 px chip + 6 px
-  // padding). AgentCard already drops chips + body title below 130 px
-  // (V86o compact mode), so the layout stays sane all the way down.
+  // The main boundary resizes the FIXED right column. The left column
+  // is the flexible `1fr` track with no min, so it absorbs the slack;
+  // the wide ceiling lets operators on big monitors give the right
+  // column a lot of room without breaking the layout.
+  'col-main':  { min: 320, max: 1400, default: 620 },
+  // Modules rail inside the roadmap column. Min low enough that it can
+  // squeeze to a thin strip (text truncates) like the agents rail.
+  'modules-rail': { min: 56, max: 420, default: 220 },
+  // Agents rail inside the agents column. Min 50 so it can collapse to
+  // just the A001-style id chip + status dot (AgentCard drops chips +
+  // body title below its compact threshold).
   'chat-rail': { min: 50, max: 320, default: 200 },
 };
 
@@ -106,9 +101,12 @@ export function applyStoredLayout(): void {
   if (typeof layout['chat-rail'] === 'number') {
     uiStore.setChatRailWidth(layout['chat-rail']);
   }
+  if (typeof layout['modules-rail'] === 'number') {
+    uiStore.setModulesRailWidth(layout['modules-rail']);
+  }
 }
 
-export default function Splitter(props: { resize: 'col-nav' | 'col-chat' | 'chat-rail'; class?: string; title?: string }) {
+export default function Splitter(props: { resize: 'col-main' | 'modules-rail' | 'chat-rail'; class?: string; title?: string }) {
   let host: HTMLDivElement | undefined;
 
   onMount(() => {
@@ -121,20 +119,21 @@ export default function Splitter(props: { resize: 'col-nav' | 'col-chat' | 'chat
       document.body.classList.add('resizing');
       const startX = e.clientX;
       const startPx = layout[props.resize] ?? BOUNDS[props.resize]!.default;
-      // col-chat lives on the right edge: dragging right SHRINKS it.
-      const sign = props.resize === 'col-chat' ? -1 : 1;
+      // col-main resizes the FIXED right column: dragging right SHRINKS it.
+      const sign = props.resize === 'col-main' ? -1 : 1;
 
       const onMove = (ev: PointerEvent): void => {
         const dx = ev.clientX - startX;
         const next = clamp(props.resize, Math.round(startPx + sign * dx));
         layout[props.resize] = next;
         document.documentElement.style.setProperty(VAR[props.resize]!, `${next}px`);
-        // V91 — Mirror the rail width into uiStore so ChatRail's
-        // compact memo (which reads uiStore.chatRailWidth) reacts on
-        // every move. Otherwise the column visually shrinks via CSS
-        // but AgentCard never collapses to its compact body.
+        // Mirror the rail widths into uiStore so the rails' compact
+        // memos react on every move (AgentCard collapses below its
+        // compact threshold; modules tree truncates).
         if (props.resize === 'chat-rail') {
           uiStore.setChatRailWidth(next);
+        } else if (props.resize === 'modules-rail') {
+          uiStore.setModulesRailWidth(next);
         }
       };
       const onUp = (): void => {
@@ -143,14 +142,10 @@ export default function Splitter(props: { resize: 'col-nav' | 'col-chat' | 'chat
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         saveLayout(layout);
-        // 2026-06-10 — record the new width against the PANEL that
-        // currently occupies the edge slot, not the slot itself. So
-        // when the operator drags Modules to the right and drops it
-        // on the chat slot, Modules keeps its narrow width instead
-        // of being inflated to the chat-slot's stored value. The
-        // store separately syncs `--col-nav` / `--col-chat` on swap.
-        if (props.resize === 'col-nav' || props.resize === 'col-chat') {
-          layoutStore.recordSlotWidth(props.resize, layout[props.resize]!);
+        // Record the right-column width against the PANEL currently in
+        // the fixed slot so it travels when the operator swaps columns.
+        if (props.resize === 'col-main') {
+          layoutStore.recordSideWidth(layout[props.resize]!);
         }
       };
       window.addEventListener('pointermove', onMove);

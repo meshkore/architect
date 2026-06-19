@@ -36,9 +36,8 @@
 import { layoutStore, type ColumnId } from '~/state/layout';
 
 const LABEL: Record<ColumnId, string> = {
-  nav: 'Modules',
-  ws: 'Workspace',
-  chat: 'Chat',
+  roadmap: 'Roadmap',
+  agents: 'Agents',
 };
 
 interface ColumnRect {
@@ -55,7 +54,7 @@ function collectColumns(): ColumnRect[] {
   const out: ColumnRect[] = [];
   for (const el of Array.from(document.querySelectorAll<HTMLElement>('[data-panel-id]'))) {
     const id = el.dataset.panelId as ColumnId | undefined;
-    if (id !== 'nav' && id !== 'ws' && id !== 'chat') continue;
+    if (id !== 'roadmap' && id !== 'agents') continue;
     const r = el.getBoundingClientRect();
     out.push({
       id,

@@ -1,13 +1,10 @@
 import { createMemo, For, Show } from 'solid-js';
 import { allModules, allTasks } from '~/state/server';
-import { uiStore, type ModulesPill } from '~/state/ui';
+import { uiStore } from '~/state/ui';
 import { viewStore } from '~/state/view';
 import ModuleNode from './ModuleNode';
-import ColumnDragGrip from './ColumnDragGrip';
 import { buildModuleTree, modulePasses } from './modules-tree/tree-build';
 import { projectDocs } from './modules-tree/doc-index';
-
-const PILLS: ModulesPill[] = ['all', 'work', 'stb'];
 
 export default function ModulesTree(props: { selected: string | null; onSelect: (id: string | null) => void }) {
   // V84 — module expansion lives in viewStore, persisted per-project.
@@ -31,49 +28,10 @@ export default function ModulesTree(props: { selected: string | null; onSelect: 
 
   return (
     <nav class="text-sm select-none flex flex-col h-full min-h-0">
-      {/* V107.19 — Header uses the same `.col-header-row` styling as
-          the .subtab-bar in the next column (38px height, col-pad-x
-          padding, border-bottom + bg-bar). Visual unity per operator
-          ask 2026-06-01: "Fíjate la siguiente columna del roadmap,
-          como las letras tienen su padding arriba, izquierda,
-          derecha, abajo." */}
-      <div class="col-header-row" style={{ 'justify-content': 'space-between', gap: '8px' }}>
-        <div class="col-bar-lead">
-          <ColumnDragGrip panelId="nav" />
-          <button
-            type="button"
-            onClick={() => uiStore.toggleModulesCollapsed()}
-            title="Collapse modules column"
-            class="col-bar-title"
-          >
-            Modules
-          </button>
-        </div>
-        {/* RJJ: filter pills (all / work / stb) hidden for now — de momento
-            esto no lo filtramos. Code preserved below, gated by a Show that
-            never renders, so it can be re-enabled by flipping the flag. */}
-        <Show when={false}>
-          <div class="flex gap-1">
-            <For each={PILLS}>
-              {(p) => (
-                <button
-                  type="button"
-                  onClick={() => uiStore.setModulesPill(p)}
-                  title={p === 'work' ? 'modules with active tasks' : p === 'stb' ? 'leaf modules without active tasks' : 'all modules'}
-                  class={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
-                    uiStore.state.modulesPill === p
-                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20'
-                      : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-gray-200'
-                  }`}
-                >
-                  {p}
-                </button>
-              )}
-            </For>
-          </div>
-        </Show>
-      </div>
-
+      {/* 2026-06-19 — headerless. The column grip + identity now live in
+          the roadmap column's shared header bar; the modules rail is
+          just the list (mirrors how the agents rail dropped its header
+          into the agents column bar). */}
       <div class="flex-1 min-h-0 overflow-y-auto px-2 pt-2 pb-3">
         <button
           type="button"

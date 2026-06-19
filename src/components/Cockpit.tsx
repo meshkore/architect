@@ -240,36 +240,24 @@ export default function Cockpit(props: {
               when={booted()}
               fallback={<BootingPanel />}
             >
-              <section class={`tab-panel three-col${uiStore.state.modulesCollapsed ? ' nav-collapsed' : ''}`}>
-                {/* Middle two columns: architect zone keeps its own
-                    nav-col + splitter + left-col; migrated top-tab
-                    zones (Bookmarks, Crons, Links, Protocols, Diary,
-                    Config) replace those with a single host that
-                    spans the same area via `grid-column: 1 / 4`. */}
-                <Show
-                  when={zone() === 'architect'}
-                  fallback={<MigratedZoneHost zone={zone()} />}
-                >
-                  {/* Three columns rendered dynamically by layoutStore
-                   *  (nav/ws/chat → any order). Splitters stay
-                   *  positional: col-nav resizes slot-0, col-chat
-                   *  resizes slot-2, middle (slot-1) is always 1fr.
-                   *  See `state/layout.ts` + `ColumnDragGrip.tsx`. */}
-                  <Slot id={layoutStore.order()[0] ?? 'nav'}
-                    selectedModule={props.selectedModule}
-                    onSelectModule={props.onSelectModule}
-                    tab={tab} setTab={setTab} />
-                  <Splitter resize="col-nav" />
-                  <Slot id={layoutStore.order()[1] ?? 'ws'}
-                    selectedModule={props.selectedModule}
-                    onSelectModule={props.onSelectModule}
-                    tab={tab} setTab={setTab} />
-                  <Splitter resize="col-chat" />
-                  <Slot id={layoutStore.order()[2] ?? 'chat'}
-                    selectedModule={props.selectedModule}
-                    onSelectModule={props.onSelectModule}
-                    tab={tab} setTab={setTab} />
-                </Show>
+              <section class="tab-panel two-col">
+                {/* Two MAIN columns, reorderable via the header grips
+                 *  (layoutStore: roadmap ⇄ agents). Each column is the
+                 *  same shape — [secondary rail | splitter | primary
+                 *  content]. The left slot is the flexible `1fr` track;
+                 *  the right slot is the fixed `--col-side` track that
+                 *  the single `col-main` splitter resizes. Migrated
+                 *  top-tab zones (Bookmarks, Crons, …) replace the
+                 *  roadmap column's content while chat stays put. */}
+                <Slot id={layoutStore.order()[0] ?? 'roadmap'}
+                  selectedModule={props.selectedModule}
+                  onSelectModule={props.onSelectModule}
+                  tab={tab} setTab={setTab} />
+                <Splitter resize="col-main" />
+                <Slot id={layoutStore.order()[1] ?? 'agents'}
+                  selectedModule={props.selectedModule}
+                  onSelectModule={props.onSelectModule}
+                  tab={tab} setTab={setTab} />
               </section>
             </Show>
             </Show>
@@ -288,30 +276,15 @@ export default function Cockpit(props: {
 }
 
 /**
- * V86k — Host for migrated top-bar zones (Bookmarks, Crons, Links,
- * Protocols, Diary, Config). Spans the two middle grid columns
- * (nav-col + splitter + left-col) so the ProjectsRail (left) and
- * ChatPanel (right) stay visible alongside. The zone panel itself
- * keeps its own internal scrolling.
- */
-function MigratedZoneHost(props: { zone: Zone }) {
-  return (
-    <div class="zone-host col" style={{ 'grid-column': '1 / 4' }}>
-      <ZoneView zone={props.zone} />
-    </div>
-  );
-}
-
-/**
- * Slot — picks the column renderer for a given panel id. Used by the
- * column-reorder system (layoutStore + ColumnDragGrip). Each branch
- * carries `data-panel-id` on its outer element so the drag handler
- * can identify the drop target via `elementFromPoint`.
+ * Slot — picks the MAIN column renderer for a given panel id. Used by
+ * the column-reorder system (layoutStore + ColumnDragGrip). Each branch
+ * carries `data-panel-id` on its outer element so the drag handler can
+ * identify the drop target.
  *
- * The middle slot (slot-1 in the grid) absorbs the `1fr` flex space;
- * the side slots (0, 2) take their width from `--col-nav` / `--col-chat`.
- * Whatever panel happens to be in the middle slot gets the wide
- * stretch — same behavior as the pre-Solid monolith.
+ * 2026-06-19 (2-col): only two panels — `roadmap` and `agents`. The
+ * roadmap slot swaps its content for a migrated top-tab zone
+ * (Bookmarks, Crons, …) when the active zone isn't `architect`; chat
+ * stays put in its own slot.
  */
 type SlotProps = {
   id: ColumnId;
@@ -322,77 +295,53 @@ type SlotProps = {
 };
 
 function Slot(props: SlotProps) {
+  const zone = () => uiStore.state.activeZone;
   return (
     <Switch>
-      <Match when={props.id === 'nav'}>
-        <NavColumn
-          collapsed={uiStore.state.modulesCollapsed}
-          selectedModule={props.selectedModule}
-          onSelectModule={props.onSelectModule}
-        />
+      <Match when={props.id === 'roadmap'}>
+        <Show
+          when={zone() === 'architect'}
+          fallback={
+            <div data-panel-id="roadmap" class="roadmap-col col">
+              <ZoneView zone={zone()} />
+            </div>
+          }
+        >
+          <RoadmapColumn
+            selectedModule={props.selectedModule}
+            onSelectModule={props.onSelectModule}
+            tab={props.tab}
+            setTab={props.setTab}
+          />
+        </Show>
       </Match>
-      <Match when={props.id === 'ws'}>
-        <WorkspaceColumn
-          selectedModule={props.selectedModule}
-          tab={props.tab}
-          setTab={props.setTab}
-        />
-      </Match>
-      <Match when={props.id === 'chat'}>
-        <ChatColumn selectedModule={props.selectedModule} />
+      <Match when={props.id === 'agents'}>
+        <AgentsColumn selectedModule={props.selectedModule} />
       </Match>
     </Switch>
   );
 }
 
-function NavColumn(props: {
-  collapsed: boolean;
+/**
+ * RoadmapColumn — the left-hand work surface. One header row carries
+ * the column grip + the sub-tabs (Roadmap › Context · Diagrams ·
+ * Protocols). Below it the body is an inner split: the Modules rail
+ * (resizable via its own `modules-rail` splitter, like the agents rail)
+ * + the workspace content driven by the active sub-tab. Modules stays
+ * visible across every sub-tab so a selection can scope Context /
+ * Diagrams (selection→list wiring lands later; default is project-wide).
+ */
+function RoadmapColumn(props: {
   selectedModule: string | null;
   onSelectModule: (id: string | null) => void;
-}) {
-  // ModulesTree owns the `col-header-row` (38 px) and now prepends
-  // its own <ColumnDragGrip panelId="nav" /> inside it, so we just
-  // mount ModulesTree directly. Keeps the grip aligned with the WS
-  // subtab-bar's grip vertically.
-  return (
-    <aside
-      data-panel-id="nav"
-      class={`nav-col col${props.collapsed ? ' collapsed' : ''}`}
-    >
-      <Show
-        when={!props.collapsed}
-        fallback={
-          <button
-            type="button"
-            class="nav-rail"
-            onClick={() => uiStore.toggleModulesCollapsed()}
-            title="Expand modules"
-            aria-label="Expand modules column"
-            style={{ display: 'flex', background: 'transparent', border: 'none' }}
-          >
-            Modules
-          </button>
-        }
-      >
-        <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
-      </Show>
-    </aside>
-  );
-}
-
-function WorkspaceColumn(props: {
-  selectedModule: string | null;
   tab: () => Tab;
   setTab: (t: Tab) => void;
 }) {
-  // 2026-06-19 — sub-tabs: Roadmap · Context · Diagrams · Protocols.
-  // (Tasks parked → src/_parked/RoadmapList.tsx.bak; Protocols moved in
-  // from the header zone per operator.)
   const { tab, setTab } = props;
   return (
-    <aside data-panel-id="ws" class="left-col col">
+    <aside data-panel-id="roadmap" class="roadmap-col col">
       <div class="subtab-bar">
-        <ColumnDragGrip panelId="ws" />
+        <ColumnDragGrip panelId="roadmap" />
         <SubTab id="roadmap"   label="Roadmap"   active={tab() === 'roadmap'}   onSelect={setTab} global />
         <span class="subtab-divider" aria-hidden="true">›</span>
         <SubTab id="context"   label="Context"   active={tab() === 'context'}   onSelect={setTab} />
@@ -400,37 +349,44 @@ function WorkspaceColumn(props: {
         <SubTab id="protocols" label="Protocols" active={tab() === 'protocols'} onSelect={setTab} />
         <div class="flex-1" />
       </div>
-      <Switch>
-        <Match when={tab() === 'roadmap'}>
-          <div class="ws-panel"><InitiativesPanel /></div>
-        </Match>
-        <Match when={tab() === 'context'}>
-          <div class="ws-panel"><ContextPanel moduleId={props.selectedModule} /></div>
-        </Match>
-        <Match when={tab() === 'diagrams'}>
-          <div class="ws-panel"><DiagramsPanel moduleId={props.selectedModule} /></div>
-        </Match>
-        <Match when={tab() === 'protocols'}>
-          <div class="ws-panel"><ProtocolsPanel /></div>
-        </Match>
-      </Switch>
+      <div class="roadmap-body flex-1 flex min-h-0">
+        <aside class="modules-rail">
+          <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
+        </aside>
+        <Splitter resize="modules-rail" title="Drag to resize modules rail" />
+        <div class="ws-content flex-1 flex flex-col min-h-0">
+          <Switch>
+            <Match when={tab() === 'roadmap'}>
+              <div class="ws-panel"><InitiativesPanel /></div>
+            </Match>
+            <Match when={tab() === 'context'}>
+              <div class="ws-panel"><ContextPanel moduleId={props.selectedModule} /></div>
+            </Match>
+            <Match when={tab() === 'diagrams'}>
+              <div class="ws-panel"><DiagramsPanel moduleId={props.selectedModule} /></div>
+            </Match>
+            <Match when={tab() === 'protocols'}>
+              <div class="ws-panel"><ProtocolsPanel /></div>
+            </Match>
+          </Switch>
+        </div>
+      </div>
     </aside>
   );
 }
 
-function ChatColumn(props: { selectedModule: string | null }) {
-  // 2026-06-19 — the chat column's top `.col-header-row` used to hold
-  // only the drag grip (an empty black bar). It now carries the column's
-  // identity title "Agents" + the new-agent "+" on the right — mirroring
-  // MODULES (title left) and ROADMAP (actions right). The agent rail below
-  // drops its own header and is just the list. The thread keeps its own
-  // scope strip unchanged.
+/**
+ * AgentsColumn — the right-hand column. Header row carries the column
+ * grip + "Agents" title + new-agent "+". Body is the inner split: the
+ * agents rail (resizable via `chat-rail`) + the chat thread.
+ */
+function AgentsColumn(props: { selectedModule: string | null }) {
   const onNewAgent = () => openNewAgentWizard({ scope: { module: props.selectedModule } });
   return (
-    <div data-panel-id="chat" class="center-col col" id="chat-col">
+    <div data-panel-id="agents" class="center-col col" id="chat-col">
       <div class="col-header-row" style={{ 'justify-content': 'space-between', gap: '8px' }}>
         <div class="col-bar-lead">
-          <ColumnDragGrip panelId="chat" />
+          <ColumnDragGrip panelId="agents" />
           <span class="col-bar-title" style={{ cursor: 'default' }}>Agents</span>
         </div>
         <button

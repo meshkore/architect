@@ -1,51 +1,48 @@
 /**
  * layoutStore — main cockpit column order, persisted to localStorage.
  *
- * The cockpit has three top-level columns inside `.three-col`:
+ * 2026-06-19 rearchitecture (3-col → 2-col). The cockpit now has TWO
+ * top-level columns inside `.two-col`:
  *
- *   nav    Modules tree
- *   ws     Workspace (Roadmap / Tasks / Context / Diagrams)
- *   chat   Chat (rail + thread)
+ *   roadmap   Modules rail + workspace content (Roadmap / Context /
+ *             Diagrams / Protocols). Modules used to be its own
+ *             top-level `nav` column; it's now an inner rail of the
+ *             roadmap column — exactly mirroring how the agents column
+ *             carries the chat rail.
+ *   agents    Agents rail + chat thread.
  *
- * Each operator can reorder these by dragging a 9-dot grip on the
- * header bar. Default order is `nav → ws → chat`. The grid slots
- * themselves stay positional (`col-nav` at slot 0, `col-chat` at
- * slot 4); only the COLUMN CONTENT moves between slots.
+ * Each main column is the same shape: `[secondary rail | splitter |
+ * primary content]`. The two MAIN columns are reorderable by dragging
+ * the 9-dot grip in each column header.
  *
- * Ported from the pre-Solid monolith's `ColumnReorder` IIFE
- * (architect/public/index.html, deleted 2026-05-18 cd931df).
- * Operator field report 2026-06-10: "esto funcionaba antes de uno
- * de los grandes rediseños cuando pasamos de vanilla JavaScript a
- * solidJS … vuelve a activarlo."
+ * Grid slots stay positional: slot-0 (left) is the flexible `1fr`
+ * column; slot-2 (right) takes its width from `--col-side`. The single
+ * `col-main` splitter resizes the right column. Only the COLUMN
+ * CONTENT moves between slots — see `ColumnDragGrip.tsx`.
  */
 
 import { createMemo, createRoot, createSignal } from 'solid-js';
 
-export type ColumnId = 'nav' | 'ws' | 'chat';
-const ORDER_KEY = 'mc-panel-order-v1';   // legacy key, preserved
-const WIDTHS_KEY = 'mc-panel-widths-v1'; // legacy key, preserved
+export type ColumnId = 'roadmap' | 'agents';
+const ORDER_KEY = 'mc-panel-order-v2';   // v2: 2-column order
+const WIDTHS_KEY = 'mc-panel-widths-v2';
 const SPLITTER_LAYOUT_KEY = 'mc-layout-v1'; // Splitter writes here
-const DEFAULT_ORDER: readonly ColumnId[] = ['nav', 'ws', 'chat'];
+const DEFAULT_ORDER: readonly ColumnId[] = ['roadmap', 'agents'];
 
-/** Width per panel, in pixels. Travels with the panel when the
- *  operator drags it to a different slot. Defaults chosen to match
- *  the long-standing column dimensions: a narrow nav, a wide chat,
- *  and a sensible value for `ws` for the rare case it lands on an
- *  edge (its primary home is the flexible `1fr` middle slot). */
+const isCol = (x: unknown): x is ColumnId => x === 'roadmap' || x === 'agents';
+
+/** Width per panel, in pixels — applied only while the panel sits in
+ *  the FIXED right slot (slot-2). Travels with the panel when the
+ *  operator reorders. The left slot is always `1fr`. */
 type PanelWidths = Record<ColumnId, number>;
-const DEFAULT_WIDTHS: PanelWidths = { nav: 220, ws: 540, chat: 420 };
+const DEFAULT_WIDTHS: PanelWidths = { roadmap: 620, agents: 600 };
 
 function loadOrder(): ColumnId[] {
   try {
     const raw = localStorage.getItem(ORDER_KEY);
     if (!raw) return [...DEFAULT_ORDER];
     const v = JSON.parse(raw);
-    if (
-      Array.isArray(v)
-      && v.length === 3
-      && new Set(v).size === 3
-      && v.every((x) => x === 'nav' || x === 'ws' || x === 'chat')
-    ) {
+    if (Array.isArray(v) && v.length === 2 && new Set(v).size === 2 && v.every(isCol)) {
       return v as ColumnId[];
     }
   } catch {
@@ -65,9 +62,8 @@ function loadWidths(): PanelWidths {
     const v = JSON.parse(raw);
     if (v && typeof v === 'object') {
       return {
-        nav: typeof v.nav === 'number' && Number.isFinite(v.nav) ? v.nav : DEFAULT_WIDTHS.nav,
-        ws: typeof v.ws === 'number' && Number.isFinite(v.ws) ? v.ws : DEFAULT_WIDTHS.ws,
-        chat: typeof v.chat === 'number' && Number.isFinite(v.chat) ? v.chat : DEFAULT_WIDTHS.chat,
+        roadmap: typeof v.roadmap === 'number' && Number.isFinite(v.roadmap) ? v.roadmap : DEFAULT_WIDTHS.roadmap,
+        agents: typeof v.agents === 'number' && Number.isFinite(v.agents) ? v.agents : DEFAULT_WIDTHS.agents,
       };
     }
   } catch {
@@ -80,22 +76,18 @@ function persistWidths(w: PanelWidths): void {
   try { localStorage.setItem(WIDTHS_KEY, JSON.stringify(w)); } catch { /* quota */ }
 }
 
-/** Push the current edge panels' widths to the CSS vars AND mirror
- *  them into the Splitter's mc-layout-v1 store so the two views stay
+/** Push the fixed (right) panel's width to `--col-side` AND mirror it
+ *  into the Splitter's mc-layout-v1 store so the two views stay
  *  consistent (Splitter reads mc-layout-v1 on its onMount). */
 function syncSlotVarsFromWidths(order: readonly ColumnId[], widths: PanelWidths): void {
   if (typeof document === 'undefined') return;
-  const slot0 = order[0]!;
-  const slot2 = order[2]!;
-  const navPx = widths[slot0];
-  const chatPx = widths[slot2];
-  document.documentElement.style.setProperty('--col-nav', `${navPx}px`);
-  document.documentElement.style.setProperty('--col-chat', `${chatPx}px`);
+  const rightPanel = order[1]!;
+  const sidePx = widths[rightPanel];
+  document.documentElement.style.setProperty('--col-side', `${sidePx}px`);
   try {
     const raw = localStorage.getItem(SPLITTER_LAYOUT_KEY);
     const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-    parsed['col-nav'] = navPx;
-    parsed['col-chat'] = chatPx;
+    parsed['col-main'] = sidePx;
     localStorage.setItem(SPLITTER_LAYOUT_KEY, JSON.stringify(parsed));
   } catch { /* quota */ }
 }
@@ -103,37 +95,33 @@ function syncSlotVarsFromWidths(order: readonly ColumnId[], widths: PanelWidths)
 const [orderSig, setOrderSig] = createRoot(() => createSignal<readonly ColumnId[]>(loadOrder()));
 const [widthsSig, setWidthsSig] = createRoot(() => createSignal<PanelWidths>(loadWidths()));
 
-// One-shot boot sync: align the slot CSS vars with the current
-// per-panel widths under the saved order. The Splitter component's
-// onMount runs `applyStoredLayout` separately; this push happens
-// before the first paint so the columns render at the right widths.
+// One-shot boot sync: align the `--col-side` var with the current
+// fixed-panel width under the saved order, before the first paint.
 if (typeof document !== 'undefined') {
   syncSlotVarsFromWidths(orderSig(), widthsSig());
 }
 
 export const layoutStore = {
-  /** Current column order — [slot0, slot1, slot2]. */
+  /** Current column order — [leftSlot, rightSlot]. */
   order: orderSig,
 
-  /** Per-panel widths in pixels. Travels with the panel between slots. */
+  /** Per-panel widths in pixels (only applied in the fixed right slot). */
   widths: widthsSig,
 
-  /** `nav` is at the leftmost slot? Used to decide whether the
-   *  Modules collapse button works (positional CSS bound to
-   *  `.nav-collapsed` only covers the slot-0 case). */
-  navAtLeftEdge: createRoot(() => createMemo(() => orderSig()[0] === 'nav')),
+  /** Which column sits in the flexible left slot. */
+  leftPanel: createRoot(() => createMemo(() => orderSig()[0]!)),
 
-  /** `chat` is at the rightmost slot? Same reason as navAtLeftEdge. */
-  chatAtRightEdge: createRoot(() => createMemo(() => orderSig()[2] === 'chat')),
+  /** Which column sits in the fixed right slot. */
+  rightPanel: createRoot(() => createMemo(() => orderSig()[1]!)),
 
-  /** Move `panel` to `targetIndex` (0..2). Other panels shift to fill
-   *  the gap. INSERT-AT semantics (matches the new drag-and-drop UX
-   *  the operator asked for 2026-06-10) — not a simple swap. */
+  /** Move `panel` to `targetIndex` (0..1). The other panel fills the
+   *  gap. With two columns this is a swap, expressed as insert-at so it
+   *  shares the ColumnDragGrip drop math. */
   moveTo(panel: ColumnId, targetIndex: number): void {
     const cur = orderSig();
     const src = cur.indexOf(panel);
     if (src < 0) return;
-    const clamped = Math.max(0, Math.min(2, Math.floor(targetIndex)));
+    const clamped = Math.max(0, Math.min(1, Math.floor(targetIndex)));
     if (clamped === src) return;
     const without = cur.filter((c) => c !== panel) as ColumnId[];
     const next = [...without.slice(0, clamped), panel, ...without.slice(clamped)] as ColumnId[];
@@ -142,43 +130,32 @@ export const layoutStore = {
     syncSlotVarsFromWidths(next, widthsSig());
   },
 
-  /** Swap two columns. Kept for callers that prefer the explicit swap
-   *  semantics; INSERT-AT (`moveTo`) is the canonical operation now. */
-  swap(a: ColumnId, b: ColumnId): void {
-    if (a === b) return;
-    const cur = orderSig();
-    const i = cur.indexOf(a);
-    const j = cur.indexOf(b);
-    if (i < 0 || j < 0) return;
-    const next = cur.slice() as ColumnId[];
-    next[i] = b;
-    next[j] = a;
+  /** Swap the two columns. */
+  swap(): void {
+    const next = [...orderSig()].reverse() as ColumnId[];
     setOrderSig(next);
     persistOrder(next);
     syncSlotVarsFromWidths(next, widthsSig());
   },
 
-  /** Called by the Splitter when the operator finishes dragging a
-   *  `col-nav` or `col-chat` handle. Records the new width into the
-   *  panel currently at that slot so the value travels with the
-   *  panel the next time the order changes. */
-  recordSlotWidth(slot: 'col-nav' | 'col-chat', px: number): void {
-    const ord = orderSig();
-    const panel = slot === 'col-nav' ? ord[0] : ord[2];
+  /** Called by the Splitter when the operator finishes dragging the
+   *  `col-main` handle. Records the new width against the PANEL
+   *  currently in the fixed right slot so the value travels with it
+   *  when the order changes. */
+  recordSideWidth(px: number): void {
+    const panel = orderSig()[1];
     if (!panel) return;
     const next = { ...widthsSig(), [panel]: px };
     setWidthsSig(next);
     persistWidths(next);
   },
 
-  /** Push the per-panel widths into the slot CSS vars + Splitter's
-   *  in-memory layout store. Called on swap/move so the slot widths
-   *  reflect the new edge panels' saved widths. */
+  /** Push the per-panel widths into `--col-side` + Splitter store. */
   syncSlotVars(): void {
     syncSlotVarsFromWidths(orderSig(), widthsSig());
   },
 
-  /** Reset to the canonical nav→ws→chat order + default widths. */
+  /** Reset to the canonical roadmap→agents order + default widths. */
   reset(): void {
     setOrderSig([...DEFAULT_ORDER]);
     setWidthsSig({ ...DEFAULT_WIDTHS });

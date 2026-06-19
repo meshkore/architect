@@ -23,6 +23,8 @@ export interface UIStoreState {
   projectsRailMode: RailMode;
   projectsRailWidth: number;
   chatRailWidth: number;
+  /** Width of the modules rail inside the roadmap column. */
+  modulesRailWidth: number;
   navFilter: string;
   wsTab: WsTab;
   /** "Group by phase" toggle on the expanded initiative card (M4.2 spec). */
@@ -40,6 +42,7 @@ const KEYS = {
   projectsRailMode: 'mc-projects-rail-mode',
   projectsRailWidth: 'mc-projects-rail-width',
   chatRailWidth: 'mc-chat-rail-width',
+  modulesRailWidth: 'mc-modules-rail-width',
   navFilter: 'mc-nav-filter',
   wsTab: 'mc-ws-tab',
   initiativeGroupByPhase: 'mc-initiative-group-by-phase',
@@ -101,6 +104,7 @@ const initial: UIStoreState = {
   projectsRailMode: readString<RailMode>(KEYS.projectsRailMode, 'full', ['full', 'short']),
   projectsRailWidth: readInt(KEYS.projectsRailWidth, 240),
   chatRailWidth: readInt(KEYS.chatRailWidth, 220),
+  modulesRailWidth: readInt(KEYS.modulesRailWidth, 220),
   navFilter: localStorage.getItem(KEYS.navFilter) ?? '',
   wsTab: readString<WsTab>(KEYS.wsTab, 'tasks', ['tasks', 'context', 'diagrams', 'modules']),
   initiativeGroupByPhase: readBool(KEYS.initiativeGroupByPhase, false),
@@ -133,6 +137,11 @@ function setProjectsRailWidth(w: number): void {
 function setChatRailWidth(w: number): void {
   setState('chatRailWidth', w);
   writeStr(KEYS.chatRailWidth, String(w));
+}
+
+function setModulesRailWidth(w: number): void {
+  setState('modulesRailWidth', w);
+  writeStr(KEYS.modulesRailWidth, String(w));
 }
 
 function setNavFilter(s: string): void {
@@ -171,6 +180,7 @@ export const uiStore = {
   setProjectsRailMode,
   setProjectsRailWidth,
   setChatRailWidth,
+  setModulesRailWidth,
   setNavFilter,
   setWsTab,
   setInitiativeGroupByPhase,
