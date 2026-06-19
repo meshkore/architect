@@ -581,6 +581,21 @@ export class DaemonClient {
     return this.request<InitiativeActivity>('GET', `/initiative/${encodeURIComponent(id)}/activity`, undefined, signal);
   }
 
+  /** Move an initiative to a wall at a given position. The daemon writes
+   *  `status: <wall>` + `wall_order` to the .md (walls.py), recompacts the
+   *  wall, and broadcasts `initiative.reordered`. The Queue wall (py-1.22+)
+   *  uses this as the shared, disk-persisted staging primitive: stage =
+   *  move to `next`; unstage = move to `active`. A CLI agent reading the
+   *  standard sees the same `status: next` + `wall_order` order. */
+  async initiativeReorder(
+    id: string,
+    wall: 'active' | 'next' | 'backlog' | 'archived',
+    order: number,
+    signal?: AbortSignal,
+  ): Promise<Result<unknown>> {
+    return this.request<unknown>('POST', '/initiative/reorder', { id, wall, order }, signal);
+  }
+
   /** V86j — Single protocol body + frontmatter. The daemon serves
    *  it at `/protocols/<id>` (id is the P<N> slug). */
   async protocolDetail(id: string, signal?: AbortSignal): Promise<Result<ProtocolDetail>> {

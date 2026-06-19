@@ -309,6 +309,18 @@
 .rt-node .rt-check {
   color: currentColor;
 }
+/* Un-stage cross (queued, not yet running) */
+.rt-node .rt-x {
+  color: currentColor;
+}
+/* Staged for execution — cyan accent so it reads as "queued to run". */
+.rt-node.is-queued {
+  color: #22d3ee;
+  border-color: rgba(34, 211, 238, .55);
+}
+.rt-node.is-queued:hover {
+  box-shadow: 0 0 0 8px #0a0d12, 0 0 14px 2px rgba(34, 211, 238, .35);
+}
 
 /* Story body row */
 .rt-row {
@@ -500,7 +512,15 @@
   opacity: 1;
 }
 
-/* Tasks list — sub-nodes hanging from same vertical line */
+/* ── Tasks list — V107.43 redesign ─────────────────────────────────
+ * Row layout (left → right):
+ *   [thread-node]  [state-glyph]  [code]   title ………………   [module…]
+ *
+ * The status moved from a right-hand ACTIVE/BACKLOG/DONE label to an
+ * explicit LEFT glyph (operator reads left-first); modules took its
+ * place on the right. The currently-executing task gets a spinner + a
+ * soft title blink so the operator can see, at a glance, exactly where
+ * work is happening — and N tasks can be live at once. */
 .rt-tasks {
   list-style: none;
   margin: 12px 0 0 0;
@@ -510,9 +530,13 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   padding: 5px 0;
 }
+
+/* Timeline thread marker — neutral dot on the vertical line. Lights up
+ * (fuchsia + pulse) ONLY while a worker is live on this task, so the
+ * eye lands on the exact live point of the roadmap. */
 .rt-task-node {
   position: absolute;
   left: -29px;
@@ -523,23 +547,83 @@
   border: 2px solid #2f3640;
   background: #0a0d12;
   box-sizing: border-box;
+  transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
 }
-.rt-task-node.is-done { border-color: #3fb95080; background: #14271a; }
-.rt-task-node.is-active,
-.rt-task-node.is-in_progress { border-color: #3fb950; background: #0a0d12; }
-.rt-task-node.is-next { border-color: #d99a2b80; background: #0a0d12; }
-.rt-task-node.is-blocked { border-color: #e24b4a; background: #0a0d12; }
+.rt-task.is-working .rt-task-node {
+  border-color: var(--theme-status-running, #ec4899);
+  background: var(--theme-status-running, #ec4899);
+  animation: rt-task-pulse 1.5s ease-in-out infinite;
+}
+@keyframes rt-task-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--theme-status-running-glow, rgba(236, 72, 153, .55)); }
+  50%      { box-shadow: 0 0 7px 2px var(--theme-status-running-glow, rgba(236, 72, 153, .55)); }
+}
 
+/* ── State glyph (left of content) — fixed box so the column is regular ── */
+.rt-task-state {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+}
+/* pending — hollow checkbox */
+.rt-task-box {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid #4b5563;
+  border-radius: 3px;
+}
+/* active / ready — hollow ring in the active hue */
+.rt-task.is-active .rt-task-state { color: var(--theme-status-active, #38bdf8); }
+.rt-task-ring {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+}
+/* blocked — exclamation */
+.rt-task.is-blocked .rt-task-state { color: #f87171; }
+.rt-task-bang {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+/* done — check in the done hue */
+.rt-task.is-done .rt-task-state { color: var(--theme-status-done, #a78bfa); }
+.rt-task-check { color: currentColor; }
+/* working — spinner in the running hue */
+.rt-task.is-working .rt-task-state { color: var(--theme-status-running, #ec4899); }
+.rt-task-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--theme-status-running, #ec4899) 28%, transparent);
+  border-top-color: var(--theme-status-running, #ec4899);
+  animation: rt-task-spin .8s linear infinite;
+}
+@keyframes rt-task-spin { to { transform: rotate(360deg); } }
+
+/* Code — fixed-width + dimmed. The title is the star; the code "no
+ * aporta mucha información" so it stays a quiet, regular column. Long
+ * legacy ids truncate with an ellipsis (full id on hover via title). */
 .rt-task-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 10px;
   background: #161b24;
-  color: #b1bac6;
+  color: #8b95a3;
   border-radius: 3px;
   padding: 2px 6px;
-  min-width: 42px;
+  width: 58px;
+  max-width: 58px;
   text-align: center;
   flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rt-task-text {
@@ -551,22 +635,52 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: color .2s ease;
+}
+.rt-task.is-done .rt-task-text { color: #9aa3af; }
+.rt-task.is-pending .rt-task-text { color: #aab2bd; }
+/* working — title softly blinks in the running hue (operator: "muy suave") */
+.rt-task.is-working .rt-task-text {
+  color: var(--theme-status-running-ring, #f9a8d4);
+  animation: rt-task-blink 1.7s ease-in-out infinite;
+}
+@keyframes rt-task-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .58; }
 }
 
-.rt-task-status {
+/* Modules — far-right badges (took the old status label's slot). One
+ * per module; the row's flex:1 title pushes them to the right edge. */
+.rt-task-mods {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
+}
+.rt-task-mod {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 9.5px;
-  font-weight: 500;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-  color: #6b7280;
-  flex-shrink: 0;
+  letter-spacing: .02em;
+  color: #9aa6c4;
+  background: #11161f;
+  border: 1px solid #222a3a;
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.rt-task-status.is-done { color: #c4b5fd; }
-.rt-task-status.is-active,
-.rt-task-status.is-in_progress { color: #38bdf8; }
-.rt-task-status.is-next { color: #fbbf24; }
-.rt-task-status.is-blocked { color: #f472b6; }
+
+/* Reduced motion — stop the spinner, pulse, and title blink */
+@media (prefers-reduced-motion: reduce) {
+  .rt-task-spinner,
+  .rt-task.is-working .rt-task-node,
+  .rt-task.is-working .rt-task-text {
+    animation: none !important;
+  }
+}
 
 /* Right-hand secondary control for an initiative (archive toggle).
  * Subtle, only the operator's hover reveals it. */
@@ -600,8 +714,8 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 18px;
-  padding-left: 4px;        /* fine-align with the line at x=14 (≈center of "I") */
+  margin-bottom: 10px;      /* tightened 2026-06-19 to match the other columns' option rows */
+  padding-left: 4px;        /* fine-align with the line at x=14 */
 }
 .rt-header .rt-h-title {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -609,6 +723,178 @@
   color: #6b7280;
   letter-spacing: .06em;
   text-transform: uppercase;
+}
+
+/* ── Queue wall (py-1.22+) ──────────────────────────────────────────── */
+
+/* Count badge on the QUEUE filter chip */
+.rt-queue-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(34, 211, 238, .2);
+  color: #67e8f9;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Control bar above the wall timeline */
+.rt-queuebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(34, 211, 238, .25);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(34, 211, 238, .06), rgba(10, 13, 18, .4));
+}
+.rt-qbar-progress {
+  position: relative;
+  flex: 1 1 160px;
+  min-width: 120px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, .15);
+  overflow: hidden;
+}
+.rt-qbar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #22d3ee, #34d399);
+  transition: width .4s ease;
+}
+.rt-qbar-stat {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10.5px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+.rt-qbtn {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, opacity .15s ease;
+}
+.rt-qbtn:disabled { opacity: .4; cursor: not-allowed; }
+.rt-qbtn-run {
+  background: rgba(34, 211, 238, .15);
+  color: #67e8f9;
+  border-color: rgba(34, 211, 238, .4);
+}
+.rt-qbtn-run:not(:disabled):hover { background: rgba(34, 211, 238, .3); }
+.rt-qbtn-stop {
+  background: rgba(239, 68, 68, .15);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, .4);
+}
+.rt-qbtn-stop:hover { background: rgba(239, 68, 68, .3); }
+.rt-qbtn-clear {
+  background: transparent;
+  color: #6b7280;
+  border-color: rgba(148, 163, 184, .25);
+}
+.rt-qbtn-clear:not(:disabled):hover { color: #cbd5e1; border-color: rgba(148, 163, 184, .45); }
+
+/* Agent badge (running task — who owns it) */
+.rt-task-agent {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(34, 211, 238, .15);
+  color: #67e8f9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  white-space: nowrap;
+}
+
+/* ── Wall task rows — rich per-task detail under the title ──────────── */
+.rt-task-wall { flex-wrap: wrap; }
+.rt-tw-detail {
+  flex-basis: 100%;
+  width: 100%;
+  margin: 4px 0 2px 26px;   /* indent under the title, clear of the glyph */
+}
+.rt-tw-agentline {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  color: #94a3b8;
+}
+.rt-tw-livedot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #22d3ee;
+  box-shadow: 0 0 6px 1px rgba(34, 211, 238, .6);
+  animation: rt-tw-pulse 1.2s ease-in-out infinite;
+}
+@keyframes rt-tw-pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+.rt-tw-working { font-style: italic; opacity: .8; }
+.rt-tw-output {
+  margin-top: 5px;
+  padding: 7px 9px;
+  max-height: 6.2em;
+  overflow: hidden;
+  border-left: 2px solid rgba(34, 211, 238, .35);
+  border-radius: 0 6px 6px 0;
+  background: rgba(15, 23, 32, .55);
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 14px);
+  mask-image: linear-gradient(180deg, transparent, #000 14px);
+}
+.rt-tw-sumline {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: #94a3b8;
+  font-size: 10px;
+}
+.rt-tw-sumline:hover { color: #cbd5e1; }
+.rt-tw-tri {
+  color: #64748b;
+  font-size: 9px;
+  width: 9px;
+  display: inline-block;
+}
+.rt-tw-meta {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: .02em;
+}
+.rt-tw-summary {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-left: 2px solid rgba(52, 211, 153, .35);
+  border-radius: 0 6px 6px 0;
+  background: rgba(15, 23, 32, .5);
+  font-size: 11.5px;
+  color: #d1d5db;
 }
 
 /* Reduced motion — kill the height/opacity transitions */

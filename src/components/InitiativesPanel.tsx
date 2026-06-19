@@ -22,6 +22,7 @@ import {
   allInitiatives,
   allTasks,
   isProjectEmpty,
+  activeEntriesByInitiative,
   type ServerInitiative,
   type ServerTask,
 } from '~/state/server';
@@ -31,15 +32,18 @@ import { viewStore } from '~/state/view';
 import { chatStore } from '~/state/chat';
 import { daemonStore, daemonHealth } from '~/state/daemon';
 import { runArchitectOnScope, stopArchitect } from '~/lib/architect-dispatch';
+import { isQueuedStatus, stageAll, clearQueue as clearQueueWall } from '~/lib/queue';
 import { log } from '~/lib/log';
 
-type VisibilityFilter = 'active' | 'archived' | 'all' | 'backlog';
+type VisibilityFilter = 'all' | 'active' | 'backlog' | 'archived' | 'queue';
 
+// Order requested by operator 2026-06-19: all · active · backlog · archived.
+// QUEUE is rendered as a distinct chip after these (the live execution wall).
 const VISIBILITY_FILTERS: { id: VisibilityFilter; label: string; title: string }[] = [
-  { id: 'active',   label: 'active',   title: 'Initiatives in flight or up next — the operative roadmap' },
-  { id: 'archived', label: 'archived', title: 'Initiatives the operator manually archived' },
   { id: 'all',      label: 'all',      title: 'Everything — active, archived, completed, backlog, mixed' },
+  { id: 'active',   label: 'active',   title: 'Initiatives in flight or up next — the operative roadmap' },
   { id: 'backlog',  label: 'backlog',  title: 'Ideas parked outside the active roadmap' },
+  { id: 'archived', label: 'archived', title: 'Initiatives the operator manually archived' },
 ];
 
 export default function InitiativesPanel() {
@@ -67,7 +71,21 @@ export default function InitiativesPanel() {
     const vis = visibility();
     const tbi = tasksByInitiative();
     const exitingSet = exiting();
+    const liveByInit = activeEntriesByInitiative();
+    const matchesQuery = (it: ServerInitiative): boolean => {
+      if (!q) return true;
+      return `${it.title} ${it.id} ${it.oneliner ?? ''}`.toLowerCase().includes(q);
+    };
     const list = allInitiatives().filter((it) => {
+      // QUEUE wall — staged for execution OR currently being worked on.
+      // Ignores the usual active/archived/backlog/done partitioning: this
+      // is "what's going to run + what's running", in roadmap order.
+      if (vis === 'queue') {
+        const queued = isQueuedStatus(it.status); // shared `next` wall
+        const live = (liveByInit[it.id]?.length ?? 0) > 0;
+        if (!queued && !live) return false;
+        return matchesQuery(it);
+      }
       const isDone = it.status === 'done';
       const isArchManual = viewStore.isInitiativeArchived(it.id) && it.status !== 'active';
       const isArchived = isDone || isArchManual;
@@ -97,6 +115,15 @@ export default function InitiativesPanel() {
         if (!cb) return -1;
         return cb.localeCompare(ca);
       });
+    }
+    if (vis === 'queue') {
+      // Execution order = the operator's `wall_order` (asc), the same key
+      // a CLI agent sorts by. Missing wall_order sinks to the end.
+      const wo = (it: ServerInitiative): number => {
+        const v = (it as Record<string, unknown>).wall_order;
+        return typeof v === 'number' ? v : Number.MAX_SAFE_INTEGER;
+      };
+      return list.slice().sort((a, b) => wo(a) - wo(b));
     }
     return list;
   });
@@ -189,18 +216,68 @@ export default function InitiativesPanel() {
     return false;
   });
 
-  const onRunAll = async (): Promise<void> => {
-    if (architectLive()) { await stopArchitect(); return; }
-    const list = filtered().filter((it) => {
+  // ── Queue wall — derived state ──────────────────────────────────────
+  /** Initiatives shown on the wall: staged by the operator OR live now,
+   *  in roadmap order. Source of truth for the wall's progress + run. */
+  const queueInitiatives = createMemo<ServerInitiative[]>(() => {
+    const liveByInit = activeEntriesByInitiative();
+    return allInitiatives().filter(
+      (it) => isQueuedStatus(it.status) || (liveByInit[it.id]?.length ?? 0) > 0,
+    );
+  });
+  /** Aggregate task progress across the whole wall (done / total). */
+  const queueProgress = createMemo<{ done: number; total: number; pct: number }>(() => {
+    const tbi = tasksByInitiative();
+    let done = 0;
+    let total = 0;
+    for (const it of queueInitiatives()) {
+      const tasks = tbi.get(it.id) ?? [];
+      total += tasks.length;
+      done += tasks.filter((t) => t.status === 'done').length;
+    }
+    return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
+  });
+
+  /** Every initiative the architect could actually run: not manually
+   *  archived, not backlog, and with ≥1 incomplete task. */
+  const eligibleForRun = (): ServerInitiative[] =>
+    allInitiatives().filter((it) => {
       if (viewStore.isInitiativeArchived(it.id)) return false;
       if (it.status === 'backlog') return false;
       const tasks = tasksByInitiative().get(it.id) ?? [];
       if (tasks.length === 0) return false;
       return tasks.some((t) => t.status !== 'done' && t.status !== 'cancelled');
     });
+
+  // RUN ALL (operator spec 2026-06-19): stage EVERY eligible initiative,
+  // flip the view to the wall, and start the pass — the wall is now the
+  // single place the operator watches execution. While the architect is
+  // live the same button is the global Stop.
+  const onRunAll = async (): Promise<void> => {
+    if (architectLive()) { await stopArchitect(); return; }
+    const list = eligibleForRun();
+    setVisibility('queue');
+    if (list.length === 0) return;
+    // Stage everything into the shared `next` wall, then run the pass.
+    await stageAll(list.map((it) => it.id));
     await runArchitectOnScope({
       initiatives: list.map((it) => ({ id: it.id, title: it.title })),
       display: 'all',
+    });
+  };
+
+  // "Ejecutar cola" — run exactly what the operator staged (a curated
+  // subset), in roadmap order, skipping anything already complete.
+  const onRunQueue = async (): Promise<void> => {
+    const list = queueInitiatives().filter((it) => {
+      if (viewStore.isInitiativeArchived(it.id)) return false;
+      const tasks = tasksByInitiative().get(it.id) ?? [];
+      return tasks.some((t) => t.status !== 'done' && t.status !== 'cancelled');
+    });
+    if (list.length === 0) return;
+    await runArchitectOnScope({
+      initiatives: list.map((it) => ({ id: it.id, title: it.title })),
+      display: list.length === 1 ? 'single' : 'subset',
     });
   };
 
@@ -209,7 +286,6 @@ export default function InitiativesPanel() {
       <Show when={!isProjectEmpty()} fallback={<EmptyOnboardingPanel />}>
         <div class="rt-wrap">
           <header class="initiatives-header rt-header">
-            <span class="rt-h-title">Initiatives</span>
             <div class="initiatives-filters flex items-center gap-1 flex-shrink-0">
               <For each={VISIBILITY_FILTERS}>
                 {(f) => (
@@ -227,6 +303,24 @@ export default function InitiativesPanel() {
                   </button>
                 )}
               </For>
+              {/* QUEUE — the live execution wall. Distinct cyan accent +
+                  count badge so it reads as "what's set to run / running",
+                  not just another status filter. */}
+              <button
+                type="button"
+                onClick={() => setVisibility('queue')}
+                class={`px-2 py-1 rounded text-[10px] font-mono uppercase tracking-wider transition-colors inline-flex items-center gap-1.5 ${
+                  visibility() === 'queue'
+                    ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/40'
+                    : 'text-gray-500 hover:text-cyan-300 border border-transparent'
+                }`}
+                title="Cola de ejecución — historias en cola o ejecutándose ahora"
+              >
+                queue
+                <Show when={queueInitiatives().length > 0}>
+                  <span class="rt-queue-count">{queueInitiatives().length}</span>
+                </Show>
+              </button>
             </div>
             <input
               type="text"
@@ -279,9 +373,58 @@ export default function InitiativesPanel() {
 
           <RateLimitBanner />
 
+          {/* Queue wall control bar — progress + run/stop/clear. */}
+          <Show when={visibility() === 'queue'}>
+            <div class="rt-queuebar">
+              <div
+                class="rt-qbar-progress"
+                title={`${queueProgress().done}/${queueProgress().total} tareas completadas`}
+              >
+                <span class="rt-qbar-fill" style={{ width: `${queueProgress().pct}%` }} />
+              </div>
+              <span class="rt-qbar-stat">
+                {queueProgress().done}/{queueProgress().total} tareas · {queueInitiatives().length} en cola
+              </span>
+              <div class="ml-auto flex items-center gap-2 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => { void onRunQueue(); }}
+                  disabled={architectLive() || queueInitiatives().length === 0}
+                  class="rt-qbtn rt-qbtn-run"
+                  title="Ejecutar las historias en cola, en orden"
+                >
+                  ▶ Ejecutar cola
+                </button>
+                <Show when={architectLive()}>
+                  <button
+                    type="button"
+                    onClick={() => { void stopArchitect(); }}
+                    class="rt-qbtn rt-qbtn-stop"
+                    title="Parar la ejecución en curso"
+                  >
+                    ⏹ Parar
+                  </button>
+                </Show>
+                <button
+                  type="button"
+                  onClick={() => { void clearQueueWall(); }}
+                  disabled={queueInitiatives().length === 0}
+                  class="rt-qbtn rt-qbtn-clear"
+                  title="Vaciar la cola (no afecta a lo que ya se está ejecutando)"
+                >
+                  Borrar cola
+                </button>
+              </div>
+            </div>
+          </Show>
+
           <Show
             when={filtered().length > 0}
-            fallback={<NoMatch totalInitiatives={allInitiatives().length} />}
+            fallback={
+              visibility() === 'queue'
+                ? <QueueEmpty />
+                : <NoMatch totalInitiatives={allInitiatives().length} />
+            }
           >
             <div class="rt-timeline">
               <span class="rt-line" aria-hidden="true" />
@@ -311,8 +454,9 @@ export default function InitiativesPanel() {
                           tasks={tasksByInitiative().get(it.id) ?? []}
                           index={i() + 1}
                           isOpen={isOpen()}
-                          isDimmed={isDimmed()}
+                          isDimmed={visibility() !== 'queue' && isDimmed()}
                           onToggle={() => toggleOpen(it.id)}
+                          wall={visibility() === 'queue'}
                         />
                       </div>
                     );
@@ -328,6 +472,17 @@ export default function InitiativesPanel() {
         </div>
       </Show>
     </section>
+  );
+}
+
+function QueueEmpty() {
+  return (
+    <div class="text-center py-16 text-gray-500">
+      <p class="text-sm">La cola está vacía.</p>
+      <p class="text-xs text-gray-600 mt-2">
+        Pulsa ▶ en una historia para añadirla a la cola, o <span class="text-cyan-300/80">Run all</span> para encolar todo y arrancar.
+      </p>
+    </div>
   );
 }
 

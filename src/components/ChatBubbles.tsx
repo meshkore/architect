@@ -122,7 +122,7 @@ function enhanceCodeBlocks(root: HTMLElement): void {
  * component skips collapse entirely — operators want to watch text
  * grow, not see it clipped.
  */
-function CollapsibleText(props: {
+export function CollapsibleText(props: {
   text: string;
   lockExpanded?: boolean;
   markdown?: boolean;

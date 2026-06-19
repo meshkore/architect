@@ -20,7 +20,7 @@
  */
 
 import { createStore } from 'solid-js/store';
-import { createMemo } from 'solid-js';
+import { createMemo, createEffect, createRoot } from 'solid-js';
 import type { DaemonClient, ChatConvSummary } from '~/lib/daemon-client';
 import { chatStore } from '~/state/chat';
 import { log } from '~/lib/log';
@@ -49,6 +49,12 @@ export interface ServerTask {
   path?: string;
   depends_on?: string[];
   blocks?: string[];
+  // Standard v26 — resolution record pointers (the rich `## Resolution`
+  // body is fetched on demand via `path`).
+  completed_at?: string | null;
+  resolved_by?: string | null;
+  resolved_by_conv?: string | null;
+  commit_shas?: string[];
   [k: string]: unknown;
 }
 
@@ -248,6 +254,7 @@ function refreshNow(client: DaemonClient, key: string): Promise<void> {
  *  whenever daemonStore.state.activeId changes. */
 function setActiveCluster(key: string | null): void {
   activeClusterKey = key;
+  resetTaskConvMap();
   syncFacade();
 }
 
@@ -378,5 +385,43 @@ export const activeEntriesByInitiative = createMemo<Record<string, ChatConvSumma
   }
   return out;
 });
+
+/** task id → label of the agent working on it right now (agent_id when
+ *  set, else the conv slug). Drives the Queue wall's "who owns this task"
+ *  badge in front of each running task row. Up to 3 agents run at once,
+ *  each on a distinct task, so this is a clean 1:1 map. */
+export const activeAgentByTask = createMemo<Record<string, string>>(() => {
+  const out: Record<string, string> = {};
+  for (const c of allConvs()) {
+    if (!c.live || !c.task_id) continue;
+    out[c.task_id] = c.agent_id || c.conv;
+  }
+  return out;
+});
+
+// ── task → conv association (Queue wall summaries) ───────────────────
+// The daemon clears a conv's `task_id` once the task completes
+// (conv.task_completed), so a live-only lookup loses the link the moment
+// we most want it — to show the finished task's summary on the wall. We
+// accumulate the association as we observe each conv carry a task_id, and
+// keep it for the rest of the session. Reset on cluster switch so a
+// project's task ids never resolve to another project's conv.
+const [taskConvMap, setTaskConvMap] = createStore<Record<string, string>>({});
+createRoot(() => {
+  createEffect(() => {
+    for (const c of allConvs()) {
+      if (!c.task_id || !c.conv) continue;
+      if (taskConvMap[c.task_id] !== c.conv) setTaskConvMap(c.task_id, c.conv);
+    }
+  });
+});
+/** Reset the accumulated task→conv links (called on cluster switch). */
+export function resetTaskConvMap(): void {
+  setTaskConvMap(() => ({}));
+}
+/** Conv that worked (or is working) a given task this session, if known. */
+export function convForTask(taskId: string): string | undefined {
+  return taskConvMap[taskId];
+}
 
 log.debug('state/server loaded (py-1.11.0+ — convs-derived selectors)');

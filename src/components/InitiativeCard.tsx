@@ -18,14 +18,17 @@
  * Pre-V108 version preserved as InitiativeCard.legacy.tsx.bak.
  */
 
-import { For, Show, createEffect, createMemo, createResource } from 'solid-js';
+import { For, Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
 import type { ServerInitiative, ServerTask } from '~/state/server';
-import { activeEntriesByInitiative, activeTaskIds } from '~/state/server';
+import { activeEntriesByInitiative, activeTaskIds, activeAgentByTask, convForTask } from '~/state/server';
 import { sortTasks } from '~/components/initiative/task-grouping';
 import { chatStore } from '~/state/chat';
+import type { ChatMsg } from '~/state/chat';
 import { viewStore } from '~/state/view';
 import { daemonStore } from '~/state/daemon';
-import { runArchitectOnScope, stopArchitect } from '~/lib/architect-dispatch';
+import { stopArchitect } from '~/lib/architect-dispatch';
+import { isQueuedStatus, stageInitiative, unstageInitiative } from '~/lib/queue';
+import { CollapsibleText } from '~/components/ChatBubbles';
 import { parseInitiativeBody, displayTaskId } from '~/lib/task-id';
 
 type VisualState = 'active' | 'next' | 'running' | 'backlog' | 'done';
@@ -37,6 +40,9 @@ export default function InitiativeCard(props: {
   isOpen: boolean;
   isDimmed: boolean;
   onToggle: () => void;
+  /** Queue wall mode — tasks always render (no accordion) and each row
+   *  gets the rich live-output / summary detail below its title. */
+  wall?: boolean;
 }) {
   // ── Live agents working on this initiative (daemon-authoritative) ──
   const liveAgentsHere = createMemo(
@@ -44,24 +50,10 @@ export default function InitiativeCard(props: {
   );
   const isWorking = (): boolean => liveAgentsHere().length > 0;
 
-  /** Other activity = a SUBAGENT live in this cluster not on this
-   *  initiative. Used to disable the run button so we never spawn a
-   *  second architect over a busy roadmap.
-   *
-   *  A subagent has `parent_conv` set (it was spawned by another conv).
-   *  Operator-opened convs (master, custom user chats) do NOT have
-   *  `parent_conv` — including them in this check would make every
-   *  play button disabled while the operator is mid-chat with master,
-   *  which the operator reported 2026-06-10 as a regression. */
-  const otherActivityLive = createMemo<boolean>(() => {
-    for (const c of Object.values(chatStore.state.convs)) {
-      if (!c.live && !c.coordinating) continue;
-      if (c.initiative_id === props.initiative.id) continue;
-      if (!c.parent_conv) continue;
-      return true;
-    }
-    return false;
-  });
+  /** Staged for execution — sits in the shared `next` wall (status:next),
+   *  persisted on disk so a CLI agent sees it too. The node renders ✕ in
+   *  this state so a second click un-stages. */
+  const isQueued = (): boolean => isQueuedStatus(props.initiative.status);
 
   const done = createMemo(() => props.tasks.filter((t) => t.status === 'done').length);
   const isComplete = createMemo(
@@ -144,19 +136,20 @@ export default function InitiativeCard(props: {
 
   const sorted = createMemo(() => sortTasks(props.tasks));
 
-  /** Node click — separate from row click (which toggles open). */
+  /** Node click — separate from row click (which toggles open).
+   *  py-1.22+ (Queue wall): the ▶ no longer dispatches directly. It
+   *  STAGES the initiative into the queue (▶ → ✕). Execution is a
+   *  separate, deliberate step ("Ejecutar cola" / RUN ALL). While an
+   *  agent is working the node is the stop control, unchanged. */
   const onNodeClick = (e: MouseEvent): void => {
     e.stopPropagation();
     if (isWorking()) {
       void stopArchitect();
       return;
     }
-    if (otherActivityLive()) return;
-    if (vstate() === 'done' || vstate() === 'backlog') return;
-    void runArchitectOnScope({
-      initiatives: [{ id: props.initiative.id, title: props.initiative.title }],
-      display: 'single',
-    });
+    if (vstate() === 'done') return;
+    if (isQueued()) void unstageInitiative(props.initiative.id);
+    else void stageInitiative(props.initiative.id);
   };
 
   const onRowKey = (e: KeyboardEvent) => {
@@ -182,10 +175,9 @@ export default function InitiativeCard(props: {
       const who = liveAgentsHere().map((e) => e.agent_id || e.conv).join(' · ');
       return `Stop architect — ${who}`;
     }
-    if (otherActivityLive()) return 'Otra iniciativa en marcha; páralas primero';
-    if (vstate() === 'backlog') return 'Sin acción — backlog';
     if (vstate() === 'done') return 'Iniciativa completa';
-    return `Run initiative #${props.initiative.id}`;
+    if (isQueued()) return 'En cola — clic para sacarla de la cola';
+    return `Añadir a la cola — #${props.initiative.id}`;
   };
 
   let rowRef: HTMLLIElement | undefined;
@@ -225,10 +217,10 @@ export default function InitiativeCard(props: {
        *  ring around the circle (0..1 fraction of tasks done). */}
       <button
         type="button"
-        class={`rt-node is-${vstate()}`}
+        class={`rt-node is-${vstate()}${isQueued() && vstate() !== 'running' && vstate() !== 'done' ? ' is-queued' : ''}`}
         style={{ '--progress': String(progressPct() / 100) }}
         onClick={onNodeClick}
-        disabled={!isWorking() && otherActivityLive()}
+        disabled={vstate() === 'done'}
         title={nodeTitle()}
         aria-label={nodeTitle()}
       >
@@ -251,7 +243,25 @@ export default function InitiativeCard(props: {
             <path d="M5 12.5l4.5 4.5L19 7" />
           </svg>
         </Show>
-        <Show when={vstate() === 'active' || vstate() === 'next'}>
+        {/* Staged (not yet running) → ✕ so a second click un-stages. */}
+        <Show when={vstate() !== 'running' && vstate() !== 'done' && isQueued()}>
+          <svg
+            class="rt-x"
+            viewBox="0 0 24 24"
+            width="11"
+            height="11"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="3"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </Show>
+        {/* Idle, stageable → ▶ */}
+        <Show when={vstate() !== 'running' && vstate() !== 'done' && !isQueued()}>
           <span class="rt-play" aria-hidden="true" />
         </Show>
       </button>
@@ -328,9 +338,10 @@ export default function InitiativeCard(props: {
         </Show>
       </div>
 
-      {/* Body — tasks render lazily on first open */}
-      <Show when={props.isOpen}>
-        <div class={`rt-body ${props.isOpen ? 'open' : ''}`}>
+      {/* Body — tasks render on open; in the wall they're always shown
+       *  so the operator watches the story fill in real time. */}
+      <Show when={props.isOpen || props.wall}>
+        <div class={`rt-body ${props.isOpen || props.wall ? 'open' : ''}`}>
           <Show
             when={sorted().length > 0}
             fallback={
@@ -341,7 +352,7 @@ export default function InitiativeCard(props: {
           >
             <ul class="rt-tasks">
               <For each={sorted()}>
-                {(t) => <TaskRow task={t} />}
+                {(t) => <TaskRow task={t} wall={props.wall} />}
               </For>
             </ul>
           </Show>
@@ -408,13 +419,13 @@ const TASK_STATE_TITLE: Record<TaskVState, string> = {
   pending: 'Pendiente',
 };
 
-function TaskRow(props: { task: ServerTask }) {
+function TaskRow(props: { task: ServerTask; wall?: boolean }) {
   const live = (): boolean => activeTaskIds().has(props.task.id);
   const vstate = (): TaskVState => taskVState(props.task, live());
   const mods = (): string[] => taskModules(props.task);
   const stateTitle = (): string => TASK_STATE_TITLE[vstate()];
   return (
-    <li class={`rt-task is-${vstate()}`}>
+    <li class={`rt-task is-${vstate()}${props.wall ? ' rt-task-wall' : ''}`}>
       {/* Timeline thread marker — neutral, lights up only where work is
        *  live so the eye lands on the exact point of the roadmap that is
        *  active right now. */}
@@ -470,6 +481,128 @@ function TaskRow(props: { task: ServerTask }) {
           </For>
         </span>
       </Show>
+
+      {/* Queue wall — agent box + live output while working; collapsed
+       *  "ejecutado · hora · tokens ▾" summary line once finished. */}
+      <Show when={props.wall}>
+        <TaskWallDetail task={props.task} live={live()} />
+      </Show>
     </li>
+  );
+}
+
+// ── Queue-wall per-task detail (live output + collapsible summary) ─────
+
+function fmtStamp(iso: string): string {
+  if (!iso || iso.length < 16) return '';
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`; // YYYY-MM-DD HH:MM
+}
+
+/** Pull the `## Resolution` section body out of a task .md (Standard v26). */
+function extractResolution(body: string): string {
+  const m = /^##\s+Resolution[ \t]*$([\s\S]*?)(?=^##\s|\Z)/m.exec(body);
+  return m ? (m[1] ?? '').trim() : '';
+}
+
+function TaskWallDetail(props: { task: ServerTask; live: boolean }) {
+  const [expanded, setExpanded] = createSignal(false);
+  const conv = createMemo<string | undefined>(() => convForTask(props.task.id));
+
+  // Live output needs the conv's streaming messages. Lazy-hydrate once we
+  // know the conv (WS deltas keep it fresh after the first load).
+  createEffect(() => {
+    if (!props.live) return;
+    const c = conv();
+    if (!c) return;
+    const have = chatStore.state.convMap[c];
+    if (have && have.length > 0) return;
+    const client = daemonStore.state.client;
+    if (!client) return;
+    void chatStore.loadConvMessagesPage(client, c, { limit: 8 });
+  });
+
+  const msgs = (): ChatMsg[] => {
+    const c = conv();
+    return c ? (chatStore.state.convMap[c] ?? []) : [];
+  };
+  const liveTail = (): string => {
+    const m = [...msgs()].reverse().find((x) => x.kind === 'assistant' && x.streaming);
+    const t = (m?.text ?? '').trim();
+    return t.split('\n').slice(-6).join('\n');
+  };
+
+  // ── Persisted resolution (Standard v26) — survives reloads ──
+  // Frontmatter pointers come from /state; the rich body is fetched on
+  // expand. Falls back to the live conv's final message for tasks
+  // resolved before the daemon started persisting (graceful transition).
+  const [bodyRes] = createResource<string, { path: string }>(
+    () =>
+      expanded() && !props.live && props.task.path
+        ? { path: props.task.path }
+        : null,
+    async (input) => {
+      const client = daemonStore.state.client;
+      if (!client) return '';
+      const r = await client.readMarkdownFile(input.path);
+      return r.ok ? r.body : '';
+    },
+  );
+  const convFinal = (): string => {
+    const m = [...msgs()].reverse().find(
+      (x) => x.kind === 'assistant' && !x.streaming && !x.cancelled,
+    );
+    return (m?.text ?? '').trim();
+  };
+  const resolutionText = (): string => extractResolution(bodyRes() ?? '') || convFinal();
+
+  const completedStamp = (): string =>
+    fmtStamp(String(props.task.completed_at ?? ''));
+  const resolvedBy = (): string =>
+    activeAgentByTask()[props.task.id] ||
+    String(props.task.resolved_by ?? '') ||
+    chatStore.state.convs[conv() ?? '']?.agent_id ||
+    conv() ||
+    '—';
+  // A finished task shows the summary line when it has a persisted record
+  // OR (pre-bump) a recoverable conv final.
+  const hasResolution = (): boolean =>
+    !!props.task.completed_at || !!convFinal();
+
+  return (
+    <div class="rt-tw-detail" onClick={(e) => e.stopPropagation()}>
+      {/* While an agent is on this task: who + a live peek at its output. */}
+      <Show when={props.live}>
+        <div class="rt-tw-agentline">
+          <span class="rt-task-agent">{resolvedBy()}</span>
+          <span class="rt-tw-livedot" aria-hidden="true" />
+          <span class="rt-tw-working">trabajando…</span>
+        </div>
+        <Show when={liveTail()}>
+          <div class="rt-tw-output">{liveTail()}</div>
+        </Show>
+      </Show>
+
+      {/* Once finished: one collapsed line that unfolds the full summary. */}
+      <Show when={!props.live && hasResolution()}>
+        <button
+          type="button"
+          class="rt-tw-sumline"
+          onClick={(e) => { e.stopPropagation(); setExpanded(!expanded()); }}
+          title="Desplegar el resumen de esta tarea"
+        >
+          <span class="rt-tw-tri">{expanded() ? '▾' : '▸'}</span>
+          <span class="rt-task-agent">{resolvedBy()}</span>
+          <span class="rt-tw-meta">
+            ejecutado
+            <Show when={completedStamp()}>{' '}{completedStamp()}</Show>
+          </span>
+        </button>
+        <Show when={expanded()}>
+          <div class="rt-tw-summary">
+            <CollapsibleText text={resolutionText()} markdown />
+          </div>
+        </Show>
+      </Show>
+    </div>
   );
 }
