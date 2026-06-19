@@ -1682,6 +1682,26 @@
     }
     .col-header-row  { height: 38px; padding: 0 var(--col-pad-x); display: flex; align-items: center; border-bottom: 1px solid var(--border-bar); flex-shrink: 0; background: var(--bg-bar); box-shadow: 0 1px 0 var(--border-col-glow); }
     .col-subheader-row { height: 38px; padding: 0 var(--col-pad-x); display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border-bar); flex-shrink: 0; background: var(--bg-bar); }
+
+    /* 2026-06-19 — unified column-header chrome across the 3 columns
+       (modules · agents/chat · roadmap). One title style, one grip→text
+       gap (the grip's own 6px margin-right is the single spacer, so the
+       lead cluster adds NO extra gap → 6px everywhere). */
+    .col-bar-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: var(--fs-title, 11px);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-weight: 600;
+      color: #6b7280;
+      background: transparent;
+      border: 0;
+      padding: 0;
+      cursor: pointer;
+      transition: color .15s ease;
+    }
+    .col-bar-title:hover { color: #6ee7b7; }
+    .col-bar-lead { display: flex; align-items: center; min-width: 0; }
     .subtab:hover { color: #d1d5db; }
     .subtab.active { color: #f3f4f6; background: linear-gradient(180deg, color-mix(in srgb, var(--theme-accent) 6%, transparent) 0%, color-mix(in srgb, var(--theme-accent) 0%, transparent) 100%); }
     .subtab.active::after { content: ''; position: absolute; bottom: -1px; left: 8px; right: 8px; height: 2px; background: linear-gradient(90deg,var(--theme-accent-bright, #34d399),#6ee7b7); border-radius: 1px 1px 0 0; box-shadow: 0 0 8px color-mix(in srgb, var(--theme-accent-bright) 50%, transparent); }

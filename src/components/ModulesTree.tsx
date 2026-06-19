@@ -38,14 +38,13 @@ export default function ModulesTree(props: { selected: string | null; onSelect: 
           como las letras tienen su padding arriba, izquierda,
           derecha, abajo." */}
       <div class="col-header-row" style={{ 'justify-content': 'space-between', gap: '8px' }}>
-        <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
+        <div class="col-bar-lead">
           <ColumnDragGrip panelId="nav" />
           <button
             type="button"
             onClick={() => uiStore.toggleModulesCollapsed()}
             title="Collapse modules column"
-            style={{ 'font-size': 'var(--fs-title, 11px)' }}
-            class="font-mono uppercase tracking-wider text-gray-500 hover:text-emerald-300 transition-colors bg-transparent border-0 p-0 cursor-pointer"
+            class="col-bar-title"
           >
             Modules
           </button>

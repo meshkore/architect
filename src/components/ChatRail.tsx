@@ -28,7 +28,7 @@ const MEDIUM_THRESHOLD_PX = 160;
 // stable creation-order + drag-override body, irrespective of whether
 // the conv is a service or a custom worker).
 
-export default function ChatRail(props: { onNewAgent?: () => void }) {
+export default function ChatRail() {
   const [order, setOrder] = createSignal<string[]>(loadRailOrder());
   const [dragSrc, setDragSrc] = createSignal<string | null>(null);
   const [dragTgt, setDragTgt] = createSignal<string | null>(null);
@@ -163,19 +163,8 @@ export default function ChatRail(props: { onNewAgent?: () => void }) {
 
   return (
     <aside class={`chat-rail-stack ${compact() ? 'compact' : ''}`}>
-      <div class="chat-rail-header">
-        <Show when={!compact()} fallback={
-          <span class="chat-rail-header-label" title="Agents" aria-label="Agents">···</span>
-        }>
-          <span class="chat-rail-header-label">Agents</span>
-        </Show>
-        <button
-          type="button"
-          onClick={() => props.onNewAgent?.()}
-          class="chat-rail-new-btn"
-          title="New agent / conversation"
-        >＋</button>
-      </div>
+      {/* 2026-06-19 — the rail header (Agents + "+") moved up into the
+          chat column's top bar (ChatColumn). The rail is just the list. */}
       <div class="flex-1 min-h-0 overflow-y-auto chat-rail-pinned chat-rail-list">
         <For each={orderedConvs()}>
           {(c) => {

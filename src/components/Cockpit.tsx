@@ -431,19 +431,29 @@ function WorkspaceColumn(props: {
 }
 
 function ChatColumn(props: { selectedModule: string | null }) {
-  // The chat column never had its own header bar in the legacy
-  // layout — the operator just sees the agent-rail's "Agents"
-  // header on the left and the thread on the right. We add a 38-px
-  // `.col-header-row` matching the other two columns so the drag
-  // grip aligns with theirs. No "Chat" label inside — the column's
-  // identity is obvious from its content, no need to duplicate.
+  // 2026-06-19 — the chat column's top `.col-header-row` used to hold
+  // only the drag grip (an empty black bar). It now carries the column's
+  // identity title "Agents" + the new-agent "+" on the right — mirroring
+  // MODULES (title left) and ROADMAP (actions right). The agent rail below
+  // drops its own header and is just the list. The thread keeps its own
+  // scope strip unchanged.
+  const onNewAgent = () => openNewAgentWizard({ scope: { module: props.selectedModule } });
   return (
     <div data-panel-id="chat" class="center-col col" id="chat-col">
-      <div class="col-header-row" style={{ 'justify-content': 'flex-start' }}>
-        <ColumnDragGrip panelId="chat" />
+      <div class="col-header-row" style={{ 'justify-content': 'space-between', gap: '8px' }}>
+        <div class="col-bar-lead">
+          <ColumnDragGrip panelId="chat" />
+          <span class="col-bar-title" style={{ cursor: 'default' }}>Agents</span>
+        </div>
+        <button
+          type="button"
+          onClick={onNewAgent}
+          class="chat-rail-new-btn"
+          title="New agent / conversation"
+        >＋</button>
       </div>
       <div class="chat-body flex-1 flex min-h-0">
-        <ChatRail onNewAgent={() => openNewAgentWizard({ scope: { module: props.selectedModule } })} />
+        <ChatRail />
         <Splitter resize="chat-rail" title="Drag to resize agent rail" />
         <div class="chat-main flex-1 flex flex-col min-h-0">
           <ChatPanel />
