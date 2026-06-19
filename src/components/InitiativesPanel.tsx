@@ -32,7 +32,7 @@ import { viewStore } from '~/state/view';
 import { chatStore } from '~/state/chat';
 import { daemonStore, daemonHealth } from '~/state/daemon';
 import { runArchitectOnScope, stopArchitect } from '~/lib/architect-dispatch';
-import { isQueuedStatus, clearQueue as clearQueueWall } from '~/lib/queue';
+import { isQueued, queuedIds, clearQueue, setQueue } from '~/lib/queue';
 import { log } from '~/lib/log';
 
 type VisibilityFilter = 'all' | 'active' | 'backlog' | 'archived' | 'queue';
@@ -78,16 +78,27 @@ export default function InitiativesPanel() {
       if (!q) return true;
       return `${it.title} ${it.id} ${it.oneliner ?? ''}`.toLowerCase().includes(q);
     };
-    const list = allInitiatives().filter((it) => {
-      // QUEUE wall — staged for execution OR currently being worked on.
-      // Ignores the usual active/archived/backlog/done partitioning: this
-      // is "what's going to run + what's running", in roadmap order.
-      if (vis === 'queue') {
-        const queued = isQueuedStatus(it.status); // shared `next` wall
-        const live = (liveByInit[it.id]?.length ?? 0) > 0;
-        if (!queued && !live) return false;
-        return matchesQuery(it);
+    // QUEUE — the ephemeral, in-memory execution list (NOT a wall). Items
+    // here are still wherever they live on the roadmap; this is just "what
+    // will run". Order = the operator's insertion order. Live-but-not-
+    // queued initiatives are appended so a running item stays visible.
+    if (vis === 'queue') {
+      const order = queuedIds();
+      const inQ = new Set(order);
+      const byId = new Map(allInitiatives().map((it) => [it.id, it] as const));
+      const out: ServerInitiative[] = [];
+      for (const id of order) {
+        const it = byId.get(id);
+        if (it && matchesQuery(it)) out.push(it);
       }
+      for (const it of allInitiatives()) {
+        if (inQ.has(it.id)) continue;
+        if ((liveByInit[it.id]?.length ?? 0) > 0 && matchesQuery(it)) out.push(it);
+      }
+      return out;
+    }
+
+    const list = allInitiatives().filter((it) => {
       const isDone = it.status === 'done';
       const isArchManual = viewStore.isInitiativeArchived(it.id) && it.status !== 'active';
       const isArchived = isDone || isArchManual;
@@ -117,15 +128,6 @@ export default function InitiativesPanel() {
         if (!cb) return -1;
         return cb.localeCompare(ca);
       });
-    }
-    if (vis === 'queue') {
-      // Execution order = the operator's `wall_order` (asc), the same key
-      // a CLI agent sorts by. Missing wall_order sinks to the end.
-      const wo = (it: ServerInitiative): number => {
-        const v = (it as Record<string, unknown>).wall_order;
-        return typeof v === 'number' ? v : Number.MAX_SAFE_INTEGER;
-      };
-      return list.slice().sort((a, b) => wo(a) - wo(b));
     }
     return list;
   });
@@ -203,14 +205,38 @@ export default function InitiativesPanel() {
     return !!s && (s.live || s.coordinating);
   });
 
-  // ── Queue wall — derived state ──────────────────────────────────────
-  /** Initiatives shown on the wall: staged by the operator OR live now,
-   *  in roadmap order. Source of truth for the wall's progress + run. */
+  // ── Execution queue — derived state ─────────────────────────────────
+  /** Initiatives in the queue (operator insertion order) PLUS anything
+   *  live-but-not-queued, appended. Source of truth for the bar + run. */
   const queueInitiatives = createMemo<ServerInitiative[]>(() => {
-    const liveByInit = activeEntriesByInitiative();
-    return allInitiatives().filter(
-      (it) => isQueuedStatus(it.status) || (liveByInit[it.id]?.length ?? 0) > 0,
-    );
+    const order = queuedIds();
+    const inQ = new Set(order);
+    const byId = new Map(allInitiatives().map((it) => [it.id, it] as const));
+    const live = activeEntriesByInitiative();
+    const out: ServerInitiative[] = [];
+    for (const id of order) { const it = byId.get(id); if (it) out.push(it); }
+    for (const it of allInitiatives()) {
+      if (!inQ.has(it.id) && (live[it.id]?.length ?? 0) > 0) out.push(it);
+    }
+    return out;
+  });
+
+  // Auto-prune: an initiative that finished (all tasks done, or status
+  // done) leaves the queue — "execute → it's done → it's gone". Pure list
+  // hygiene; nothing on the roadmap is touched here.
+  createEffect(() => {
+    const order = queuedIds();
+    if (order.length === 0) return;
+    const byId = new Map(allInitiatives().map((it) => [it.id, it] as const));
+    const tbi = tasksByInitiative();
+    const keep = order.filter((id) => {
+      const it = byId.get(id);
+      if (!it) return true; // unknown (snapshot lag) — keep, don't drop blindly
+      const tasks = tbi.get(id) ?? [];
+      const complete = tasks.length > 0 && tasks.every((t) => t.status === 'done');
+      return it.status !== 'done' && !complete;
+    });
+    if (keep.length !== order.length) setQueue(keep);
   });
   /** Aggregate task progress across the whole wall (done / total). */
   const queueProgress = createMemo<{ done: number; total: number; pct: number }>(() => {
@@ -339,7 +365,7 @@ export default function InitiativesPanel() {
                       <button
                         type="button"
                         class="rt-qbtn rt-qbtn-stop"
-                        onClick={() => { void clearQueueWall(); setConfirmingReset(false); }}
+                        onClick={() => { clearQueue(); setConfirmingReset(false); }}
                       >Sí</button>
                       <button
                         type="button"
@@ -399,9 +425,9 @@ export default function InitiativesPanel() {
                           tasks={tasksByInitiative().get(it.id) ?? []}
                           index={i() + 1}
                           isOpen={isOpen()}
-                          isDimmed={visibility() !== 'queue' && isDimmed()}
+                          isDimmed={isDimmed()}
                           onToggle={() => toggleOpen(it.id)}
-                          wall={visibility() === 'queue'}
+                          archived={visibility() === 'archived'}
                         />
                       </div>
                     );
@@ -425,7 +451,7 @@ function QueueEmpty() {
     <div class="text-center py-16 text-gray-500">
       <p class="text-sm">La cola está vacía.</p>
       <p class="text-xs text-gray-600 mt-2">
-        Pulsa ▶ en una historia (en <span class="text-amber-300/80">active</span> o <span class="text-gray-400">backlog</span>) para añadirla a la cola; luego <span class="text-cyan-300/80">Ejecutar cola</span>.
+        Pulsa <span class="text-cyan-300/80">＋</span> en una historia <span class="text-amber-300/80">active</span> para añadirla a la cola; luego <span class="text-cyan-300/80">Ejecutar cola</span>. La cola es temporal — no mueve nada del roadmap.
       </p>
     </div>
   );

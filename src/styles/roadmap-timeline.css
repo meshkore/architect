@@ -292,29 +292,18 @@
   }
 }
 
-/* Inner icon — play triangle */
-.rt-node .rt-play {
-  width: 0;
-  height: 0;
-  border-left: 7px solid currentColor;
-  border-top: 5px solid transparent;
-  border-bottom: 5px solid transparent;
-  margin-left: 2px;
-}
+/* Inner icons — all stroke=currentColor so they take the node's state
+   colour. ＋ (enqueue), queued list-glyph, promote ↑, done ✓. */
+.rt-node .rt-plus,
+.rt-node .rt-queued,
+.rt-node .rt-promote,
+.rt-node .rt-check { color: currentColor; }
 /* Stop square (running) */
 .rt-node .rt-stop {
   width: 9px;
   height: 9px;
   background: currentColor;
   border-radius: 1px;
-}
-/* Done check */
-.rt-node .rt-check {
-  color: currentColor;
-}
-/* Un-stage cross (queued, not yet running) */
-.rt-node .rt-x {
-  color: currentColor;
 }
 /* Staged for execution — cyan accent so it reads as "queued to run". */
 .rt-node.is-queued {
@@ -873,77 +862,60 @@
   white-space: nowrap;
 }
 
-/* ── Wall task rows — rich per-task detail under the title ──────────── */
-.rt-task-wall { flex-wrap: wrap; }
-.rt-tw-detail {
+/* ── Archived task rows — the execution registry ────────────────────────
+   An archived task shows its durable record: who/when, description,
+   execution summary, and the files it touched. Drops the in-flight noise
+   (live output, spinners). This is what the diary is built from. */
+.rt-task-archived { flex-wrap: wrap; }
+.rt-arch-detail {
   flex-basis: 100%;
   width: 100%;
-  margin: 4px 0 2px 26px;   /* indent under the title, clear of the glyph */
+  margin: 5px 0 4px 26px;       /* indent under the title, clear of the glyph */
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
 }
-.rt-tw-agentline {
+.rt-arch-meta {
   display: flex;
   align-items: center;
   gap: 7px;
   font-size: 10px;
   color: #94a3b8;
 }
-.rt-tw-livedot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: #22d3ee;
-  box-shadow: 0 0 6px 1px rgba(34, 211, 238, .6);
-  animation: rt-tw-pulse 1.2s ease-in-out infinite;
-}
-@keyframes rt-tw-pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
-.rt-tw-working { font-style: italic; opacity: .8; }
-.rt-tw-output {
-  margin-top: 5px;
-  padding: 7px 9px;
-  max-height: 6.2em;
-  overflow: hidden;
-  border-left: 2px solid rgba(34, 211, 238, .35);
-  border-radius: 0 6px 6px 0;
-  background: rgba(15, 23, 32, .55);
-  color: #cbd5e1;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10.5px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  -webkit-mask-image: linear-gradient(180deg, transparent, #000 14px);
-  mask-image: linear-gradient(180deg, transparent, #000 14px);
-}
-.rt-tw-sumline {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 3px 0;
-  background: none;
-  border: 0;
-  cursor: pointer;
-  color: #94a3b8;
-  font-size: 10px;
-}
-.rt-tw-sumline:hover { color: #cbd5e1; }
-.rt-tw-tri {
-  color: #64748b;
-  font-size: 9px;
-  width: 9px;
-  display: inline-block;
-}
-.rt-tw-meta {
+.rt-arch-stamp {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   letter-spacing: .02em;
+  color: #64748b;
 }
-.rt-tw-summary {
-  margin-top: 6px;
-  padding: 8px 10px;
-  border-left: 2px solid rgba(52, 211, 153, .35);
+.rt-arch-block { display: flex; flex-direction: column; gap: 3px; }
+.rt-arch-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  color: #64748b;
+}
+.rt-arch-body {
+  padding: 7px 10px;
+  border-left: 2px solid rgba(52, 211, 153, .30);
   border-radius: 0 6px 6px 0;
   background: rgba(15, 23, 32, .5);
   font-size: 11.5px;
+  line-height: 1.55;
   color: #d1d5db;
+}
+.rt-arch-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.rt-arch-file {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(148, 163, 184, .10);
+  border: 1px solid rgba(148, 163, 184, .18);
+  color: #cbd5e1;
 }
 
 /* Reduced motion — kill the height/opacity transitions */

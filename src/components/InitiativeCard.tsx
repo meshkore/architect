@@ -18,7 +18,7 @@
  * Pre-V108 version preserved as InitiativeCard.legacy.tsx.bak.
  */
 
-import { For, Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
+import { For, Show, createEffect, createMemo, createResource } from 'solid-js';
 import type { ServerInitiative, ServerTask } from '~/state/server';
 import { activeEntriesByInitiative, activeTaskIds, activeAgentByTask, convForTask } from '~/state/server';
 import { sortTasks } from '~/components/initiative/task-grouping';
@@ -27,7 +27,7 @@ import type { ChatMsg } from '~/state/chat';
 import { viewStore } from '~/state/view';
 import { daemonStore } from '~/state/daemon';
 import { stopArchitect } from '~/lib/architect-dispatch';
-import { isQueuedStatus, stageInitiative, unstageInitiative } from '~/lib/queue';
+import { isQueued as isQueuedFn, stageInitiative, unstageInitiative } from '~/lib/queue';
 import { CollapsibleText } from '~/components/ChatBubbles';
 import { parseInitiativeBody, displayTaskId } from '~/lib/task-id';
 
@@ -40,9 +40,11 @@ export default function InitiativeCard(props: {
   isOpen: boolean;
   isDimmed: boolean;
   onToggle: () => void;
-  /** Queue wall mode — tasks always render (no accordion) and each row
-   *  gets the rich live-output / summary detail below its title. */
-  wall?: boolean;
+  /** Archived (execution-registry) mode — when expanded, each task row
+   *  shows its execution detail: description + resolution summary +
+   *  modified files. The card is otherwise rendered exactly like the
+   *  active roadmap (same density, same accordion). */
+  archived?: boolean;
 }) {
   // ── Live agents working on this initiative (daemon-authoritative) ──
   const liveAgentsHere = createMemo(
@@ -50,10 +52,11 @@ export default function InitiativeCard(props: {
   );
   const isWorking = (): boolean => liveAgentsHere().length > 0;
 
-  /** Staged for execution — sits in the shared `next` wall (status:next),
-   *  persisted on disk so a CLI agent sees it too. The node renders ✕ in
-   *  this state so a second click un-stages. */
-  const isQueued = (): boolean => isQueuedStatus(props.initiative.status);
+  /** In the (ephemeral, in-memory) execution queue. Decoupled from the
+   *  roadmap walls — the item stays `active` whether or not it's queued.
+   *  The node renders the "queued" glyph in this state so a second click
+   *  removes it from the queue. */
+  const isQueued = (): boolean => isQueuedFn(props.initiative.id);
 
   const done = createMemo(() => props.tasks.filter((t) => t.status === 'done').length);
   const isComplete = createMemo(
@@ -136,20 +139,28 @@ export default function InitiativeCard(props: {
 
   const sorted = createMemo(() => sortTasks(props.tasks));
 
-  /** Node click — separate from row click (which toggles open).
-   *  py-1.22+ (Queue wall): the ▶ no longer dispatches directly. It
-   *  STAGES the initiative into the queue (▶ → ✕). Execution is a
-   *  separate, deliberate step ("Ejecutar cola" / RUN ALL). While an
-   *  agent is working the node is the stop control, unchanged. */
+  /** Promote a backlog initiative onto the active wall (a real roadmap
+   *  move, unlike enqueuing). */
+  const promoteToActive = async (): Promise<void> => {
+    const client = daemonStore.state.client;
+    if (!client) return;
+    await client.initiativeReorder(props.initiative.id, 'active', 0);
+  };
+
+  /** Node click — separate from row click (which toggles open). Action
+   *  depends on the state:
+   *    running  → stop the architect.
+   *    done     → locked (no-op; the work is finished).
+   *    backlog  → promote to active (＋ becomes a promote glyph here).
+   *    active   → enqueue (＋) / dequeue (queued glyph). Pure in-memory
+   *               queue op — nothing on the roadmap moves. */
   const onNodeClick = (e: MouseEvent): void => {
     e.stopPropagation();
-    if (isWorking()) {
-      void stopArchitect();
-      return;
-    }
+    if (isWorking()) { void stopArchitect(); return; }
     if (vstate() === 'done') return;
-    if (isQueued()) void unstageInitiative(props.initiative.id);
-    else void stageInitiative(props.initiative.id);
+    if (vstate() === 'backlog') { void promoteToActive(); return; }
+    if (isQueued()) unstageInitiative(props.initiative.id);
+    else stageInitiative(props.initiative.id);
   };
 
   const onRowKey = (e: KeyboardEvent) => {
@@ -175,8 +186,9 @@ export default function InitiativeCard(props: {
       const who = liveAgentsHere().map((e) => e.agent_id || e.conv).join(' · ');
       return `Stop architect — ${who}`;
     }
-    if (vstate() === 'done') return 'Iniciativa completa';
-    if (isQueued()) return 'En cola — clic para sacarla de la cola';
+    if (vstate() === 'done') return 'Completada — archivada (no se puede mover)';
+    if (vstate() === 'backlog') return 'Pasar a activo';
+    if (isQueued()) return 'En cola — clic para quitarla';
     return `Añadir a la cola — #${props.initiative.id}`;
   };
 
@@ -217,52 +229,44 @@ export default function InitiativeCard(props: {
        *  ring around the circle (0..1 fraction of tasks done). */}
       <button
         type="button"
-        class={`rt-node is-${vstate()}${isQueued() && vstate() !== 'running' && vstate() !== 'done' ? ' is-queued' : ''}`}
+        class={`rt-node is-${vstate()}${isQueued() && vstate() !== 'running' && vstate() !== 'done' && vstate() !== 'backlog' ? ' is-queued' : ''}`}
         style={{ '--progress': String(progressPct() / 100) }}
         onClick={onNodeClick}
         disabled={vstate() === 'done'}
         title={nodeTitle()}
         aria-label={nodeTitle()}
       >
+        {/* running → stop */}
         <Show when={vstate() === 'running'}>
           <span class="rt-stop" aria-hidden="true" />
         </Show>
+        {/* done → ✓ (locked) */}
         <Show when={vstate() === 'done'}>
-          <svg
-            class="rt-check"
-            viewBox="0 0 24 24"
-            width="11"
-            height="11"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="3"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
+          <svg class="rt-check" viewBox="0 0 24 24" width="12" height="12" fill="none"
+            stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M5 12.5l4.5 4.5L19 7" />
           </svg>
         </Show>
-        {/* Staged (not yet running) → ✕ so a second click un-stages. */}
-        <Show when={vstate() !== 'running' && vstate() !== 'done' && isQueued()}>
-          <svg
-            class="rt-x"
-            viewBox="0 0 24 24"
-            width="11"
-            height="11"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="3"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M6 6l12 12M18 6L6 18" />
+        {/* backlog → promote-to-active (up arrow) */}
+        <Show when={vstate() === 'backlog'}>
+          <svg class="rt-promote" viewBox="0 0 24 24" width="13" height="13" fill="none"
+            stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 19V6M6 12l6-6 6 6" />
           </svg>
         </Show>
-        {/* Idle, stageable → ▶ */}
-        <Show when={vstate() !== 'running' && vstate() !== 'done' && !isQueued()}>
-          <span class="rt-play" aria-hidden="true" />
+        {/* active + queued → "in queue" glyph (stacked list); click removes */}
+        <Show when={vstate() !== 'running' && vstate() !== 'done' && vstate() !== 'backlog' && isQueued()}>
+          <svg class="rt-queued" viewBox="0 0 24 24" width="13" height="13" fill="none"
+            stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 7h16M4 12h16M4 17h10" />
+          </svg>
+        </Show>
+        {/* active + not queued → chunky ＋ (enqueue) */}
+        <Show when={vstate() !== 'running' && vstate() !== 'done' && vstate() !== 'backlog' && !isQueued()}>
+          <svg class="rt-plus" viewBox="0 0 24 24" width="14" height="14" fill="none"
+            stroke="currentColor" stroke-width="3.2" stroke-linecap="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
         </Show>
       </button>
 
@@ -338,10 +342,10 @@ export default function InitiativeCard(props: {
         </Show>
       </div>
 
-      {/* Body — tasks render on open; in the wall they're always shown
-       *  so the operator watches the story fill in real time. */}
-      <Show when={props.isOpen || props.wall}>
-        <div class={`rt-body ${props.isOpen || props.wall ? 'open' : ''}`}>
+      {/* Body — tasks render on open (accordion). Identical in every view;
+       *  archived adds the per-task execution detail (registry). */}
+      <Show when={props.isOpen}>
+        <div class="rt-body open">
           <Show
             when={sorted().length > 0}
             fallback={
@@ -352,7 +356,7 @@ export default function InitiativeCard(props: {
           >
             <ul class="rt-tasks">
               <For each={sorted()}>
-                {(t) => <TaskRow task={t} wall={props.wall} />}
+                {(t) => <TaskRow task={t} archived={props.archived} />}
               </For>
             </ul>
           </Show>
@@ -419,13 +423,13 @@ const TASK_STATE_TITLE: Record<TaskVState, string> = {
   pending: 'Pendiente',
 };
 
-function TaskRow(props: { task: ServerTask; wall?: boolean }) {
+function TaskRow(props: { task: ServerTask; archived?: boolean }) {
   const live = (): boolean => activeTaskIds().has(props.task.id);
   const vstate = (): TaskVState => taskVState(props.task, live());
   const mods = (): string[] => taskModules(props.task);
   const stateTitle = (): string => TASK_STATE_TITLE[vstate()];
   return (
-    <li class={`rt-task is-${vstate()}${props.wall ? ' rt-task-wall' : ''}`}>
+    <li class={`rt-task is-${vstate()}${props.archived ? ' rt-task-archived' : ''}`}>
       {/* Timeline thread marker — neutral, lights up only where work is
        *  live so the eye lands on the exact point of the roadmap that is
        *  active right now. */}
@@ -482,16 +486,21 @@ function TaskRow(props: { task: ServerTask; wall?: boolean }) {
         </span>
       </Show>
 
-      {/* Queue wall — agent box + live output while working; collapsed
-       *  "ejecutado · hora · tokens ▾" summary line once finished. */}
-      <Show when={props.wall}>
-        <TaskWallDetail task={props.task} live={live()} />
+      {/* Archived (registry) — description + execution summary + the
+       *  files that were modified. */}
+      <Show when={props.archived}>
+        <TaskArchivedDetail task={props.task} />
       </Show>
     </li>
   );
 }
 
-// ── Queue-wall per-task detail (live output + collapsible summary) ─────
+// ── Archived per-task detail = the execution registry ─────────────────
+// Each archived task is the canonical record of what was done: its
+// description, the execution summary (`## Resolution`, Standard v26), and
+// the files/scripts that were modified. This is the source the diary is
+// generated from, so it deliberately drops the in-flight noise (live
+// output, spinners) and keeps the durable facts.
 
 function fmtStamp(iso: string): string {
   if (!iso || iso.length < 16) return '';
@@ -504,42 +513,37 @@ function extractResolution(body: string): string {
   return m ? (m[1] ?? '').trim() : '';
 }
 
-function TaskWallDetail(props: { task: ServerTask; live: boolean }) {
-  const [expanded, setExpanded] = createSignal(false);
+/** The task description = the body intro (after frontmatter + H1 title,
+ *  before the first `##` section). */
+function extractDescription(body: string): string {
+  let b = body.replace(/^---\n[\s\S]*?\n---\n?/, ''); // strip frontmatter
+  b = b.replace(/^#\s+.*\n?/, '');                     // strip H1 title
+  const idx = b.search(/^##\s/m);
+  return (idx >= 0 ? b.slice(0, idx) : b).trim();
+}
+
+/** Files modified by the task — `files_changed` once the daemon records
+ *  it (QX5); falls back to the commit SHAs we already persist. */
+function taskFiles(task: ServerTask): string[] {
+  const raw = task as Record<string, unknown>;
+  const fc = Array.isArray(raw.files_changed) ? (raw.files_changed as unknown[]) : null;
+  if (fc) return fc.filter((x): x is string => typeof x === 'string' && x.length > 0);
+  return [];
+}
+function taskCommits(task: ServerTask): string[] {
+  const raw = task as Record<string, unknown>;
+  const cs = Array.isArray(raw.commit_shas) ? (raw.commit_shas as unknown[]) : null;
+  if (cs) return cs.filter((x): x is string => typeof x === 'string' && x.length > 0).map((s) => s.slice(0, 9));
+  return [];
+}
+
+function TaskArchivedDetail(props: { task: ServerTask }) {
   const conv = createMemo<string | undefined>(() => convForTask(props.task.id));
 
-  // Live output needs the conv's streaming messages. Lazy-hydrate once we
-  // know the conv (WS deltas keep it fresh after the first load).
-  createEffect(() => {
-    if (!props.live) return;
-    const c = conv();
-    if (!c) return;
-    const have = chatStore.state.convMap[c];
-    if (have && have.length > 0) return;
-    const client = daemonStore.state.client;
-    if (!client) return;
-    void chatStore.loadConvMessagesPage(client, c, { limit: 8 });
-  });
-
-  const msgs = (): ChatMsg[] => {
-    const c = conv();
-    return c ? (chatStore.state.convMap[c] ?? []) : [];
-  };
-  const liveTail = (): string => {
-    const m = [...msgs()].reverse().find((x) => x.kind === 'assistant' && x.streaming);
-    const t = (m?.text ?? '').trim();
-    return t.split('\n').slice(-6).join('\n');
-  };
-
-  // ── Persisted resolution (Standard v26) — survives reloads ──
-  // Frontmatter pointers come from /state; the rich body is fetched on
-  // expand. Falls back to the live conv's final message for tasks
-  // resolved before the daemon started persisting (graceful transition).
+  // The rich body (description + resolution) lives in the task .md; fetch
+  // it once when this row mounts (the parent initiative is already open).
   const [bodyRes] = createResource<string, { path: string }>(
-    () =>
-      expanded() && !props.live && props.task.path
-        ? { path: props.task.path }
-        : null,
+    () => (props.task.path ? { path: props.task.path } : null),
     async (input) => {
       const client = daemonStore.state.client;
       if (!client) return '';
@@ -547,61 +551,62 @@ function TaskWallDetail(props: { task: ServerTask; live: boolean }) {
       return r.ok ? r.body : '';
     },
   );
+  const body = (): string => bodyRes() ?? '';
+
+  // Fallback summary: the live conv's final message, for tasks resolved
+  // before the daemon began persisting `## Resolution` (graceful).
   const convFinal = (): string => {
-    const m = [...msgs()].reverse().find(
-      (x) => x.kind === 'assistant' && !x.streaming && !x.cancelled,
-    );
+    const c = conv();
+    const msgs = c ? (chatStore.state.convMap[c] ?? []) : [];
+    const m = [...msgs].reverse().find((x: ChatMsg) => x.kind === 'assistant' && !x.streaming && !x.cancelled);
     return (m?.text ?? '').trim();
   };
-  const resolutionText = (): string => extractResolution(bodyRes() ?? '') || convFinal();
 
-  const completedStamp = (): string =>
-    fmtStamp(String(props.task.completed_at ?? ''));
+  const description = (): string => extractDescription(body());
+  const resolution = (): string => extractResolution(body()) || convFinal();
+  const files = (): string[] => taskFiles(props.task);
+  const commits = (): string[] => taskCommits(props.task);
+  const completedStamp = (): string => fmtStamp(String(props.task.completed_at ?? ''));
   const resolvedBy = (): string =>
-    activeAgentByTask()[props.task.id] ||
     String(props.task.resolved_by ?? '') ||
+    activeAgentByTask()[props.task.id] ||
     chatStore.state.convs[conv() ?? '']?.agent_id ||
-    conv() ||
     '—';
-  // A finished task shows the summary line when it has a persisted record
-  // OR (pre-bump) a recoverable conv final.
-  const hasResolution = (): boolean =>
-    !!props.task.completed_at || !!convFinal();
 
   return (
-    <div class="rt-tw-detail" onClick={(e) => e.stopPropagation()}>
-      {/* While an agent is on this task: who + a live peek at its output. */}
-      <Show when={props.live}>
-        <div class="rt-tw-agentline">
+    <div class="rt-arch-detail" onClick={(e) => e.stopPropagation()}>
+      <Show when={resolvedBy() !== '—' || completedStamp()}>
+        <div class="rt-arch-meta">
           <span class="rt-task-agent">{resolvedBy()}</span>
-          <span class="rt-tw-livedot" aria-hidden="true" />
-          <span class="rt-tw-working">trabajando…</span>
+          <Show when={completedStamp()}>
+            <span class="rt-arch-stamp">· {completedStamp()}</span>
+          </Show>
         </div>
-        <Show when={liveTail()}>
-          <div class="rt-tw-output">{liveTail()}</div>
-        </Show>
       </Show>
 
-      {/* Once finished: one collapsed line that unfolds the full summary. */}
-      <Show when={!props.live && hasResolution()}>
-        <button
-          type="button"
-          class="rt-tw-sumline"
-          onClick={(e) => { e.stopPropagation(); setExpanded(!expanded()); }}
-          title="Desplegar el resumen de esta tarea"
-        >
-          <span class="rt-tw-tri">{expanded() ? '▾' : '▸'}</span>
-          <span class="rt-task-agent">{resolvedBy()}</span>
-          <span class="rt-tw-meta">
-            ejecutado
-            <Show when={completedStamp()}>{' '}{completedStamp()}</Show>
-          </span>
-        </button>
-        <Show when={expanded()}>
-          <div class="rt-tw-summary">
-            <CollapsibleText text={resolutionText()} markdown />
+      <Show when={description()}>
+        <div class="rt-arch-block">
+          <span class="rt-arch-label">descripción</span>
+          <div class="rt-arch-body"><CollapsibleText text={description()} markdown /></div>
+        </div>
+      </Show>
+
+      <Show when={resolution()}>
+        <div class="rt-arch-block">
+          <span class="rt-arch-label">resumen</span>
+          <div class="rt-arch-body"><CollapsibleText text={resolution()} markdown /></div>
+        </div>
+      </Show>
+
+      <Show when={files().length > 0 || commits().length > 0}>
+        <div class="rt-arch-block">
+          <span class="rt-arch-label">{files().length > 0 ? 'ficheros' : 'commits'}</span>
+          <div class="rt-arch-files">
+            <For each={files().length > 0 ? files() : commits()}>
+              {(f) => <code class="rt-arch-file">{f}</code>}
+            </For>
           </div>
-        </Show>
+        </div>
       </Show>
     </div>
   );

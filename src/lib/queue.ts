@@ -1,73 +1,92 @@
 /**
- * queue.ts — execution-queue staging, backed by the SHARED .meshkore
- * storage (NOT cockpit localStorage), so a Claude Code terminal reading
- * the MeshKore standard sees the exact same queue.
+ * queue.ts — the execution queue.
  *
- * The queue IS the `next` wall (standard §: status⇄wall). Staging an
- * initiative = moving it to the `next` wall via POST /initiative/reorder,
- * which the daemon persists as `status: next` + `wall_order` on the .md
- * and broadcasts (walls.py). The lifecycle is:
+ * 2026-06-19 reframe (operator): the queue is NOT a roadmap wall. It is
+ * an ephemeral, client-side list of "what will run when I press Ejecutar
+ * cola". Enqueuing/dequeuing an initiative does NOT change its status or
+ * move it between walls — a queued item stays exactly where it lives
+ * (only `active` items are queueable). Execute → it completes →
+ * auto-archives. Reset just empties the list.
  *
- *   backlog/active ──stage──▶ next (queued) ──architect picks up──▶
- *   active (running) ──done──▶ archived
+ * Storage is per-project localStorage (the cockpit's own memory), keyed
+ * by the active daemon id. It is deliberately NOT the shared `next` wall
+ * and NOT persisted into the .meshkore roadmap — earlier the queue WAS
+ * the next wall (v26); that conflated "queued to run" with the roadmap
+ * status and is reverted here.
  *
- * A CLI agent consumes the queue by reading `wall: next` ordered by
- * `wall_order` ascending — see
- * `.meshkore/docs/conventions/execution-queue-protocol.md`.
+ * Order = insertion order (the execution order). The list is deduped.
  */
 
+import { createEffect, createRoot, createSignal } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
-import { allInitiatives } from '~/state/server';
-import { log } from './log';
 
-/** True when an initiative is staged (sits in the `next` wall). */
-export function isQueuedStatus(status?: string): boolean {
-  return (status ?? '').toLowerCase() === 'next';
-}
+const KEY_PREFIX = 'mc-exec-queue::';
+const keyFor = (id: string | null): string => `${KEY_PREFIX}${id ?? 'default'}`;
 
-/** How many initiatives are currently in the `next` wall — the append
- *  position for a freshly-staged item. */
-function nextWallCount(): number {
-  return allInitiatives().filter((it) => isQueuedStatus(it.status)).length;
-}
-
-/** Stage one initiative — append to the end of the `next` wall. */
-export async function stageInitiative(id: string): Promise<void> {
-  const client = daemonStore.state.client;
-  if (!client) return;
-  const res = await client.initiativeReorder(id, 'next', nextWallCount());
-  if (!res.ok) log.warn('[queue] stage failed', { id, status: res.status });
-}
-
-/** Un-stage one initiative — back to the operative `active` wall. */
-export async function unstageInitiative(id: string): Promise<void> {
-  const client = daemonStore.state.client;
-  if (!client) return;
-  const res = await client.initiativeReorder(id, 'active', 0);
-  if (!res.ok) log.warn('[queue] unstage failed', { id, status: res.status });
-}
-
-/** Stage many initiatives in order (RUN ALL → fill the queue). Sequential
- *  so wall_order lands in the caller's order; each call recompacts the
- *  wall server-side. N calls is acceptable for an explicit bulk action. */
-export async function stageAll(ids: string[]): Promise<void> {
-  const client = daemonStore.state.client;
-  if (!client) return;
-  let order = nextWallCount();
-  for (const id of ids) {
-    const res = await client.initiativeReorder(id, 'next', order++);
-    if (!res.ok) log.warn('[queue] stageAll item failed', { id, status: res.status });
+function load(id: string | null): string[] {
+  try {
+    const raw = localStorage.getItem(keyFor(id));
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
   }
 }
 
-/** Empty the queue — move every staged (`next`) initiative back to the
- *  operative `active` wall. Does NOT touch initiatives already running. */
-export async function clearQueue(): Promise<void> {
-  const client = daemonStore.state.client;
-  if (!client) return;
-  const staged = allInitiatives().filter((it) => isQueuedStatus(it.status));
-  for (const it of staged) {
-    const res = await client.initiativeReorder(it.id, 'active', 0);
-    if (!res.ok) log.warn('[queue] clear item failed', { id: it.id, status: res.status });
-  }
+function persist(id: string | null, ids: string[]): void {
+  try { localStorage.setItem(keyFor(id), JSON.stringify(ids)); } catch { /* quota */ }
+}
+
+const { ids, setIds } = createRoot(() => {
+  const [ids, setIds] = createSignal<string[]>(load(daemonStore.state.activeId));
+  // Reload the queue when the active project changes (per-project memory).
+  createEffect(() => {
+    const id = daemonStore.state.activeId;
+    setIds(load(id));
+  });
+  return { ids, setIds };
+});
+
+function write(next: string[]): void {
+  setIds(next);
+  persist(daemonStore.state.activeId, next);
+}
+
+/** The queued initiative ids, in execution (insertion) order. Reactive. */
+export const queuedIds = (): string[] => ids();
+
+/** Is this initiative in the execution queue? Reactive. */
+export const isQueued = (id: string): boolean => ids().includes(id);
+
+/** Append one initiative to the queue (no-op if already there). */
+export function stageInitiative(id: string): void {
+  if (ids().includes(id)) return;
+  write([...ids(), id]);
+}
+
+/** Remove one initiative from the queue. Does NOT touch its status/wall. */
+export function unstageInitiative(id: string): void {
+  if (!ids().includes(id)) return;
+  write(ids().filter((x) => x !== id));
+}
+
+/** Append many in order (skipping any already queued). */
+export function stageAll(newIds: string[]): void {
+  const have = new Set(ids());
+  const add = newIds.filter((id) => !have.has(id));
+  if (add.length === 0) return;
+  write([...ids(), ...add]);
+}
+
+/** Empty the queue. Pure list operation — nothing on the roadmap moves. */
+export function clearQueue(): void {
+  if (ids().length === 0) return;
+  write([]);
+}
+
+/** Replace the queue wholesale (used to prune ids that no longer apply,
+ *  e.g. an initiative that finished and auto-archived). */
+export function setQueue(next: string[]): void {
+  write(next);
 }
