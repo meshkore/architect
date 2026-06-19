@@ -69,9 +69,14 @@
   position: relative;
   margin-bottom: 32px;
   padding: 2px 0 4px 44px;
-  cursor: pointer;
+  /* 2026-06-19 — the whole story is no longer the toggle; only the title
+     row is (so clicking meta/desc/tasks doesn't collapse it). */
+  cursor: default;
   transition: opacity .25s ease, margin-bottom .25s ease;
 }
+/* Title row is the expand/collapse affordance. */
+.rt-title-row-toggle { cursor: pointer; border-radius: 6px; }
+.rt-title-row-toggle:hover .rt-title { color: #fff; }
 .rt-story:last-child { margin-bottom: 4px; }
 
 .rt-story.dim { opacity: .42; }
@@ -524,7 +529,13 @@
   align-items: center;
   gap: 9px;
   padding: 5px 0;
+  /* Click a task to drop its detail inline (no story collapse). */
+  cursor: pointer;
+  border-radius: 6px;
 }
+.rt-task:hover .rt-task-text { color: #fff; }
+/* When open (or archived), the inline detail wraps to its own line. */
+.rt-task-archived, .rt-task-open { flex-wrap: wrap; }
 
 /* Timeline thread marker — neutral dot on the vertical line. Lights up
  * (fuchsia + pulse) ONLY while a worker is live on this task, so the
@@ -887,6 +898,7 @@
   letter-spacing: .02em;
   color: #64748b;
 }
+.rt-arch-empty { font-size: 11.5px; font-style: italic; color: #64748b; margin: 0; }
 .rt-arch-block { display: flex; flex-direction: column; gap: 3px; }
 .rt-arch-label {
   font-size: 9px;

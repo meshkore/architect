@@ -18,7 +18,7 @@
  * Pre-V108 version preserved as InitiativeCard.legacy.tsx.bak.
  */
 
-import { For, Show, createEffect, createMemo, createResource } from 'solid-js';
+import { For, Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
 import type { ServerInitiative, ServerTask } from '~/state/server';
 import { activeEntriesByInitiative, activeTaskIds, activeAgentByTask, convForTask } from '~/state/server';
 import { sortTasks } from '~/components/initiative/task-grouping';
@@ -214,11 +214,6 @@ export default function InitiativeCard(props: {
       class={`rt-story is-${vstate()} ${props.isOpen ? 'open' : ''} ${
         props.isDimmed ? 'dim' : ''
       }${viewStore.isRecentlyCreatedInit(props.initiative.id) ? ' is-flash-new' : ''}`}
-      tabIndex={0}
-      role="button"
-      aria-expanded={props.isOpen}
-      onClick={props.onToggle}
-      onKeyDown={onRowKey}
     >
       {/* Story number — left of the line, mono */}
       <span class="rt-number" aria-hidden="true">
@@ -284,7 +279,16 @@ export default function InitiativeCard(props: {
       </span>
 
       <div class="rt-row">
-        <div class="rt-title-row">
+        {/* Expand/collapse the story ONLY from the title row (operator
+            2026-06-19) — clicking the meta/desc/tasks must not toggle it. */}
+        <div
+          class="rt-title-row rt-title-row-toggle"
+          role="button"
+          tabIndex={0}
+          aria-expanded={props.isOpen}
+          onClick={props.onToggle}
+          onKeyDown={onRowKey}
+        >
           <Show when={props.initiative.id}>
             <span class="rt-id" aria-label={`initiative id ${props.initiative.id}`}>
               #{props.initiative.id}
@@ -428,8 +432,18 @@ function TaskRow(props: { task: ServerTask; archived?: boolean }) {
   const vstate = (): TaskVState => taskVState(props.task, live());
   const mods = (): string[] => taskModules(props.task);
   const stateTitle = (): string => TASK_STATE_TITLE[vstate()];
+  // Click a task to drop its detail (description; + execution summary +
+  // files when archived) inline — without collapsing the parent story.
+  const [open, setOpen] = createSignal(false);
+  const toggle = (e: MouseEvent): void => {
+    e.stopPropagation();
+    setOpen(!open());
+  };
   return (
-    <li class={`rt-task is-${vstate()}${props.archived ? ' rt-task-archived' : ''}`}>
+    <li
+      class={`rt-task is-${vstate()}${props.archived ? ' rt-task-archived' : ''}${open() ? ' rt-task-open' : ''}`}
+      onClick={toggle}
+    >
       {/* Timeline thread marker — neutral, lights up only where work is
        *  live so the eye lands on the exact point of the roadmap that is
        *  active right now. */}
@@ -486,10 +500,10 @@ function TaskRow(props: { task: ServerTask; archived?: boolean }) {
         </span>
       </Show>
 
-      {/* Archived (registry) — description + execution summary + the
-       *  files that were modified. */}
-      <Show when={props.archived}>
-        <TaskArchivedDetail task={props.task} />
+      {/* Inline detail on click — description always; + execution summary
+       *  + modified files when archived (the registry). */}
+      <Show when={open()}>
+        <TaskDetail task={props.task} archived={props.archived} />
       </Show>
     </li>
   );
@@ -537,7 +551,7 @@ function taskCommits(task: ServerTask): string[] {
   return [];
 }
 
-function TaskArchivedDetail(props: { task: ServerTask }) {
+function TaskDetail(props: { task: ServerTask; archived?: boolean }) {
   const conv = createMemo<string | undefined>(() => convForTask(props.task.id));
 
   // The rich body (description + resolution) lives in the task .md; fetch
@@ -575,7 +589,8 @@ function TaskArchivedDetail(props: { task: ServerTask }) {
 
   return (
     <div class="rt-arch-detail" onClick={(e) => e.stopPropagation()}>
-      <Show when={resolvedBy() !== '—' || completedStamp()}>
+      {/* who/when — only meaningful for finished (archived) work */}
+      <Show when={props.archived && (resolvedBy() !== '—' || completedStamp())}>
         <div class="rt-arch-meta">
           <span class="rt-task-agent">{resolvedBy()}</span>
           <Show when={completedStamp()}>
@@ -584,21 +599,30 @@ function TaskArchivedDetail(props: { task: ServerTask }) {
         </div>
       </Show>
 
-      <Show when={description()}>
+      {/* description — shown in every view */}
+      <Show
+        when={description()}
+        fallback={
+          <Show when={!bodyRes.loading}>
+            <p class="rt-arch-empty">Sin descripción.</p>
+          </Show>
+        }
+      >
         <div class="rt-arch-block">
           <span class="rt-arch-label">descripción</span>
           <div class="rt-arch-body"><CollapsibleText text={description()} markdown /></div>
         </div>
       </Show>
 
-      <Show when={resolution()}>
+      {/* execution summary + files — only for archived (the registry) */}
+      <Show when={props.archived && resolution()}>
         <div class="rt-arch-block">
           <span class="rt-arch-label">resumen</span>
           <div class="rt-arch-body"><CollapsibleText text={resolution()} markdown /></div>
         </div>
       </Show>
 
-      <Show when={files().length > 0 || commits().length > 0}>
+      <Show when={props.archived && (files().length > 0 || commits().length > 0)}>
         <div class="rt-arch-block">
           <span class="rt-arch-label">{files().length > 0 ? 'ficheros' : 'commits'}</span>
           <div class="rt-arch-files">
