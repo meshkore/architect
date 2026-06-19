@@ -13,8 +13,11 @@
   /* Asymmetric padding: minimal on the left so the line + nodes sit
    * close to the column edge (operator field report 2026-06-10: the
    * old 18-px L padding was stacking with the section's p-4 → ~8 px
-   * of visible drift). Right padding kept for breathing room. */
-  padding: 20px 18px 24px 4px;
+   * of visible drift). Right padding kept for breathing room.
+   * 2026-06-19: top trimmed 20→6px — the options row sat too far below
+   * the subtab bar (operator); the generous BOTTOM padding (+ rt-header
+   * margin) keeps the black margin bar→wall that gives clarity. */
+  padding: 6px 18px 24px 4px;
 }
 
 /* Timeline has NO left padding — instead, each .rt-story owns its
@@ -726,6 +729,52 @@
 }
 
 /* ── Queue wall (py-1.22+) ──────────────────────────────────────────── */
+
+/* Queue chip sits apart from the status catalog (it's not a catalog
+   filter — it's the live, operator-managed execution wall). */
+.rt-filter-sep {
+  display: inline-block;
+  width: 36px;
+  flex-shrink: 0;
+}
+
+/* RUN ALL — inline node-style control: circle + play (or stop) + outer
+   ring showing WHOLE-roadmap completion + label. Same node format as the
+   per-initiative ▶, so it reads as "run the whole thing". */
+.rt-runall {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 2px 2px 2px 4px;
+}
+.rt-runall:disabled { opacity: .45; cursor: not-allowed; }
+.rt-runall-node {
+  /* override the timeline node's absolute placement → inline, drop the
+     8px line-masking disc (no vertical line to hide up here). */
+  position: relative;
+  left: auto;
+  top: auto;
+  --node-color: #22d3ee;
+  --node-ring: #22d3ee;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .55);
+}
+.rt-runall.is-live .rt-runall-node {
+  --node-color: #f87171;
+  --node-ring: #f87171;
+}
+.rt-runall:not(:disabled):hover .rt-runall-node { transform: scale(1.08); }
+.rt-runall-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: #67e8f9;
+}
+.rt-runall.is-live .rt-runall-label { color: #fca5a5; }
 
 /* Count badge on the QUEUE filter chip */
 .rt-queue-count {

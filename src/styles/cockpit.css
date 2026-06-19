@@ -1025,7 +1025,9 @@
        * overrides that and keeps all three column grips at the same
        * baseline as their header text. */
       align-self: center;
-      color: #4b5563;
+      /* 2026-06-19: brightened #4b5563 → #828b9a — the six-dot grip was
+       * near-invisible on dim/older monitors (operator). */
+      color: #828b9a;
       background: transparent;
       border: 1px solid transparent;
       border-radius: 4px;

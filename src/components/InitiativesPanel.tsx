@@ -193,7 +193,6 @@ export default function InitiativesPanel() {
       .sort((a, b) => (b.last_activity_at || '').localeCompare(a.last_activity_at || ''))
       .map((c) => c.conv),
   );
-  const architectExists = () => archCandidates().length > 0;
   const activeArchConv = (): string | null => archCandidates()[0] ?? null;
   const architectLive = createMemo<boolean>(() => {
     const conv = activeArchConv();
@@ -237,6 +236,21 @@ export default function InitiativesPanel() {
     }
     return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
   });
+
+  /** Whole-roadmap completion (done tasks / all tasks) — drives the RUN
+   *  ALL node's outer progress ring so the operator reads overall project
+   *  progress at a glance. */
+  const overallProgress = createMemo<{ done: number; total: number; frac: number; pct: number }>(() => {
+    const ts = allTasks();
+    const total = ts.length;
+    const done = ts.filter((t) => t.status === 'done').length;
+    return { done, total, frac: total ? done / total : 0, pct: total ? Math.round((done / total) * 100) : 0 };
+  });
+
+  /** RUN ALL only makes sense on the operative walls — active (the
+   *  roadmap you run) and queue (what's staged/running). It's noise on
+   *  all / backlog / archived. */
+  const showRunAll = (): boolean => visibility() === 'active' || visibility() === 'queue';
 
   /** Every initiative the architect could actually run: not manually
    *  archived, not backlog, and with ≥1 incomplete task. */
@@ -282,30 +296,14 @@ export default function InitiativesPanel() {
   };
 
   return (
-    <section class="initiatives-section min-w-0 p-4">
+    <section class="initiatives-section min-w-0 px-4 pt-1 pb-4">
       <Show when={!isProjectEmpty()} fallback={<EmptyOnboardingPanel />}>
         <div class="rt-wrap">
           <header class="initiatives-header rt-header">
-            <div class="initiatives-filters flex items-center gap-1 flex-shrink-0">
-              <For each={VISIBILITY_FILTERS}>
-                {(f) => (
-                  <button
-                    type="button"
-                    onClick={() => setVisibility(f.id)}
-                    class={`px-2 py-1 rounded text-[10px] font-mono uppercase tracking-wider transition-colors ${
-                      visibility() === f.id
-                        ? 'bg-amber-500/15 text-amber-300 border border-amber-500/40'
-                        : 'text-gray-500 hover:text-gray-300 border border-transparent'
-                    }`}
-                    title={f.title}
-                  >
-                    {f.label}
-                  </button>
-                )}
-              </For>
-              {/* QUEUE — the live execution wall. Distinct cyan accent +
-                  count badge so it reads as "what's set to run / running",
-                  not just another status filter. */}
+            <div class="initiatives-filters flex items-center flex-shrink-0">
+              {/* QUEUE FIRST — the live, operator-managed execution wall.
+                  It is NOT part of the task catalog, so it sits apart (cyan
+                  accent + a ~36px gap before the status filters). */}
               <button
                 type="button"
                 onClick={() => setVisibility('queue')}
@@ -321,54 +319,69 @@ export default function InitiativesPanel() {
                   <span class="rt-queue-count">{queueInitiatives().length}</span>
                 </Show>
               </button>
+              <span class="rt-filter-sep" aria-hidden="true" />
+              {/* The status-catalog filters. */}
+              <div class="flex items-center gap-1">
+                <For each={VISIBILITY_FILTERS}>
+                  {(f) => (
+                    <button
+                      type="button"
+                      onClick={() => setVisibility(f.id)}
+                      class={`px-2 py-1 rounded text-[10px] font-mono uppercase tracking-wider transition-colors ${
+                        visibility() === f.id
+                          ? 'bg-amber-500/15 text-amber-300 border border-amber-500/40'
+                          : 'text-gray-500 hover:text-gray-300 border border-transparent'
+                      }`}
+                      title={f.title}
+                    >
+                      {f.label}
+                    </button>
+                  )}
+                </For>
+              </div>
             </div>
             <input
               type="text"
               placeholder="Filter…"
               value={query()}
               onInput={(e) => setQuery((e.currentTarget as HTMLInputElement).value)}
-              class="initiatives-filter-input bg-gray-900/60 border border-gray-800 rounded-md px-3 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-500/50 w-44 min-w-0"
+              class="initiatives-filter-input bg-gray-800/70 border border-gray-600 rounded-md px-3 py-1 text-xs text-gray-100 placeholder-gray-400 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-500/40 w-44 min-w-0"
             />
-            <div class="ml-auto flex items-center flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => { void onRunAll(); }}
-                disabled={
-                  !architectLive() && (
-                    filtered().length === 0 ||
-                    anyStoryRunLive()
-                  )
-                }
-                title={
-                  architectLive()
-                    ? 'Stop the running Roadmap Architect'
-                    : anyStoryRunLive()
-                      ? 'Hay otras iniciativas en marcha. Páralas primero.'
-                      : filtered().length === 0
-                        ? 'No hay iniciativas elegibles para Run all'
-                        : architectExists()
-                          ? 'Resume the existing Roadmap Architect over the visible scope'
-                          : 'Spawn a Roadmap Architect agent over the visible roadmap'
-                }
-                class={`px-3 py-1.5 rounded-md text-[11px] font-mono uppercase tracking-wider transition-colors border disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 ${
-                  architectLive()
-                    ? 'bg-red-500/15 hover:bg-red-500/30 text-red-300 border-red-500/40'
-                    : 'bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border-cyan-500/40'
-                }`}
-              >
-                <Show when={architectLive()} fallback={
-                  <span class="inline-flex items-center gap-1.5">
-                    <span aria-hidden="true">🗺️</span>
-                    <span class="runall-label-full">Run all</span>
-                    <span class="runall-label-short" aria-hidden="true">Run</span>
+            {/* RUN ALL — node-style control (circle + play + outer ring
+                showing WHOLE-roadmap completion) + label. Only on the
+                operative walls: active + queue. */}
+            <Show when={showRunAll()}>
+              <div class="ml-auto flex items-center flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => { void onRunAll(); }}
+                  disabled={!architectLive() && (eligibleForRun().length === 0 || anyStoryRunLive())}
+                  title={
+                    architectLive()
+                      ? 'Parar el Roadmap Architect en marcha'
+                      : anyStoryRunLive()
+                        ? 'Hay otras iniciativas en marcha. Páralas primero.'
+                        : eligibleForRun().length === 0
+                          ? 'No hay iniciativas elegibles para Run all'
+                          : `Run all — ${overallProgress().pct}% del roadmap completado`
+                  }
+                  class={`rt-runall${architectLive() ? ' is-live' : ''}`}
+                >
+                  <span
+                    class="rt-node rt-runall-node"
+                    style={{ '--progress': String(overallProgress().frac) }}
+                  >
+                    <Show
+                      when={architectLive()}
+                      fallback={<span class="rt-play" aria-hidden="true" />}
+                    >
+                      <span class="rt-stop" aria-hidden="true" />
+                    </Show>
                   </span>
-                }>
-                  <span class="inline-block w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" aria-hidden="true" />
-                  <span class="runall-label-full">Stop architect</span>
-                  <span class="runall-label-short" aria-hidden="true">Stop</span>
-                </Show>
-              </button>
-            </div>
+                  <span class="rt-runall-label">{architectLive() ? 'Stop' : 'Run all'}</span>
+                </button>
+              </div>
+            </Show>
           </header>
 
           <RateLimitBanner />
