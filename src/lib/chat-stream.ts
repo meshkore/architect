@@ -1,5 +1,5 @@
 import { store } from '~/state/store';
-import type { ChatMsg } from '~/state/chat';
+import { isAutonomousConv, isWakeAuthored, type ChatMsg } from '~/state/chat';
 import type { DaemonEvent } from '~/lib/daemon-client';
 
 export type StreamItem =
@@ -7,9 +7,51 @@ export type StreamItem =
   | { kind: 'tool'; ts: string; ev: DaemonEvent }
   | { kind: 'task'; ts: string; ev: DaemonEvent };
 
+/** A render segment for the autonomous (continuous-timeline) layout: a
+ *  `run` is consecutive agent finals shown under ONE header; an operator
+ *  `msg` (or a tool/task event) breaks the run and renders standalone. */
+export type AutoSegment =
+  | { kind: 'run'; msgs: ChatMsg[] }
+  | { kind: 'msg'; msg: ChatMsg }
+  | { kind: 'tool'; ev: DaemonEvent }
+  | { kind: 'task'; ev: DaemonEvent };
+
+/** Group an autonomous conv's ordered stream into a continuous timeline:
+ *  consecutive assistant finals coalesce into one `run`; the live bubble
+ *  tails the final run; an operator message / tool / task flushes the run
+ *  and renders on its own (so the next agent output starts a fresh run). */
+export function groupAutonomous(pre: StreamItem[], live: ChatMsg | null): AutoSegment[] {
+  const out: AutoSegment[] = [];
+  let run: ChatMsg[] | null = null;
+  const flush = (): void => {
+    if (run && run.length) out.push({ kind: 'run', msgs: run });
+    run = null;
+  };
+  for (const it of pre) {
+    if (it.kind === 'msg') {
+      if (it.msg.kind === 'assistant') {
+        (run ??= []).push(it.msg);
+      } else {
+        flush();
+        out.push({ kind: 'msg', msg: it.msg });
+      }
+    } else if (it.kind === 'tool') {
+      flush();
+      out.push({ kind: 'tool', ev: it.ev });
+    } else {
+      flush();
+      out.push({ kind: 'task', ev: it.ev });
+    }
+  }
+  if (live) (run ??= []).push(live);
+  flush();
+  return out;
+}
+
 export function buildStream(conv: string, msgs: ChatMsg[]): {
   pre: StreamItem[]; queued: StreamItem[]; live: ChatMsg | null;
 } {
+  const autonomous = isAutonomousConv(conv);
   const liveIdx = msgs.findIndex((m) => m.kind === 'assistant' && m.streaming);
   const live: ChatMsg | null = liveIdx >= 0 ? msgs[liveIdx]! : null;
 
@@ -31,9 +73,16 @@ export function buildStream(conv: string, msgs: ChatMsg[]): {
   // queued; trailing messages just flow in sequence and trigger the next turn.
   msgs.forEach((m, i) => {
     if (i === liveIdx) return;
+    // Autonomous convs: hide the daemon→agent wake plumbing entirely
+    // (the agent summarises the outcome in its own terse event line).
+    if (autonomous && isWakeAuthored(m)) return;
     const ts = m.ts ?? '';
     const item: StreamItem = { kind: 'msg', ts, msg: m };
-    if (live && m.kind === 'user' && i > liveIdx) {
+    // Autonomous convs never HOIST an operator message above the live
+    // output ("queued · merges into next turn"). The operator's co-direction
+    // message renders INLINE in chronological order — it's the natural break
+    // that ends the current run and starts a fresh agent header after it.
+    if (!autonomous && live && m.kind === 'user' && i > liveIdx) {
       queued.push({ ...item, prepend: true });
     } else {
       pre.push(item);

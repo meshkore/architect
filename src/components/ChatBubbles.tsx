@@ -552,34 +552,42 @@ function AttachmentGrid(props: { msg: ChatMsg; align: 'left' | 'right' }) {
   );
 }
 
-export function AssistantBubble(props: { msg: ChatMsg }) {
+// V89.1 — Shared agent byline resolution for the ACTIVE conv. Used by
+// the normal AssistantBubble header AND the autonomous continuous-run
+// header. The daemon emits assistant events authored by self.identity
+// (the host machine), which is wrong UX — the assistant IS the agent.
+// Prefer convMeta.title, then the agentId chip, then the daemon author,
+// then a neutral 'agent'. (The old 'coordinator' fallback is gone
+// outside onboarding — it leaked into every untitled custom conv.)
+function activeConvMeta() {
+  const conv = chatStore.state.activeConv;
+  return conv ? chatStore.state.convMeta[conv] : null;
+}
+function activeAgentId(): string | null {
+  return activeConvMeta()?.agentId ?? null;
+}
+function activeAgentName(msg: ChatMsg): string {
+  const title = activeConvMeta()?.title?.trim();
+  if (title) return title;
+  if (chatStore.state.activeConv === ONBOARDING_CONV_ID) return 'Architect Agent';
+  const aid = activeAgentId();
+  if (aid) return aid;
+  const author = msg.author?.trim();
+  if (author && author !== 'architect' && author !== 'operator' && author !== 'user') return author;
+  return 'agent';
+}
+
+export function AssistantBubble(props: { msg: ChatMsg; headerless?: boolean }) {
   // V86u — borderless. Agent replies read as continuous prose with a
   // bold byline (A001 chip + agent name) and a timestamp. The body
   // is rendered markdown (`.md prose`) — headings, tables, code all
   // styled by the existing prose classes, no surrounding card.
-  const meta = () => {
-    const conv = chatStore.state.activeConv;
-    return conv ? chatStore.state.convMeta[conv] : null;
-  };
-  const agentId = () => meta()?.agentId ?? null;
-  // V89.1 — Author label fallback chain. The daemon emits assistant
-  // events with author=self.identity (the host machine), which is
-  // wrong UX; the assistant IS the agent, not the daemon host. So we
-  // prefer the cockpit's convMeta.title, then the agentId chip, then
-  // the daemon author, then a neutral 'agent'. Critically, the old
-  // 'coordinator' fallback is GONE outside the onboarding conv — it
-  // was leaking into every untitled custom conv.
-  const isOnboarding = () => chatStore.state.activeConv === ONBOARDING_CONV_ID;
-  const agentName = () => {
-    const title = meta()?.title?.trim();
-    if (title) return title;
-    if (isOnboarding()) return 'Architect Agent';
-    const aid = agentId();
-    if (aid) return aid;
-    const author = props.msg.author?.trim();
-    if (author && author !== 'architect' && author !== 'operator' && author !== 'user') return author;
-    return 'agent';
-  };
+  //
+  // `headerless` (2026-06-20) — used by AutonomousRun: the byline is
+  // rendered ONCE per run, so each event row drops its own header and
+  // shows only a small timestamp gutter + body.
+  const agentId = () => activeAgentId();
+  const agentName = () => activeAgentName(props.msg);
   // V89.2 — Inline Stop control on the streaming agent bubble.
   // Replaces the standalone StopBar above the composer; lives on the
   // same row as the byline, at the far right after the fade.
@@ -623,15 +631,29 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
 
   return (
     <div class="flex flex-col gap-1.5 items-start w-full">
-      <BubbleHeader
-        primary={agentName()}
-        id={agentId() ?? undefined}
-        ts={props.msg.ts}
-        align="left"
-        tone={props.msg.cancelled ? 'cancelled' : 'agent'}
-        suffix={props.msg.cancelled ? 'cancelled' : undefined}
-        onStop={props.msg.streaming && !props.msg.cancelled ? onStop : undefined}
-      />
+      <Show
+        when={!props.headerless}
+        fallback={
+          <Show when={props.msg.ts}>
+            <span class="font-mono text-[10px] text-gray-600 pl-2 flex-shrink-0">
+              <time dateTime={props.msg.ts}>{formatBubbleTs(props.msg.ts!)}</time>
+              <Show when={props.msg.cancelled}>
+                <span class="ml-2 text-red-400/80 uppercase tracking-wider">· cancelled</span>
+              </Show>
+            </span>
+          </Show>
+        }
+      >
+        <BubbleHeader
+          primary={agentName()}
+          id={agentId() ?? undefined}
+          ts={props.msg.ts}
+          align="left"
+          tone={props.msg.cancelled ? 'cancelled' : 'agent'}
+          suffix={props.msg.cancelled ? 'cancelled' : undefined}
+          onStop={props.msg.streaming && !props.msg.cancelled ? onStop : undefined}
+        />
+      </Show>
       <Show when={showsValidationRed()} fallback={
       <>
         <Show when={showsHaltViolation()}>
@@ -672,6 +694,48 @@ export function AssistantBubble(props: { msg: ChatMsg }) {
       }>
         <ValidationBlock conv={chatStore.state.activeConv ?? ''} text={props.msg.text} />
       </Show>
+    </div>
+  );
+}
+
+/**
+ * AutonomousRun (2026-06-20) — the continuous-timeline renderer for an
+ * autonomous agent (roadmap-architect "Run all"). A `run` is a sequence
+ * of consecutive agent finals with NO operator turn between them. We paint
+ * ONE byline header for the whole run, then each final as an event row on
+ * a thin timeline rule (small timestamp gutter + body). Only a real
+ * operator message breaks the run (handled upstream in ChatThread), which
+ * starts a fresh header for the next run. The trailing live/streaming
+ * final tails the run and carries the Stop control on the run header.
+ */
+export function AutonomousRun(props: { msgs: ChatMsg[] }) {
+  const first = (): ChatMsg => props.msgs[0]!;
+  const anyStreaming = (): boolean => props.msgs.some((m) => m.streaming && !m.cancelled);
+  const onStop = (): void => {
+    const conv = chatStore.state.activeConv;
+    const client = daemonStore.state.client;
+    if (!conv || !client) return;
+    void client.chatCancel(conv);
+  };
+  return (
+    <div class="flex flex-col gap-2 w-full">
+      <BubbleHeader
+        primary={activeAgentName(first())}
+        id={activeAgentId() ?? undefined}
+        ts={first().ts}
+        align="left"
+        tone="agent"
+        onStop={anyStreaming() ? onStop : undefined}
+      />
+      <div class="flex flex-col gap-3 border-l border-emerald-500/15 ml-1.5 pl-2">
+        <For each={props.msgs}>
+          {(m) =>
+            m.streaming
+              ? <div data-live-bubble="1"><AssistantBubble msg={m} headerless /></div>
+              : <AssistantBubble msg={m} headerless />
+          }
+        </For>
+      </div>
     </div>
   );
 }

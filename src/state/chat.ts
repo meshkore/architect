@@ -1816,4 +1816,27 @@ export const chatStore = {
   hydrateQueue,
 };
 
+// ── Autonomous-agent chat mode (2026-06-20) ────────────────────────
+// Some agent types run as a self-driving loop with NO operator turns
+// between their outputs (today: the roadmap-architect "Run all" executor,
+// woken by its own `architect-wake` plumbing). For those, the chat is
+// rendered as ONE CONTINUOUS timeline under a single header — consecutive
+// agent finals stack as event rows, only an actual operator message breaks
+// the run and starts a fresh header. (ChatThread + chat-stream.groupAutonomous.)
+const AUTONOMOUS_AGENT_TYPES = new Set<AgentType>(['roadmap-architect']);
+
+export function isAutonomousConv(conv: string | null | undefined): boolean {
+  if (!conv) return false;
+  if (conv.startsWith('roadmap-architect-')) return true;
+  const t = chatStore.state.convMeta[conv]?.type;
+  return !!t && AUTONOMOUS_AGENT_TYPES.has(t);
+}
+
+/** Daemon-synthesised `chat.user` events that are agent↔agent plumbing,
+ *  not operator speech. In an autonomous conv these are hidden — the
+ *  agent summarises the outcome itself in its own terse event line. */
+export function isWakeAuthored(msg: ChatMsg): boolean {
+  return msg.author?.trim() === 'architect-wake';
+}
+
 log.debug('state/chat loaded');
