@@ -25,8 +25,8 @@ const ALLOWED_EXACT = new Set<string>([
   // Theme + layout (per-browser preferences)
   'mc-theme-v1',
   'mc-layout-v1',
-  'mc-panel-order-v1',
-  'mc-panel-widths-v1',
+  'mc-panel-order-v2',
+  'mc-panel-widths-v2',
   // uiStore per-browser preferences (state/ui.ts KEYS). 2026-06-13 —
   // these were being WIPED on every boot because the allowlist
   // predated them: rail widths, collapsed state, active tab/zone,
@@ -38,6 +38,7 @@ const ALLOWED_EXACT = new Set<string>([
   'mc-projects-rail-mode',
   'mc-projects-rail-width',
   'mc-chat-rail-width',
+  'mc-modules-rail-width',
   'mc-nav-filter',
   'mc-ws-tab',
   'mc-initiative-group-by-phase',
