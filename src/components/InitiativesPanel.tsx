@@ -26,7 +26,7 @@ import {
   type ServerInitiative,
   type ServerTask,
 } from '~/state/server';
-import InitiativeCard from '~/components/InitiativeCard';
+import InitiativeCard, { expandAllTaskRows, collapseAllTaskRows } from '~/components/InitiativeCard';
 import EmptyOnboardingPanel from '~/components/EmptyOnboardingPanel';
 import { viewStore } from '~/state/view';
 import { chatStore } from '~/state/chat';
@@ -52,8 +52,25 @@ export default function InitiativesPanel() {
   // Two-step confirm for the queue Reset (no destructive one-click wipe).
   const [confirmingReset, setConfirmingReset] = createSignal(false);
   // Accordion — only one story open at a time. `null` means all collapsed.
+  // `expandAll` overrides: when true, every story is open (and every task
+  // row is opened too, via expandAllTaskRows) so the operator can read the
+  // full history end-to-end. Toggled from the header.
   const [openId, setOpenId] = createSignal<string | null>(null);
-  const toggleOpen = (id: string) => setOpenId((cur) => (cur === id ? null : id));
+  const [expandAll, setExpandAll] = createSignal(false);
+  const toggleOpen = (id: string) => {
+    if (expandAll()) setExpandAll(false);
+    setOpenId((cur) => (cur === id ? null : id));
+  };
+  const onExpandAll = () => {
+    setExpandAll(true);
+    setOpenId(null);
+    expandAllTaskRows(allTasks().map((t) => t.id));
+  };
+  const onCollapseAll = () => {
+    setExpandAll(false);
+    setOpenId(null);
+    collapseAllTaskRows();
+  };
 
   const [exiting, setExiting] = createSignal<Set<string>>(new Set());
   const EXIT_ANIM_MS = 550;
@@ -328,6 +345,37 @@ export default function InitiativesPanel() {
                 </For>
               </div>
             </div>
+            {/* Expand-all / collapse-all — open every story AND every
+                task body so the operator can read the whole history
+                without clicking through. */}
+            <div class="rt-expand-group ml-auto flex items-center gap-0.5 flex-shrink-0">
+              <button
+                type="button"
+                onClick={onExpandAll}
+                class="rt-expand-btn"
+                title="Expandir todas las historias y tareas — leer todo de un vistazo"
+                aria-label="Expand all"
+              >
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none"
+                  stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M7 9l5-5 5 5" />
+                  <path d="M7 15l5 5 5-5" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={onCollapseAll}
+                class="rt-expand-btn"
+                title="Plegar todas las historias y tareas"
+                aria-label="Collapse all"
+              >
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none"
+                  stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M7 4l5 5 5-5" />
+                  <path d="M7 20l5-5 5 5" />
+                </svg>
+              </button>
+            </div>
             <input
               type="text"
               placeholder="Filter…"
@@ -420,8 +468,8 @@ export default function InitiativesPanel() {
                 <For each={filtered()}>
                   {(it, i) => {
                     const isExitingNow = () => exiting().has(it.id);
-                    const isOpen = () => openId() === it.id;
-                    const isDimmed = () => openId() !== null && openId() !== it.id;
+                    const isOpen = () => expandAll() || openId() === it.id;
+                    const isDimmed = () => !expandAll() && openId() !== null && openId() !== it.id;
                     return (
                       <div
                         style={{

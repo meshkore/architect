@@ -47,6 +47,16 @@ function toggleTaskOpen(id: string): void {
   else next.add(id);
   setExpandedTaskIds(next);
 }
+/** Open every task body in one shot (used by InitiativesPanel's
+ *  expand-all). The IDs are the on-disk task ids; passing a Set is fine,
+ *  we copy to a new instance so the signal fires. */
+export function expandAllTaskRows(ids: Iterable<string>): void {
+  setExpandedTaskIds(new Set<string>(ids));
+}
+/** Collapse every task body. */
+export function collapseAllTaskRows(): void {
+  setExpandedTaskIds(new Set<string>());
+}
 // Body cache (task path → markdown) so a row recreated by the 2s poll
 // shows its detail instantly instead of re-fetching + flickering.
 const taskBodyCache = new Map<string, string>();
@@ -283,7 +293,9 @@ export default function InitiativeCard(props: {
         </Show>
       </button>
 
-      {/* Secondary control (archive) — fades in on hover/open */}
+      {/* Secondary control (archive) — fades in on hover/open. Stroke
+       *  SVG replaces the old 🗃 / ↺ emoji (rendered inconsistently
+       *  across fonts; operator field report 2026-06-20). */}
       <span class="rt-secondary" aria-hidden="false">
         <button
           type="button"
@@ -292,7 +304,23 @@ export default function InitiativeCard(props: {
           title={isArchived() ? 'Restore to active list' : 'Hide from active list'}
           aria-label={isArchived() ? 'Restore initiative' : 'Archive initiative'}
         >
-          {isArchived() ? '↺' : '🗃'}
+          <Show
+            when={isArchived()}
+            fallback={
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="4" rx="1" />
+                <path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" />
+                <path d="M10 12h4" />
+              </svg>
+            }
+          >
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7" />
+              <path d="M3 4v5h5" />
+            </svg>
+          </Show>
         </button>
       </span>
 
