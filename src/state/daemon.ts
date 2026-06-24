@@ -37,7 +37,7 @@ import { log } from '~/lib/log';
 import { daemonHttpBase, localTransport } from '~/lib/transport';
 import { clusterTokenKey, tokenForCluster, saveTokenForCluster } from '~/lib/tokens';
 import { verifyDaemonIdentity } from '~/lib/auth';
-import { openTokenUnlockModal } from '~/components/modals/TokenUnlockModal';
+import { openTokenUnlockModal, clearTokenPrompt } from '~/components/modals/TokenUnlockModal';
 
 export type ConnectionPhase =
   | 'idle'
@@ -88,6 +88,11 @@ function notifyActiveChanged(): void {
   // recurse until "Maximum call stack size exceeded" on page refresh.
   queueMicrotask(() => {
     const id = state.activeId;
+    // The active selection changed → drop any pending token prompt so it
+    // doesn't linger over a different project (the prompt is per-cluster and
+    // only ever opened for the one being switched to; opening does not fire
+    // this, so this never clears a freshly-opened prompt).
+    clearTokenPrompt();
     console.log('[RAIL] notifyActiveChanged → listeners count:', activeChangeListeners.size, 'activeId:', id);
     for (const fn of activeChangeListeners) {
       try { fn(id); } catch (e) {

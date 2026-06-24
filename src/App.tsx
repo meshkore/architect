@@ -32,7 +32,6 @@ import { storyStore } from '~/state/story';
 import { log } from '~/lib/log';
 import { applyStoredLayout } from '~/components/Splitter';
 import { ModalHost } from '~/lib/modal';
-import { TokenUnlockHost } from '~/components/modals/TokenUnlockModal';
 import { ProjectDebugModalHost } from '~/components/modals/ProjectDebugModal';
 // V97 — DaemonOutdatedHost removed. The outdated state is now the
 // inline DaemonOutdatedPanel mounted by Cockpit.tsx (mandatory full-
@@ -268,7 +267,6 @@ export default function App() {
         renderConnectionGate={connectionGateNode}
       />
       <ModalHost />
-      <TokenUnlockHost />
       <ProjectDebugModalHost />
       {/* V97 — DaemonOutdatedHost removed; daemon-outdated is now an
           inline panel in Cockpit.tsx */}

@@ -19,6 +19,7 @@ import { cockpitOutdated, latestCockpitCommit, COCKPIT_COMMIT, probeCockpitHealt
 import Header from '~/components/Header';
 import ProjectsRail from '~/components/ProjectsRail';
 import OfflinePanel from '~/components/OfflinePanel';
+import { TokenUnlockPanel } from '~/components/modals/TokenUnlockModal';
 import RailEmptyPanel from '~/components/RailEmptyPanel';
 import ModulesTree from '~/components/ModulesTree';
 import InitiativesPanel from '~/components/InitiativesPanel';
@@ -274,6 +275,11 @@ export default function Cockpit(props: {
           >
             {props.renderConnectionGate?.()}
           </Show>
+          {/* Token unlock — rendered HERE inside <main> (centre project zone),
+              not as a root full-screen overlay, so the projects rail stays
+              usable. Self-gates on a pending prompt; local clusters
+              auto-unlock so this is the cloud/remote case. */}
+          <TokenUnlockPanel />
         </main>
       </div>
     </div>
