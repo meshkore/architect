@@ -57,7 +57,7 @@ async function validate(token: string, port: number): Promise<{ ok: true } | { o
     const probe = new DaemonClient(localTransport(port, token));
     const r = await probe.credentials();
     if (r.ok) return { ok: true };
-    if (r.status === 401 || r.status === 403) return { ok: false, message: 'Daemon rejected the token. Check .meshkore/credentials/architect-token and paste again.' };
+    if (r.status === 401 || r.status === 403) return { ok: false, message: 'Daemon rejected the token. Check .meshkore/credentials/portal-token and paste again.' };
     return { ok: false, message: `Daemon returned HTTP ${r.status}.` };
   } catch (e) {
     log.warn('TokenUnlockModal validate failed', e);
@@ -109,7 +109,7 @@ export function TokenUnlockHost(): JSX.Element {
               <span class="font-mono text-emerald-300">
                 {o.project.cluster_id ?? `port:${o.project.port}`}
               </span>
-              . It lives in <span class="font-mono text-emerald-300">.meshkore/credentials/architect-token</span> and stays in this browser (per-cluster).
+              . It lives in <span class="font-mono text-emerald-300">.meshkore/credentials/portal-token</span> and stays in this browser (per-cluster).
             </p>
             <input
               type="password"

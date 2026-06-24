@@ -24,10 +24,10 @@
  * Styling lives entirely in src/styles/projects-rail.css.
  */
 
-import { For, Show, createMemo } from 'solid-js';
+import { For, Show, createMemo, createEffect, onCleanup } from 'solid-js';
 import { uiStore } from '~/state/ui';
 import ProjectsRailRow from '~/components/ProjectsRailRow';
-import { PORT_LO, PORT_HI, discoverProjects } from '~/components/projects-rail/discovery';
+import { PORT_LO, PORT_HI, discoverProjects, scanning, setScanning } from '~/components/projects-rail/discovery';
 import { rows } from '~/components/projects-rail/rows';
 import { RailFooter } from '~/components/projects-rail/RailFooter';
 import { loadProjectsOrder, applyOrder } from '~/components/projects-rail/order';
@@ -67,6 +67,33 @@ export default function ProjectsRail() {
   // Both call `discoverProjects({ fullScan: true })` which sweeps
   // 5570–5589 once and stops.
   void discoverProjects; // keep the import live for downstream callers
+
+  // Onboarding "Watching for your daemon" loop (re-added 2026-06-24).
+  // NewPromptScreen flips `scanning()` ON when the operator is about to
+  // launch a brand-new daemon. The catch: a fresh cluster binds ANY free
+  // port in 5570–5589 (rarely 5570 — sticky ports + other clusters take the
+  // low ones) and is NOT yet a known project, so the cheap default probe set
+  // (5570 + last-port + known) can NEVER see it. The continuous poll behind
+  // this flag had been removed (V86e), so the "Watching…" panel showed a
+  // spinner that never actually probed — the new project never popped into
+  // the rail until the operator hit Rescan by hand (field report 2026-06-24).
+  // Fix: while scanning is on, run a bounded FULL sweep every few seconds so
+  // the new daemon is found by itself. Capped so it can't sweep forever if
+  // the panel is left open ("Close — keep scanning"). Stop() ends it early.
+  createEffect(() => {
+    if (!scanning()) return;
+    let stopped = false;
+    const startedAt = Date.now();
+    const MAX_MS = 3 * 60_000; // safety cap — generous enough to paste + launch
+    const tick = async (): Promise<void> => {
+      if (stopped) return;
+      try { await discoverProjects({ fullScan: true }); } catch { /* probe errors are normal */ }
+      if (!stopped && Date.now() - startedAt > MAX_MS) setScanning(false);
+    };
+    void tick(); // probe immediately, then on an interval
+    const id = setInterval(() => void tick(), 3500);
+    onCleanup(() => { stopped = true; clearInterval(id); });
+  });
 
   // Drag-resize handle on the right edge.
   let host: HTMLElement | undefined;

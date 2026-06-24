@@ -21,6 +21,7 @@ import {
   readStoredToken,
   type ConnectionStatus,
 } from '~/lib/connection';
+import { adoptTokenFromUrl } from '~/lib/adopt';
 import { store } from '~/state/store';
 import { daemonStore } from '~/state/daemon';
 import { serverStore, isProjectEmpty } from '~/state/server';
@@ -53,6 +54,10 @@ export default function App() {
   onMount(() => {
     log.info('App.onMount — starting connection probe');
     applyStoredLayout();
+    // Auto-adopt a local daemon's token from the launch URL BEFORE connecting,
+    // so first-boot of your own machine needs no token paste. Strips the token
+    // from the URL. No-op when the mk_* params are absent. (lib/adopt.ts)
+    adoptTokenFromUrl();
     void connect(setStatus);
   });
 

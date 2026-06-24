@@ -11,6 +11,7 @@ const STEP_LABEL: Record<Step, number | null> = {
 
 const [open, setOpen] = createSignal(false);
 export function openAddProjectWizard(): void { setOpen(true); }
+export function closeAddProjectWizard(): void { setOpen(false); }
 
 export function AddProjectWizardHost() {
   return (
