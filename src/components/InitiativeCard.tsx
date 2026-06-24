@@ -473,18 +473,66 @@ const TASK_STATE_TITLE: Record<TaskVState, string> = {
   pending: 'Pendiente',
 };
 
+type SummaryView = 'des' | 'res';
+
 function TaskRow(props: { task: ServerTask; archived?: boolean }) {
   const live = (): boolean => activeTaskIds().has(props.task.id);
   const vstate = (): TaskVState => taskVState(props.task, live());
   const mods = (): string[] => taskModules(props.task);
   const stateTitle = (): string => TASK_STATE_TITLE[vstate()];
-  // Toggle the inline detail from the TITLE only (operator 2026-06-19) —
+
+  // Body fetch lives at row-level now (RTR2) so both the always-visible
+  // summary line and the deep-expanded TaskDetail share one read. Cached
+  // by path; the 2s /state poll re-creates the row but the cache prevents
+  // re-fetch flicker.
+  const [bodyRes] = createResource<string, { path: string }>(
+    () => (props.task.path ? { path: props.task.path } : null),
+    async (input) => {
+      const client = daemonStore.state.client;
+      if (!client) return taskBodyCache.get(input.path) ?? '';
+      const r = await client.readMarkdownFile(input.path);
+      const text = r.ok ? r.body : '';
+      if (text) taskBodyCache.set(input.path, text);
+      return text;
+    },
+  );
+  const body = (): string =>
+    bodyRes() ?? (props.task.path ? taskBodyCache.get(props.task.path) ?? '' : '');
+  const description = (): string => extractDescription(body());
+  const resolution = (): string => extractResolution(body());
+  const hasRes = (): boolean => resolution().length > 0;
+  const hasDes = (): boolean => description().length > 0;
+
+  // Default view: tasks WITH a resolution show RES; everything else DES.
+  // The operator can flip it manually per task.
+  const [viewOverride, setViewOverride] = createSignal<SummaryView | null>(null);
+  const view = (): SummaryView => {
+    const o = viewOverride();
+    if (o) return o;
+    return hasRes() ? 'res' : 'des';
+  };
+  const summaryText = (): string => (view() === 'res' ? resolution() : description());
+
+  // Toggle the deep inline detail from the TITLE only (operator 2026-06-19) —
   // open state is module-level so it survives the 2s /state poll.
   const open = (): boolean => isTaskOpen(props.task.id);
   const toggle = (e: MouseEvent): void => {
     e.stopPropagation();
     toggleTaskOpen(props.task.id);
   };
+
+  const modsLabel = (): string => {
+    const m = mods();
+    if (m.length === 0) return props.task.title;
+    return `${props.task.title} · ${m.length === 1 ? 'módulo' : 'módulos'}: ${m.join(', ')}`;
+  };
+
+  const onPickView = (v: SummaryView, e: MouseEvent): void => {
+    e.stopPropagation();
+    if (v === 'res' && !hasRes()) return;
+    setViewOverride(v);
+  };
+
   return (
     <li
       class={`rt-task is-${vstate()}${props.archived ? ' rt-task-archived' : ''}${open() ? ' rt-task-open' : ''}`}
@@ -494,68 +542,97 @@ function TaskRow(props: { task: ServerTask; archived?: boolean }) {
        *  active right now. */}
       <span class="rt-task-node" aria-hidden="true" />
 
-      {/* Explicit status glyph — first thing read on the row. */}
-      <span class="rt-task-state" title={stateTitle()} aria-label={stateTitle()}>
-        <Show when={vstate() === 'working'}>
-          <span class="rt-task-spinner" aria-hidden="true" />
-        </Show>
-        <Show when={vstate() === 'done'}>
-          <svg
-            class="rt-task-check"
-            viewBox="0 0 24 24"
-            width="12"
-            height="12"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="3"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
+      <div class="rt-task-main">
+        <div class="rt-task-line">
+          {/* Explicit status glyph — first thing read on the row. */}
+          <span class="rt-task-state" title={stateTitle()} aria-label={stateTitle()}>
+            <Show when={vstate() === 'working'}>
+              <span class="rt-task-spinner" aria-hidden="true" />
+            </Show>
+            <Show when={vstate() === 'done'}>
+              <svg
+                class="rt-task-check"
+                viewBox="0 0 24 24"
+                width="12"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M5 12.5l4.5 4.5L19 7" />
+              </svg>
+            </Show>
+            <Show when={vstate() === 'blocked'}>
+              <span class="rt-task-bang" aria-hidden="true">!</span>
+            </Show>
+            <Show when={vstate() === 'active'}>
+              <span class="rt-task-ring" aria-hidden="true" />
+            </Show>
+            <Show when={vstate() === 'pending'}>
+              <span class="rt-task-box" aria-hidden="true" />
+            </Show>
+          </span>
+
+          <span class="rt-task-code" title={props.task.id}>
+            {displayTaskId(props.task.id)}
+          </span>
+          <span
+            class="rt-task-text rt-task-toggle"
+            title={modsLabel()}
+            role="button"
+            tabIndex={0}
+            onClick={toggle}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e as unknown as MouseEvent); } }}
           >
-            <path d="M5 12.5l4.5 4.5L19 7" />
-          </svg>
-        </Show>
-        <Show when={vstate() === 'blocked'}>
-          <span class="rt-task-bang" aria-hidden="true">!</span>
-        </Show>
-        <Show when={vstate() === 'active'}>
-          <span class="rt-task-ring" aria-hidden="true" />
-        </Show>
-        <Show when={vstate() === 'pending'}>
-          <span class="rt-task-box" aria-hidden="true" />
-        </Show>
-      </span>
+            {props.task.title}
+          </span>
 
-      <span class="rt-task-code" title={props.task.id}>
-        {displayTaskId(props.task.id)}
-      </span>
-      <span
-        class="rt-task-text rt-task-toggle"
-        title={props.task.title}
-        role="button"
-        tabIndex={0}
-        onClick={toggle}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e as unknown as MouseEvent); } }}
-      >
-        {props.task.title}
-      </span>
+          {/* RTR2 — DES/RES selector took the modules slot. Modules moved
+           *  into the title's tooltip (zero pixel cost). RES is disabled
+           *  until the task has a `## Resolution` body. */}
+          <span class="rt-task-views" role="group" aria-label="Vista del resumen">
+            <button
+              type="button"
+              class={`rt-task-view-btn${view() === 'des' ? ' is-active' : ''}`}
+              onClick={(e) => onPickView('des', e)}
+              disabled={!hasDes()}
+              title="Descripción"
+              aria-pressed={view() === 'des'}
+            >
+              DES
+            </button>
+            <button
+              type="button"
+              class={`rt-task-view-btn${view() === 'res' ? ' is-active' : ''}`}
+              onClick={(e) => onPickView('res', e)}
+              disabled={!hasRes()}
+              title={hasRes() ? 'Resultado de la ejecución' : 'Sin resultado todavía'}
+              aria-pressed={view() === 'res'}
+            >
+              RES
+            </button>
+          </span>
+        </div>
 
-      <Show when={mods().length > 0}>
-        <span class="rt-task-mods">
-          <For each={mods()}>
-            {(m) => (
-              <span class="rt-task-mod" title={`Módulo: ${m}`}>
-                {m}
-              </span>
-            )}
-          </For>
-        </span>
-      </Show>
+        {/* RTR2 — summary line under the title. Always visible when there's
+         *  something to show; clamped 2-3 lines via CollapsibleText. */}
+        <Show when={summaryText().length > 0}>
+          <div
+            class={`rt-task-summary rt-task-summary-${view()}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <CollapsibleText text={summaryText()} markdown />
+          </div>
+        </Show>
+      </div>
 
       {/* Inline detail on click — description always; + execution summary
        *  + modified files when archived (the registry). */}
       <Show when={open()}>
-        <TaskDetail task={props.task} archived={props.archived} />
+        <TaskDetail task={props.task} archived={props.archived} body={body()} />
       </Show>
     </li>
   );
@@ -603,25 +680,11 @@ function taskCommits(task: ServerTask): string[] {
   return [];
 }
 
-function TaskDetail(props: { task: ServerTask; archived?: boolean }) {
+function TaskDetail(props: { task: ServerTask; archived?: boolean; body: string }) {
   const conv = createMemo<string | undefined>(() => convForTask(props.task.id));
 
-  // The rich body (description + resolution) lives in the task .md; fetch
-  // it once when this row mounts (the parent initiative is already open).
-  const [bodyRes] = createResource<string, { path: string }>(
-    () => (props.task.path ? { path: props.task.path } : null),
-    async (input) => {
-      const client = daemonStore.state.client;
-      if (!client) return taskBodyCache.get(input.path) ?? '';
-      const r = await client.readMarkdownFile(input.path);
-      const text = r.ok ? r.body : '';
-      if (text) taskBodyCache.set(input.path, text);
-      return text;
-    },
-  );
-  // Fall back to the cached body while a poll-recreated row re-fetches —
-  // no flicker, no collapse.
-  const body = (): string => bodyRes() ?? (props.task.path ? taskBodyCache.get(props.task.path) ?? '' : '');
+  // Body is fetched at TaskRow level (RTR2) and threaded in.
+  const body = (): string => props.body;
 
   // Fallback summary: the live conv's final message, for tasks resolved
   // before the daemon began persisting `## Resolution` (graceful).
@@ -632,7 +695,6 @@ function TaskDetail(props: { task: ServerTask; archived?: boolean }) {
     return (m?.text ?? '').trim();
   };
 
-  const description = (): string => extractDescription(body());
   const resolution = (): string => extractResolution(body()) || convFinal();
   const files = (): string[] => taskFiles(props.task);
   const commits = (): string[] => taskCommits(props.task);
@@ -655,17 +717,9 @@ function TaskDetail(props: { task: ServerTask; archived?: boolean }) {
         </div>
       </Show>
 
-      {/* description — plain text under the title, no label / no rule */}
-      <Show
-        when={description()}
-        fallback={
-          <Show when={!bodyRes.loading}>
-            <p class="rt-arch-empty">Sin descripción.</p>
-          </Show>
-        }
-      >
-        <div class="rt-task-desc"><CollapsibleText text={description()} markdown /></div>
-      </Show>
+      {/* RTR2 — description no longer repeated here; it's the default
+       *  summary line under the title. Deep expand stays focused on the
+       *  execution registry (agent, stamp, resolution, files). */}
 
       {/* execution summary + files — only for archived (the registry) */}
       <Show when={props.archived && resolution()}>

@@ -526,14 +526,29 @@
 .rt-task {
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;       /* RTR2 — main column may grow with summary */
   gap: 9px;
   padding: 5px 0;
+}
+/* RTR2 — the row used to be a single horizontal line; now the title + the
+ * always-visible summary stack vertically inside .rt-task-main. */
+.rt-task-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rt-task-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
 }
 /* Only the TITLE toggles the inline detail (operator 2026-06-19). */
 .rt-task-toggle { cursor: pointer; }
 .rt-task-toggle:hover { color: #fff; }
-/* When open (or archived), the inline detail wraps to its own line. */
+/* When open (or archived), the inline detail wraps below the main column. */
 .rt-task-archived, .rt-task-open { flex-wrap: wrap; }
 /* Description = plain text under the title — no label, no rule, no box.
    (The parent .rt-arch-detail already indents under the title.) */
@@ -659,28 +674,73 @@
   50%      { opacity: .58; }
 }
 
-/* Modules — far-right badges (took the old status label's slot). One
- * per module; the row's flex:1 title pushes them to the right edge. */
-.rt-task-mods {
+/* RTR2 — DES/RES view selector (took the old modules slot on the right).
+ * Two compact pill-buttons; the active one fills with the active hue, the
+ * inactive one is a quiet outline. Disabled = nothing to show in that
+ * view (e.g. RES on a not-yet-resolved task). Modules moved to the title
+ * tooltip (zero pixel cost in the row). */
+.rt-task-views {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   margin-left: 6px;
 }
-.rt-task-mod {
+.rt-task-view-btn {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 9.5px;
-  letter-spacing: .02em;
+  font-weight: 600;
+  letter-spacing: .04em;
   color: #9aa6c4;
   background: #11161f;
   border: 1px solid #222a3a;
   border-radius: 999px;
   padding: 1px 8px;
+  cursor: pointer;
   white-space: nowrap;
-  max-width: 130px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  transition: color .15s ease, background .15s ease, border-color .15s ease, opacity .15s ease;
+}
+.rt-task-view-btn:hover:not(:disabled) {
+  color: #d6deea;
+  border-color: #34405a;
+}
+.rt-task-view-btn.is-active {
+  color: #0a0d12;
+  background: #7dd3fc;            /* sky-300 — matches the active hue */
+  border-color: #7dd3fc;
+}
+.rt-task-view-btn:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+
+/* RTR2 — always-visible summary line under the task title. Holds either
+ * the description (DES) or the resolution (RES). CollapsibleText handles
+ * the 2-3 line clamp + "+ más" / "— menos" toggle, so the wrapper just
+ * positions + colors the block. */
+.rt-task-summary {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #aab2bd;
+  /* Indent under the state glyph + code so the summary lines up with the
+   * title, not the timeline node. (16px state + 9px gap + 58px code + 9px gap = 92px.) */
+  padding-left: 92px;
+}
+/* Visually distinguish DES vs RES — RES gets a faint left rule in the
+ * done hue so the eye knows "this is the result, not the brief". */
+.rt-task-summary-res {
+  border-left: 2px solid color-mix(in srgb, var(--theme-status-done, #a78bfa) 60%, transparent);
+  padding-left: 90px;             /* compensate for the 2px border */
+  margin-left: 0;
+}
+/* On narrow widths the indent gets in the way — drop it under 520px. */
+@media (max-width: 520px) {
+  .rt-task-summary,
+  .rt-task-summary-res {
+    padding-left: 0;
+    border-left: 0;
+  }
 }
 
 /* Reduced motion — stop the spinner, pulse, and title blink */
@@ -741,14 +801,24 @@
 }
 
 /* Header above the timeline (filter pills + run-all) — black flavour.
- * "Initiatives" sits at the same x as the vertical line below it. */
+ * "Initiatives" sits at the same x as the vertical line below it.
+ * 2026-06-23: STICKY so the filter chips (queue · active · backlog · …)
+ * stay visible while the operator scrolls a long roadmap. Scroll
+ * container is `.ws-panel` (overflow-y:auto). Solid bg matches `.rt-wrap`
+ * (#0a0d12) so content slides UNDER it. The negative margins + padding
+ * extend the bg so it bleeds past the wrap's left/right padding,
+ * covering the timeline line/nodes during scroll. */
 .rt-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 10px;      /* tightened 2026-06-19 to match the other columns' option rows */
-  padding-left: 4px;        /* fine-align with the line at x=14 */
+  margin: 0 -18px 10px -4px;
+  padding: 8px 18px 8px 8px;
+  background: #0a0d12;
 }
 .rt-header .rt-h-title {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
