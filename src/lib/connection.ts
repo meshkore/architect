@@ -158,7 +158,13 @@ export async function connect(setStatus: (s: ConnectionStatus) => void): Promise
   }
 
   const userToken = readStoredToken(probe.health, probe.port);
-  const transport = localTransport(probe.port, userToken);
+  // FC-1/FC-2 — carry the boot project's id (X-MeshKore-Project) for daemon
+  // routing; matches the daemon's default project today.
+  const transport = localTransport(
+    probe.port,
+    userToken,
+    probe.health.cluster_id ?? undefined,
+  );
   const client = new DaemonClient(transport);
 
   // Authenticated probe — /state requires a Bearer. If 401 we ask the

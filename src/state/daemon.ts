@@ -602,7 +602,13 @@ async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
     return { ok: false, reason: 'unknown', detail: 'auth mismatch' };
   }
 
-  const client = new DaemonClient(localTransport(port, token));
+  // FC-1/FC-2 — carry the project id so the daemon routes this client's
+  // requests to the right ProjectContext. Today each per-port daemon's default
+  // project IS this cluster, so the header matches; once one daemon serves many
+  // projects (OC-1) this is what disambiguates them.
+  const client = new DaemonClient(
+    localTransport(port, token, health.cluster_id ?? undefined),
+  );
   attachClient(client, health);
   console.log('[RAIL] switchToPort attached new instance', { port, cluster_id: health.cluster_id ?? null });
   log.info('switchToPort attached', { port, cluster_id: health.cluster_id ?? null, identity: verify.kind });
