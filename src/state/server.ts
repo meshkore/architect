@@ -197,6 +197,7 @@ async function doRefresh(client: DaemonClient, key: string): Promise<void> {
     }
     const res = await client.state();
     if (res.ok) {
+      consecutiveStateFail.set(key, 0);
       writeSlice(key, {
         snapshot: res.data as ServerSnapshot,
         lastRefresh: new Date().toISOString(),
@@ -213,7 +214,26 @@ async function doRefresh(client: DaemonClient, key: string): Promise<void> {
     });
   }
   writeSlice(key, { refreshing: false, error: lastErr });
+  // Self-healing (2026-06-24): /state for the ACTIVE cluster has now failed
+  // a full retry-cycle. After STATE_FAIL_THRESHOLD consecutive cycles, hand
+  // the project to the centre-zone reconnect flow (OfflinePanel: auto re-probe
+  // /health → re-attach the moment it answers, else manual-restart guidance).
+  // This auto-recovers BOTH a real daemon outage AND a wedged tab (the re-probe
+  // re-establishes the connection). Dynamic import keeps server.ts free of the
+  // daemonStore cycle. Only the active cluster — the rail and other clusters
+  // are untouched.
+  const n = (consecutiveStateFail.get(key) ?? 0) + 1;
+  consecutiveStateFail.set(key, n);
+  if (key === activeClusterKey && n >= STATE_FAIL_THRESHOLD) {
+    consecutiveStateFail.set(key, 0);
+    void import('~/state/daemon')
+      .then(({ daemonStore }) => daemonStore.markActiveDisconnected(key, 'lost'))
+      .catch(() => undefined);
+  }
 }
+
+const consecutiveStateFail = new Map<string, number>();
+const STATE_FAIL_THRESHOLD = 2; // ~2 retry-cycles (~a few seconds) before reconnect UI
 
 /** Debounced per-cluster refresh. Two back-to-back calls on the same
  *  cluster coalesce; different clusters don't interfere. */

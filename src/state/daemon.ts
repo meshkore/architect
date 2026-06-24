@@ -35,7 +35,7 @@ import { log } from '~/lib/log';
 // everything in the main chunk, so a stale tab either Just Works
 // (everything already loaded) or the chunk-load guard reloads it.
 import { daemonHttpBase, localTransport } from '~/lib/transport';
-import { clusterTokenKey, tokenForCluster } from '~/lib/tokens';
+import { clusterTokenKey, tokenForCluster, saveTokenForCluster } from '~/lib/tokens';
 import { verifyDaemonIdentity } from '~/lib/auth';
 import { openTokenUnlockModal } from '~/components/modals/TokenUnlockModal';
 
@@ -111,8 +111,10 @@ export interface OfflineSelection {
   cluster_id: string | null;
   cluster_name: string | null;
   display: string;
-  /** Why the probe failed — used by the panel to tailor the message. */
-  reason: 'no-daemon' | 'tls' | 'unknown';
+  /** Why the probe failed — used by the panel to tailor the message.
+   *  'lost' = a previously-LIVE connection dropped (reconnecting), vs the
+   *  boot-time 'no-daemon'/'tls'/'unknown' (never connected). */
+  reason: 'no-daemon' | 'tls' | 'unknown' | 'lost';
 }
 
 /** py-1.12.5 — Runner auth request pushed from event-bus into the
@@ -323,12 +325,19 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
       try {
         const { findClusterPort } = await import('~/components/projects-rail/discovery');
         const found = await findClusterPort(cid);
-        if (!found || found.port === state.instances[key]?.port) return;
-        log.info('ws-fatal: cluster moved ports, hot-swapping', {
-          cluster_id: cid, stale: state.instances[key]?.port, live: found.port,
-        });
-        try { localStorage.setItem('meshcore-last-port', String(found.port)); } catch { /* quota */ }
-        await daemonStore.switchToPortDetailed(found.port);
+        if (found && found.port !== state.instances[key]?.port) {
+          log.info('ws-fatal: cluster moved ports, hot-swapping', {
+            cluster_id: cid, stale: state.instances[key]?.port, live: found.port,
+          });
+          try { localStorage.setItem('meshcore-last-port', String(found.port)); } catch { /* quota */ }
+          await daemonStore.switchToPortDetailed(found.port);
+        } else if (!found) {
+          // Daemon is gone (not just a port move) → self-healing reconnect UI
+          // in the centre zone (auto-retry + manual-restart guidance). Rail
+          // untouched. If found on the SAME port it's a WS glitch — let the
+          // socket retry on its own, don't tear the project down.
+          markActiveDisconnected(key);
+        }
       } finally {
         recovering = false;
       }
@@ -541,10 +550,19 @@ async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
   console.log('[RAIL] switchToPort identity', { port, outcome: verify.kind });
 
   if (verify.kind === 'no-token') {
-    // Daemon is reachable but we have no token stored for this cluster yet.
-    // Open the unlock modal immediately — don't wait for a chat call to 401.
-    // Once the operator saves a valid token, re-run switchToPortDetailed so
-    // the client is properly attached and the cockpit body renders.
+    // LOCAL auto-unlock (py-1.27.6) — a token for your OWN local daemon is
+    // pointless friction. The daemon hands its bearer token to the
+    // same-origin cockpit over loopback (GET /auth/local-token, origin-gated),
+    // so a local project connects with NO prompt. Only if that fails (the
+    // future CLOUD daemon, a different origin, or an opt-out) do we fall back
+    // to asking for the token.
+    const localTok = await fetchLocalToken(port);
+    if (localTok) {
+      saveTokenForCluster(tokenKey, localTok);
+      log.info('switchToPort — auto-unlocked local cluster', { port, cluster: health.cluster_id });
+      return switchToPortDetailed(port); // re-attach now that the token is stored
+    }
+    // Daemon is reachable but we have no token and couldn't auto-acquire one.
     log.info('switchToPort — no token for cluster, opening unlock dialog', { port, cluster: health.cluster_id });
     return new Promise<SwitchOutcome>((resolve) => {
       openTokenUnlockModal({
@@ -610,6 +628,46 @@ function selectOffline(target: OfflineSelection): void {
 function clearOfflineSelection(): void {
   if (!state.offlineSelection) return;
   setState('offlineSelection', null);
+}
+
+/** GET the daemon's bearer token from a LOCAL (loopback) daemon for the
+ *  same-origin cockpit (py-1.27.6 auto-unlock). Returns null on any failure
+ *  (non-local / older daemon / opted out / network) — caller falls back to
+ *  the explicit token flow. The token never leaves this machine. */
+async function fetchLocalToken(port: number): Promise<string | null> {
+  try {
+    const r = await fetch(`${daemonHttpBase(port)}/auth/local-token`, {
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!r.ok) return null;
+    const d = (await r.json().catch(() => ({}))) as { token?: string };
+    return typeof d.token === 'string' && d.token.length > 0 ? d.token : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Self-healing reconnect entry point (2026-06-24). Called when the ACTIVE
+ *  cluster's connection is lost (HTTP refresh fails repeatedly, or WS goes
+ *  fatal with no live port). Tears the dead instance down and drops into the
+ *  OfflinePanel for THIS project — which auto-reconnects (polls /health,
+ *  re-attaches the moment it answers) and, if it stays down, shows manual
+ *  daemon-restart guidance. Renders in the centre project zone only; the
+ *  left projects rail is untouched so the other clusters stay usable. */
+function markActiveDisconnected(key: string, reason: OfflineSelection['reason'] = 'lost'): void {
+  const inst = state.instances[key];
+  if (!inst || state.activeId !== key) return; // only the active, still-tracked cluster
+  const sel: OfflineSelection = {
+    key,
+    port: inst.port,
+    cluster_id: inst.health?.cluster_id ?? null,
+    cluster_name: inst.health?.cluster_name ?? null,
+    display: inst.health?.cluster_name ?? inst.health?.cluster_id ?? `:${inst.port}`,
+    reason,
+  };
+  log.warn('connection lost — entering reconnecting (centre zone)', { key, port: inst.port, reason });
+  disconnectInstance(key); // close WS/bus
+  selectOffline(sel); // phase 'no-daemon' + offlineSelection → OfflinePanel mounts + auto-reconnects
 }
 
 /**
@@ -729,6 +787,7 @@ export const daemonStore = {
   disconnect,
   disconnectAll,
   disconnectInstance,
+  markActiveDisconnected,
   setPhase,
   setAutoUpdate,
   recheckHealth,

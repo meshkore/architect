@@ -165,6 +165,9 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }): J
 
   const cluster = (): string =>
     props.sel.cluster_name ?? props.sel.display ?? `port ${props.sel.port}`;
+  // 'lost' = a previously-live connection dropped → frame as reconnecting
+  // (auto, nothing for the operator to do) vs boot-time "waiting".
+  const reconnecting = (): boolean => props.sel.reason === 'lost';
 
   return (
     <section class="h-full flex items-center justify-center px-6 py-12 overflow-auto">
@@ -172,12 +175,19 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }): J
         <header class="mb-6">
           <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-500/10 border border-gray-500/40 text-gray-300 text-xs font-medium mb-4">
             <span class="w-1.5 h-1.5 rounded-full bg-gray-400 animate-pulse-soft" />
-            <Show when={diagnose() === 'tls-missing'} fallback="Daemon offline">TLS bundle missing</Show>
+            <Show when={diagnose() === 'tls-missing'} fallback={reconnecting() ? 'Reconnecting' : 'Daemon offline'}>TLS bundle missing</Show>
           </div>
           <h1 class="text-2xl md:text-3xl font-semibold tracking-tight mb-2">
             <Show
               when={diagnose() === 'tls-missing'}
-              fallback={<>Esperando a <span class="font-mono text-gray-100">{cluster()}</span></>}
+              fallback={
+                <Show
+                  when={reconnecting()}
+                  fallback={<>Esperando a <span class="font-mono text-gray-100">{cluster()}</span></>}
+                >
+                  Reconectando a <span class="font-mono text-gray-100">{cluster()}</span>
+                </Show>
+              }
             >
               Reparando <span class="font-mono text-gray-100">{cluster()}</span>
             </Show>
@@ -185,10 +195,19 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }): J
           <p class="text-gray-400 leading-relaxed text-sm">
             <Show
               when={diagnose() === 'tls-missing'}
-              fallback={<>
-                The daemon on <span class="font-mono text-gray-300">:{props.sel.port}</span> isn't
-                responding. The cockpit reconnects the moment <code class="font-mono text-gray-300">/health</code> answers.
-              </>}
+              fallback={
+                <Show
+                  when={reconnecting()}
+                  fallback={<>
+                    The daemon on <span class="font-mono text-gray-300">:{props.sel.port}</span> isn't
+                    responding. The cockpit reconnects the moment <code class="font-mono text-gray-300">/health</code> answers.
+                  </>}
+                >
+                  Perdimos la conexión con el daemon en <span class="font-mono text-gray-300">:{props.sel.port}</span>.
+                  Reintentando automáticamente — se reanuda solo en cuanto responda, no tienes que hacer nada.
+                  Tus otros proyectos siguen disponibles en la barra de la izquierda.
+                </Show>
+              }
             >
               Something is bound to <span class="font-mono text-gray-300">:{props.sel.port}</span>{' '}
               but it's serving plain HTTP. The cockpit speaks HTTPS only — sync the TLS bundle and restart.
