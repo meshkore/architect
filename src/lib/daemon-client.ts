@@ -662,7 +662,12 @@ export class DaemonClient {
     try {
       const r = await fetch(url, {
         signal,
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(this.transport.projectId
+            ? { 'X-MeshKore-Project': this.transport.projectId }
+            : {}),
+        },
       });
       if (!r.ok) return { ok: false, status: r.status };
       const body = await r.text();
@@ -720,7 +725,12 @@ export class DaemonClient {
     try {
       const r = await fetch(url, {
         signal,
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(this.transport.projectId
+            ? { 'X-MeshKore-Project': this.transport.projectId }
+            : {}),
+        },
       });
       if (!r.ok) return { ok: false, status: r.status };
       const body = await r.text();
@@ -774,7 +784,12 @@ export class DaemonClient {
     try {
       const r = await fetch(url, {
         signal,
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(this.transport.projectId
+            ? { 'X-MeshKore-Project': this.transport.projectId }
+            : {}),
+        },
       });
       if (!r.ok) return { ok: false, status: r.status };
       const body = await r.text();
@@ -970,6 +985,12 @@ export class DaemonClient {
     if (sendsBody) headers['content-type'] = 'application/json';
     if (requireAuth && this.transport.token) {
       headers['authorization'] = `Bearer ${this.transport.token}`;
+    }
+    // FC-1 (daemon-centralized) — one chokepoint, so every one of the 52
+    // client methods inherits project routing. Absent projectId → no header →
+    // daemon's default (boot) project = today's behaviour.
+    if (this.transport.projectId) {
+      headers['x-meshkore-project'] = this.transport.projectId;
     }
     let res: Response;
     // V108 — bound EVERY request. Most callers (boot path: health /

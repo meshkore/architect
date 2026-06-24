@@ -26,6 +26,13 @@ export interface TransportConfig {
   token: string;
   /** Human-readable label shown in the UI ("localhost:5570", "cloud · meshkore-main"). */
   label: string;
+  /**
+   * FC-1 (daemon-centralized) — the project this transport addresses. Sent as
+   * the `X-MeshKore-Project` header on every request so ONE daemon can serve
+   * many projects. Absent → the daemon uses its default (boot) project, which
+   * is exactly today's one-daemon-per-project behaviour.
+   */
+  projectId?: string;
 }
 
 /** Default daemon port range from the spec — try first in order. */
@@ -95,7 +102,11 @@ export function daemonWsBase(port: number): string {
  * Build a LOCAL transport for a given port. No token resolution here — the
  * caller injects it (from localStorage, prompt, or auto-discovery).
  */
-export function localTransport(port: number, token: string): TransportConfig {
+export function localTransport(
+  port: number,
+  token: string,
+  projectId?: string,
+): TransportConfig {
   const tls = useTlsDaemon();
   return {
     kind: 'local',
@@ -103,17 +114,24 @@ export function localTransport(port: number, token: string): TransportConfig {
     wsBase: daemonWsBase(port),
     token,
     label: tls ? `${LOOPBACK_HOSTNAME}:${port}` : `localhost:${port}`,
+    projectId,
   };
 }
 
 /** LAN transport — same shape, different host. */
-export function lanTransport(host: string, port: number, token: string): TransportConfig {
+export function lanTransport(
+  host: string,
+  port: number,
+  token: string,
+  projectId?: string,
+): TransportConfig {
   return {
     kind: 'lan',
     httpBase: `http://${host}:${port}`,
     wsBase: `ws://${host}:${port}`,
     token,
     label: `${host}:${port}`,
+    projectId,
   };
 }
 
