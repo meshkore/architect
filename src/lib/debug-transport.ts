@@ -118,6 +118,12 @@ async function flushOnce(): Promise<void> {
       headers: {
         'Content-Type': 'application/json',
         ...(client.transport.token ? { Authorization: `Bearer ${client.transport.token}` } : {}),
+        // Centralized multi-project debug — tag these cockpit logs with the
+        // project so the one daemon debug stream is filterable (raw fetch, so
+        // the header isn't auto-injected like in DaemonClient.request).
+        ...(client.transport.projectId
+          ? { 'X-MeshKore-Project': client.transport.projectId }
+          : {}),
       },
       body: JSON.stringify({ events: batch }),
     });
