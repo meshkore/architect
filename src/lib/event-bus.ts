@@ -98,6 +98,13 @@ export function attachEventBus(
   const unsubscribe = ws.onAny((ev: DaemonEvent) => {
     const t = ev.type;
     if (!t) return;
+    // FC-2/FC-3 (daemon-centralized) — ONE daemon's WS carries events for ALL
+    // the projects it serves (the hub broadcasts to every socket). This bus is
+    // scoped to one project (clusterKey); drop events tagged (DC-6) for a
+    // different project. Untagged/global events (heartbeat, idea.*, legacy
+    // daemons) have no project_id → pass through unchanged.
+    const evProject = (ev as { project_id?: string }).project_id;
+    if (evProject && evProject !== clusterKey) return;
     if (t.startsWith(CHAT_TYPE_PREFIX) && typeof ev.conv === 'string') {
       // MP4 — route to the right cluster's slice. When the cluster
       // is active, this is a normal ingestEvent (reactive setState);

@@ -483,12 +483,17 @@ async function switchToPort(port: number): Promise<boolean> {
   return r.ok;
 }
 
-async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
-  console.log('[RAIL] switchToPort entry', { port, current: state.health?.port ?? null, instances: Object.keys(state.instances) });
-  log.info('switchToPort requested', { port, current: state.health?.port ?? null });
+async function switchToPortDetailed(port: number, projectId?: string): Promise<SwitchOutcome> {
+  console.log('[RAIL] switchToPort entry', { port, projectId, current: state.health?.port ?? null, instances: Object.keys(state.instances) });
+  log.info('switchToPort requested', { port, projectId, current: state.health?.port ?? null });
 
-  // Already-attached instance for this port? Just flip the pointer.
-  const existing = Object.entries(state.instances).find(([, i]) => i.port === port);
+  // FC-2 (daemon-centralized) — ONE daemon serves MANY projects, so an instance
+  // is identified by its projectId, not its port. Match by projectId when given
+  // (multiple instances share a port); fall back to port for single-project /
+  // legacy daemons that send no project id.
+  const existing = Object.entries(state.instances).find(([, i]) =>
+    projectId ? i.client.transport.projectId === projectId : i.port === port,
+  );
   if (existing) {
     const [key, inst] = existing;
     console.log('[RAIL] switchToPort reusing existing instance', { key, port });
@@ -526,7 +531,13 @@ async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
     // forever, so the switchProject in-flight guard never cleared and
     // the project was stuck un-switchable. 5s is well above a healthy
     // localhost /health (<100ms) yet bounds the worst case.
-    const r = await fetch(probeUrl, { signal: AbortSignal.timeout(5000) });
+    // FC-2 — probe the SELECTED project's /health (DC-4 makes /health honour
+    // the header), so health.cluster_id == projectId and the instance keys
+    // correctly even when many projects share this daemon/port.
+    const r = await fetch(probeUrl, {
+      headers: projectId ? { 'X-MeshKore-Project': projectId } : {},
+      signal: AbortSignal.timeout(5000),
+    });
     if (!r.ok) {
       console.warn('[RAIL] switchToPort probe non-OK', { port, status: r.status });
       log.warn('switchToPort probe failed', port, r.status);
@@ -565,7 +576,7 @@ async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
     if (localTok) {
       saveTokenForCluster(tokenKey, localTok);
       log.info('switchToPort — auto-unlocked local cluster', { port, cluster: health.cluster_id });
-      return switchToPortDetailed(port); // re-attach now that the token is stored
+      return switchToPortDetailed(port, projectId); // re-attach now that the token is stored
     }
     // Daemon is reachable but we have no token and couldn't auto-acquire one.
     log.info('switchToPort — no token for cluster, opening unlock dialog', { port, cluster: health.cluster_id });
@@ -574,7 +585,7 @@ async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
         project: { port, cluster_id: health.cluster_id ?? null, cluster_name: health.cluster_name ?? null },
         onUnlocked: (_tok) => {
           // Token is now saved in the per-cluster map; re-attach.
-          void switchToPortDetailed(port).then(resolve);
+          void switchToPortDetailed(port, projectId).then(resolve);
         },
         onCancel: () => {
           // Operator dismissed — attach anyway with empty token so the project
@@ -597,7 +608,7 @@ async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
         'token. Likely causes: stale local token, or someone impersonating the daemon on ' +
         'this network. Paste a fresh token from .meshkore/credentials/portal-token, ' +
         'or move to a trusted network.',
-      onUnlocked: () => { void switchToPortDetailed(port); },
+      onUnlocked: () => { void switchToPortDetailed(port, projectId); },
     });
     return { ok: false, reason: 'unknown', detail: 'auth mismatch' };
   }
@@ -607,7 +618,7 @@ async function switchToPortDetailed(port: number): Promise<SwitchOutcome> {
   // project IS this cluster, so the header matches; once one daemon serves many
   // projects (OC-1) this is what disambiguates them.
   const client = new DaemonClient(
-    localTransport(port, token, health.cluster_id ?? undefined),
+    localTransport(port, token, projectId ?? health.cluster_id ?? undefined),
   );
   attachClient(client, health);
   console.log('[RAIL] switchToPort attached new instance', { port, cluster_id: health.cluster_id ?? null });

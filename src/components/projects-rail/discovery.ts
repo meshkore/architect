@@ -14,14 +14,32 @@ export const [livePorts, setLivePorts] = createSignal<Set<number>>(new Set());
 export const [liveClusters, setLiveClusters] = createSignal<Map<string, LiveProbe>>(new Map());
 export const [scanning, setScanning] = createSignal(false);
 
-async function probe(port: number): Promise<LiveProbe | null> {
+async function probe(port: number): Promise<LiveProbe[]> {
   const base = daemonHttpBase(port);
   try {
     const r = await fetch(`${base}/health`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
-    if (!r.ok) return null;
+    if (!r.ok) return [];
     const data = await r.json().catch(() => ({})) as { cluster_id?: string; cluster_name?: string };
-    return { port, base, cluster_id: data.cluster_id ?? null, cluster_name: data.cluster_name ?? null };
-  } catch { return null; }
+    // FC-2 (daemon-centralized) — ONE daemon may serve MANY projects. Ask
+    // /projects (no-auth discovery) and emit one rail entry per project, all on
+    // this port. The daemon routes each by the X-MeshKore-Project header.
+    // Falls back to the single /health cluster for old daemons (no /projects).
+    try {
+      const pr = await fetch(`${base}/projects`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+      if (pr.ok) {
+        const pd = await pr.json().catch(() => ({})) as { projects?: Array<{ id?: string; name?: string }> };
+        const list = Array.isArray(pd.projects) ? pd.projects.filter((p) => p.id) : [];
+        if (list.length > 0) {
+          return list.map((p) => ({
+            port, base,
+            cluster_id: p.id as string,
+            cluster_name: p.name ?? (p.id as string),
+          }));
+        }
+      }
+    } catch { /* old daemon / no /projects → single-cluster fallback below */ }
+    return [{ port, base, cluster_id: data.cluster_id ?? null, cluster_name: data.cluster_name ?? null }];
+  } catch { return []; }
 }
 
 export async function discoverProjects(opts: { fullScan?: boolean } = {}): Promise<void> {
@@ -37,13 +55,13 @@ export async function discoverProjects(opts: { fullScan?: boolean } = {}): Promi
   for (const p of known) priority.add(p.port);
   const pri = [...priority].filter((p) => p >= PORT_LO && p <= PORT_HI);
 
-  let live = (await Promise.all(pri.map(probe))).filter((x): x is LiveProbe => !!x);
+  let live = (await Promise.all(pri.map(probe))).flat();
 
   // Only sweep the rest of the range on explicit user rescan.
   if (opts.fullScan) {
     const rest: number[] = [];
     for (let p = PORT_LO; p <= PORT_HI; p++) if (!priority.has(p)) rest.push(p);
-    const more = (await Promise.all(rest.map(probe))).filter((x): x is LiveProbe => !!x);
+    const more = (await Promise.all(rest.map(probe))).flat();
     live = live.concat(more);
   }
 
@@ -94,8 +112,7 @@ export const projectsRailScan = {
 export async function findClusterPort(targetClusterId: string): Promise<LiveProbe | null> {
   const ports: number[] = [];
   for (let p = PORT_LO; p <= PORT_HI; p += 1) ports.push(p);
-  const probes = await Promise.all(ports.map(probe));
-  const live = probes.filter((x): x is LiveProbe => !!x);
+  const live = (await Promise.all(ports.map(probe))).flat();
   const match = live.find((p) => p.cluster_id === targetClusterId);
   // Update the discovery signals + projectsStore in a single batch so
   // memos downstream (rows.ts, OfflinePanel) see one consistent tick.

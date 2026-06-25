@@ -151,7 +151,9 @@ async function switchProjectImpl(
   }
 
   try { localStorage.setItem('meshcore-last-port', String(effectivePort)); } catch { /* quota */ }
-  let outcome = await daemonStore.switchToPortDetailed(effectivePort);
+  // FC-2 — pass the selected project's id so the daemon routes to it (one
+  // daemon may serve many projects; the instance is keyed by projectId).
+  let outcome = await daemonStore.switchToPortDetailed(effectivePort, fallback?.cluster_id ?? undefined);
   console.log('[RAIL] switchProject result', { port: effectivePort, key, outcome });
 
   // V86l — second-chance reconciliation. If the probe failed AND we
@@ -168,7 +170,7 @@ async function switchProjectImpl(
         cluster_id: fallback.cluster_id, port: found.port,
       });
       try { localStorage.setItem('meshcore-last-port', String(found.port)); } catch { /* quota */ }
-      const retry = await daemonStore.switchToPortDetailed(found.port);
+      const retry = await daemonStore.switchToPortDetailed(found.port, fallback?.cluster_id ?? undefined);
       if (retry.ok) {
         // Drop any prior offline pick that was anchored to the
         // stale port — the canonical attach above already cleared
