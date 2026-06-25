@@ -599,6 +599,18 @@ async function switchToPortDetailed(port: number, projectId?: string): Promise<S
   }
 
   if (verify.kind === 'mismatch') {
+    // FC-2 (daemon-centralized) — a mismatch on a LOCAL daemon is almost always
+    // a STALE token (the daemon re-minted, or a different daemon used this port
+    // before — common now that ONE central daemon replaces the per-port ones),
+    // NOT a real MITM. If the daemon offers local auto-unlock, re-fetch its
+    // current token and retry ONCE. Only refuse if the fresh token is the same
+    // (genuinely wrong) or unavailable (remote daemon / opt-out).
+    const freshTok = await fetchLocalToken(port);
+    if (freshTok && freshTok !== token) {
+      saveTokenForCluster(tokenKey, freshTok);
+      log.info('switchToPort — stale token replaced via local auto-unlock; retrying', { port, cluster: health.cluster_id });
+      return switchToPortDetailed(port, projectId);
+    }
     log.error('switchToPort REFUSED — auth challenge failed (possible MITM)', { port, cluster: health.cluster_id });
     openTokenUnlockModal({
       project: { port, cluster_id: health.cluster_id ?? null, cluster_name: health.cluster_name ?? null },
