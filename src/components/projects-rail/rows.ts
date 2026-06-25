@@ -67,8 +67,15 @@ export const rows = createRoot(() =>
       if (!k.cluster_id && livePortSet.has(k.port)) continue;
     }
     const port = portCandidate;
-    if (seenPorts.has(port)) continue;
-    if (k.cluster_id && seenClusters.has(k.cluster_id)) continue;
+    // FC-2 (daemon-centralized) — ONE daemon/port now serves MANY projects, so
+    // the unique key is the cluster_id (project), NOT the port. Dedup cluster'd
+    // rows by cluster_id (many can share a port); only port-dedup legacy rows
+    // that have no cluster_id.
+    if (k.cluster_id) {
+      if (seenClusters.has(k.cluster_id)) continue;
+    } else if (seenPorts.has(port)) {
+      continue;
+    }
     seenPorts.add(port);
     if (k.cluster_id) seenClusters.add(k.cluster_id);
     const alias = kp.getAlias(k);

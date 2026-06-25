@@ -24,7 +24,7 @@
  * Styling lives entirely in src/styles/projects-rail.css.
  */
 
-import { For, Show, createMemo, createEffect, onCleanup } from 'solid-js';
+import { For, Show, createMemo, createEffect, onCleanup, onMount } from 'solid-js';
 import { uiStore } from '~/state/ui';
 import ProjectsRailRow from '~/components/ProjectsRailRow';
 import { PORT_LO, PORT_HI, discoverProjects, scanning, setScanning } from '~/components/projects-rail/discovery';
@@ -66,7 +66,13 @@ export default function ProjectsRail() {
   //   - "Rescan" button in `RailFooter`
   // Both call `discoverProjects({ fullScan: true })` which sweeps
   // 5570–5589 once and stops.
-  void discoverProjects; // keep the import live for downstream callers
+  // FC-2 (daemon-centralized) — ONE daemon serves MANY projects, so the boot
+  // MUST enumerate them via /projects, or the rail shows only the single
+  // boot-attached project. This is now CHEAP: the priority probe set is mostly
+  // just the connected daemon's port, and each probe expands to its /projects
+  // list (not an N-port sweep). V86e removed boot discovery for the old
+  // per-port model; re-added here for the central model.
+  onMount(() => { void discoverProjects(); });
 
   // Onboarding "Watching for your daemon" loop (re-added 2026-06-24).
   // NewPromptScreen flips `scanning()` ON when the operator is about to
