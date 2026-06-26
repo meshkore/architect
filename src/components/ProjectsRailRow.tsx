@@ -94,7 +94,7 @@ export async function stopAllAgents(clusterKey: string): Promise<{ cancelled: nu
   };
 }
 
-const switchProjectInFlight = new Set<number>();
+const switchProjectInFlight = new Set<string>(); // FC-2: keyed by project (row key), not port
 
 /**
  * V108 — per-port re-entrancy guard. A failed/flapping switch (the
@@ -113,15 +113,19 @@ export async function switchProject(
   key: string,
   fallback?: { display: string; cluster_id: string | null; cluster_name: string | null },
 ): Promise<boolean> {
-  if (switchProjectInFlight.has(port)) {
-    console.log('[RAIL] switchProject coalesced — switch to this port already in flight', { port, key });
+  // FC-2 (daemon-centralized) — coalesce by PROJECT (key), not port. One daemon
+  // serves many projects on ONE port, so a port-keyed guard blocked switching
+  // between sibling projects (clicking B while A's switch was in flight no-oped
+  // forever). Keying by the row key lets each project switch independently.
+  if (switchProjectInFlight.has(key)) {
+    console.log('[RAIL] switchProject coalesced — switch to this project already in flight', { port, key });
     return false;
   }
-  switchProjectInFlight.add(port);
+  switchProjectInFlight.add(key);
   try {
     return await switchProjectImpl(port, key, fallback);
   } finally {
-    switchProjectInFlight.delete(port);
+    switchProjectInFlight.delete(key);
   }
 }
 
