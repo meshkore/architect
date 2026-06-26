@@ -122,6 +122,10 @@ export const rows = createRoot(() =>
   const emittedKeys = new Set(result.map((r) => r.key));
   const emittedClusters = new Set(result.map((r) => r.cluster_id).filter((c): c is string => !!c));
   for (const [, inst] of Object.entries(daemonStore.state.instances)) {
+    // FC-2 (daemon-centralized) — never synthesize a row for the server HOME
+    // (central store, not a project). The boot connection attaches it, but it
+    // must not appear in the rail.
+    if ((inst.health as { server_home?: boolean }).server_home) continue;
     const cid = inst.health.cluster_id ?? null;
     const port = inst.health.port;
     const synthKey = cid ?? `port:${port}`;

@@ -90,14 +90,19 @@ export default function App() {
     batch(() => {
       void store.attach(client);
       serverStore.setActiveCluster(activeId);
-      projectsStore.upsert({
-        port: health.port,
-        base: client.transport.httpBase,
-        cluster_id: health.cluster_id ?? undefined,
-        cluster_name: health.cluster_name ?? undefined,
-        status: 'live',
-      });
-      projectsStore.setActive(health.port, health.cluster_id ?? null);
+      // FC-2 (daemon-centralized) — the server HOME (central store: ideas,
+      // projects registry, external creds) is NOT a project. Don't register it
+      // in the rail; real projects come from discovery (GET /projects).
+      if (!(health as { server_home?: boolean }).server_home) {
+        projectsStore.upsert({
+          port: health.port,
+          base: client.transport.httpBase,
+          cluster_id: health.cluster_id ?? undefined,
+          cluster_name: health.cluster_name ?? undefined,
+          status: 'live',
+        });
+        projectsStore.setActive(health.port, health.cluster_id ?? null);
+      }
       chatStore.bindCluster(health.cluster_id ?? null);
       viewStore.bindCluster(health.cluster_id ?? null);
       // V89 — run state is now daemon-owned. Reset the in-memory
@@ -234,6 +239,26 @@ export default function App() {
       cluster_id: only.cluster_id,
       cluster_name: only.cluster_name,
     }).finally(() => { autoSelectInFlight = false; });
+  });
+
+  // FC-2 (daemon-centralized) — never sit on the server HOME. The boot probe
+  // connects to the central daemon via its home cluster (server_home), but the
+  // home is the global store, not a project. Once discovery surfaces a real
+  // project, switch to it so the operator lands on an actual project.
+  let homeSwitchInFlight = false;
+  createEffect(() => {
+    if (homeSwitchInFlight) return;
+    const h = daemonStore.state.health as { server_home?: boolean } | null;
+    if (!h?.server_home) return; // active is already a real project
+    const real = rows().find((r) => !!r.cluster_id);
+    if (!real) return; // no real project discovered yet
+    homeSwitchInFlight = true;
+    log.info('[FC-2] on server home — switching to first real project', { key: real.key });
+    void switchProject(real.port, real.key, {
+      display: real.display,
+      cluster_id: real.cluster_id,
+      cluster_name: real.cluster_name,
+    }).finally(() => { homeSwitchInFlight = false; });
   });
 
   onCleanup(() => {
