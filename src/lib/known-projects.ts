@@ -176,7 +176,11 @@ export function upsert(input: Partial<KnownProject> & { port: number; base: stri
     const cleaned = arr.filter((p) => {
       if (p === merged) return true;
       if (p.port !== merged.port) return true;
-      if (p.cluster_id && p.cluster_id === merged.cluster_id) return true;
+      // FC-2 (daemon-centralized) — MANY projects now share ONE daemon/port, so
+      // a DIFFERENT cluster_id on the same port is a legit sibling project, not
+      // a stale phantom. Keep every cluster'd entry; only sweep cluster_id-less
+      // port squatters (the original V86 case: an orphan ":5572" row).
+      if (p.cluster_id) return true;
       return false;
     });
     if (cleaned.length !== arr.length) {
