@@ -93,7 +93,11 @@ export default function App() {
       // FC-2 (daemon-centralized) — the server HOME (central store: ideas,
       // projects registry, external creds) is NOT a project. Don't register it
       // in the rail; real projects come from discovery (GET /projects).
-      if (!(health as { server_home?: boolean }).server_home) {
+      if ((health as { server_home?: boolean }).server_home) {
+        // Purge any stale known-projects entry for the home left over from
+        // before it was excluded (otherwise it survives in localStorage).
+        if (health.cluster_id) projectsStore.forget({ cluster_id: health.cluster_id });
+      } else {
         projectsStore.upsert({
           port: health.port,
           base: client.transport.httpBase,

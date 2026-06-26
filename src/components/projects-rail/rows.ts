@@ -18,6 +18,15 @@ function initialsFor(name: string): string {
 export const rows = createRoot(() =>
   createMemo<RailRowData[]>(() => {
   const known = projectsStore.state.list;
+  // FC-2 (daemon-centralized) — the central server HOME is never a project row.
+  // Collect home cluster ids from any connected instance flagged server_home,
+  // then drop persisted known-projects entries that match (stale localStorage
+  // from before the home was excluded survives a restart otherwise).
+  const homeClusterIds = new Set<string>();
+  for (const [, inst] of Object.entries(daemonStore.state.instances)) {
+    if ((inst.health as { server_home?: boolean }).server_home && inst.health.cluster_id)
+      homeClusterIds.add(inst.health.cluster_id);
+  }
   const livePortSet = livePorts();
   const liveById = liveClusters();
   // Read active port + cluster_id from the instances Map keyed by
@@ -48,6 +57,9 @@ export const rows = createRoot(() =>
   const seenPorts = new Set<number>();
   const seenClusters = new Set<string>();
   for (const k of known) {
+    // FC-2 — never render the server home, even if a stale localStorage entry
+    // for it survived (it's the global store, not a project).
+    if (k.cluster_id && homeClusterIds.has(k.cluster_id)) continue;
     const liveProbe = k.cluster_id ? liveById.get(k.cluster_id) : null;
     const portCandidate = liveProbe?.port ?? k.port;
     // V86 — orphan suppression. A known-projects entry without
