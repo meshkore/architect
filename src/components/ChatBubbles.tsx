@@ -503,7 +503,14 @@ function AttachmentGrid(props: { msg: ChatMsg; align: 'left' | 'right' }) {
     if (/^https?:\/\//.test(url)) return url;
     const b = base();
     if (!b) return url;
-    return b.replace(/\/+$/, '') + url;
+    let out = b.replace(/\/+$/, '') + url;
+    // FC-2 (daemon-centralized) — <img> / <a> loads can't send the
+    // X-MeshKore-Project header, so the centralized daemon would resolve the
+    // upload against the default project (→ 404 / broken image). Carry the
+    // project in the URL via ?project=<id>; the daemon's _guard honours it.
+    const pid = daemonStore.state.client?.transport.projectId;
+    if (pid) out += (out.includes('?') ? '&' : '?') + 'project=' + encodeURIComponent(pid);
+    return out;
   };
   const list = (): NonNullable<ChatMsg['attachments']> => props.msg.attachments ?? [];
   return (

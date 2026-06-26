@@ -71,7 +71,7 @@ export default function BootingPanel(): JSX.Element {
         fallback={
           <div class="flex flex-col items-center gap-4 text-center max-w-sm">
             <p class="text-sm text-gray-300">
-              Tarda más de lo normal en conectar con{' '}
+              Tarda más de lo normal en inicializar{' '}
               <span class="font-mono text-emerald-200">{cluster()}</span>.
             </p>
             <div class="flex items-center gap-2">
@@ -101,8 +101,11 @@ export default function BootingPanel(): JSX.Element {
             class="w-8 h-8 rounded-full border-2 border-emerald-500/25 border-t-emerald-400 animate-spin"
             aria-hidden="true"
           />
+          {/* FC-2 (daemon-centralized) — one daemon serves every local project,
+              so switching is NOT a (re)connection: we just sync the front-end
+              state for the selected project. Wording reflects that. */}
           <p class="text-sm text-gray-400">
-            Conectando con <span class="font-mono text-emerald-200">{cluster()}</span>…
+            Inicializando <span class="font-mono text-emerald-200">{cluster()}</span>…
           </p>
         </div>
       </Show>
