@@ -24,7 +24,7 @@ export default function BootingPanel(): JSX.Element {
   const cluster = (): string =>
     daemonStore.state.health?.cluster_name
     ?? daemonStore.state.health?.identity
-    ?? 'el proyecto';
+    ?? 'the project';
 
   const [slow, setSlow] = createSignal(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -71,7 +71,7 @@ export default function BootingPanel(): JSX.Element {
         fallback={
           <div class="flex flex-col items-center gap-4 text-center max-w-sm">
             <p class="text-sm text-gray-300">
-              Tarda más de lo normal en inicializar{' '}
+              Taking longer than usual to load{' '}
               <span class="font-mono text-emerald-200">{cluster()}</span>.
             </p>
             <div class="flex items-center gap-2">
@@ -80,18 +80,18 @@ export default function BootingPanel(): JSX.Element {
                 onClick={retry}
                 class="px-3 py-1.5 rounded-md text-xs border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 transition-colors"
               >
-                Reintentar
+                Retry
               </button>
               <button
                 type="button"
                 onClick={startOptions}
                 class="px-3 py-1.5 rounded-md text-xs border border-gray-700 text-gray-300 hover:bg-gray-800/60 transition-colors"
               >
-                Opciones de arranque
+                Startup options
               </button>
             </div>
             <p class="text-[11px] text-gray-600">
-              Arranca el daemon tú mismo o deja que Claude Code lo haga.
+              Start the daemon yourself or let Claude Code do it.
             </p>
           </div>
         }
@@ -105,7 +105,7 @@ export default function BootingPanel(): JSX.Element {
               so switching is NOT a (re)connection: we just sync the front-end
               state for the selected project. Wording reflects that. */}
           <p class="text-sm text-gray-400">
-            Inicializando <span class="font-mono text-emerald-200">{cluster()}</span>…
+            Loading <span class="font-mono text-emerald-200">{cluster()}</span>…
           </p>
         </div>
       </Show>
