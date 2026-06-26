@@ -385,6 +385,21 @@ export interface ChatUsageTotal {
   turns: number;
 }
 
+/** CTX1 (daemon py-1.28.0) — per-turn context-window fill, carried on the
+ *  `chat.usage` event. The daemon resolves a per-PLATFORM policy: claude-code
+ *  knows its window + self-compacts; an unmodelled runtime sends window=null
+ *  (→ no gauge). `fill_ratio` is prompt_tokens / window in [0,1] (null when the
+ *  window is unknown). `should_compact` flips at `threshold` (0.5). */
+export interface ChatContextBlock {
+  platform: string;
+  window: number | null;
+  prompt_tokens: number;
+  fill_ratio: number | null;
+  supports_compaction: boolean;
+  threshold: number | null;
+  should_compact: boolean;
+}
+
 export interface ChatConvSummary {
   conv: string;
   agent_type: string | null;
@@ -411,6 +426,9 @@ export interface ChatConvSummary {
    *  conv. Absent until the first turn finalises. Resets on daemon
    *  restart. */
   usage?: ChatUsageTotal;
+  /** CTX1 (daemon py-1.28.0) — last turn's context-window fill. Absent until
+   *  the first turn finalises, or when the runtime has no known window. */
+  context?: ChatContextBlock;
 }
 
 export interface ChatSnapshotResponse {

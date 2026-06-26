@@ -58,6 +58,14 @@ function forget(target: Parameters<typeof kp.forget>[0]): boolean {
   return ok;
 }
 
+/** FC-2 — durably mark a cluster as the server HOME (never a project) and
+ *  scrub it from the known list. Persists so the home stays filtered even
+ *  while the daemon is offline. */
+function markHome(clusterId: string): void {
+  kp.markHome(clusterId);
+  refresh();
+}
+
 function setActive(port: number, clusterId: string | null): void {
   setState({ activePort: port, activeClusterId: clusterId });
 }
@@ -77,6 +85,7 @@ export const projectsStore = {
   refresh,
   upsert,
   forget,
+  markHome,
   setActive,
   clearNewBadge,
   attachRepoPath,

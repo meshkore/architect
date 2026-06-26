@@ -22,7 +22,7 @@ export const rows = createRoot(() =>
   // Collect home cluster ids from any connected instance flagged server_home,
   // then drop persisted known-projects entries that match (stale localStorage
   // from before the home was excluded survives a restart otherwise).
-  const homeClusterIds = new Set<string>();
+  const homeClusterIds = new Set<string>(kp.homeIds()); // durable (offline-safe)
   for (const [, inst] of Object.entries(daemonStore.state.instances)) {
     if ((inst.health as { server_home?: boolean }).server_home && inst.health.cluster_id)
       homeClusterIds.add(inst.health.cluster_id);

@@ -29,6 +29,7 @@ import type {
   DaemonEvent,
   DispatchBody,
   ChatConvSummary,
+  ChatContextBlock,
   ChatSnapshotResponse,
   ChatQueueItem,
   ChatUsageTotal,
@@ -1668,11 +1669,15 @@ function ingestConvEvent(ev: DaemonEvent): void {
     // and `model` are available on the event but not stored — they're
     // useful for telemetry / future per-turn breakdown.
     const total = (ev as { total?: ChatUsageTotal }).total;
+    // CTX1 (daemon py-1.28.0) — per-turn context-window fill, painted as the
+    // gauge in ChatScopeStrip. Present only for platforms with a known window.
+    const context = (ev as { context?: ChatContextBlock }).context;
     if (total && typeof total === 'object') {
       setState('convs', conv, (prev) => ({
         ...(prev ?? ({} as ChatConvSummary)),
         conv,
         usage: total,
+        ...(context && typeof context === 'object' ? { context } : {}),
       }));
     }
     return;

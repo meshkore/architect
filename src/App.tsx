@@ -94,9 +94,10 @@ export default function App() {
       // projects registry, external creds) is NOT a project. Don't register it
       // in the rail; real projects come from discovery (GET /projects).
       if ((health as { server_home?: boolean }).server_home) {
-        // Purge any stale known-projects entry for the home left over from
-        // before it was excluded (otherwise it survives in localStorage).
-        if (health.cluster_id) projectsStore.forget({ cluster_id: health.cluster_id });
+        // Durably remember this cluster IS the server home and scrub any stale
+        // known-projects row for it. Persisted so the home stays filtered out
+        // of the rail / no-daemon panel / discovery even while offline.
+        if (health.cluster_id) projectsStore.markHome(health.cluster_id);
       } else {
         projectsStore.upsert({
           port: health.port,

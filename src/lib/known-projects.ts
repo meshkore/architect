@@ -38,6 +38,14 @@
 
 const STORE_KEY = 'mc-known-projects-v1';
 const ALIAS_KEY = 'mc-project-aliases-v1';
+// FC-2 (daemon-centralized) — cluster ids that are the central server's own
+// HOME (its .meshkore IS the global store: ideas, projects registry, creds),
+// learned from /health.server_home. The home is NEVER a project. We persist
+// the ids DURABLY so the home stays filtered out of every consumer (rail,
+// no-daemon panel, discovery) even while the daemon is OFFLINE — the earlier
+// fix only filtered when a live server_home signal was present, so the home
+// reappeared whenever the daemon was down.
+const HOME_IDS_KEY = 'mc-server-home-ids-v1';
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export interface KnownProject {
@@ -112,13 +120,55 @@ function fresh(p: KnownProject): boolean {
   return Date.now() - t < MAX_AGE_MS;
 }
 
+// ── server-home id store (FC-2) ──────────────────────────────────────────────
+function readHomeIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(HOME_IDS_KEY);
+    if (!raw) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((x): x is string => typeof x === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+
+/** Returns the durable set of known server-home cluster ids (consumers that
+ *  build their own rows from instances — not just kp.list() — can use this to
+ *  filter too). */
+export function homeIds(): Set<string> {
+  return readHomeIds();
+}
+
+/** Record a cluster id as the server HOME and scrub it from the known list.
+ *  Idempotent; called from the boot bus whenever /health.server_home is true. */
+export function markHome(clusterId: string): void {
+  if (!clusterId) return;
+  const ids = readHomeIds();
+  if (!ids.has(clusterId)) {
+    ids.add(clusterId);
+    try {
+      localStorage.setItem(HOME_IDS_KEY, JSON.stringify([...ids]));
+    } catch {
+      /* quota / private mode */
+    }
+  }
+  // Also remove any stale known-projects row for it (survivor from before the
+  // home was excluded). forget() handles aliases / rail order / per-conv keys.
+  forget({ cluster_id: clusterId });
+}
+
 /**
  * Return all known projects, sorted most-recent first, dropping any
- * record older than `MAX_AGE_MS`.
+ * record older than `MAX_AGE_MS` AND any cluster flagged as a server HOME
+ * (FC-2 — the home is the global store, never a project; filtered here so
+ * EVERY consumer is covered, online or offline).
  */
 export function list(): KnownProject[] {
+  const home = readHomeIds();
   return readRaw()
     .filter(fresh)
+    .filter((p) => !(p.cluster_id && home.has(p.cluster_id)))
     .sort((a, b) => (b.last_seen.localeCompare(a.last_seen)));
 }
 

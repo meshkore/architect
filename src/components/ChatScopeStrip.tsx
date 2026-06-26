@@ -19,6 +19,7 @@ import { chatStore, ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
 import { agentVisualInfo } from '~/lib/agent-types';
 import { modelLabel } from '~/lib/models';
+import type { ChatContextBlock } from '~/lib/daemon-client';
 import { debugDropCount } from '~/lib/debug-transport';
 import { log } from '~/lib/log';
 
@@ -236,6 +237,46 @@ export default function ChatScopeStrip(props: Props) {
                 <span>{fmt(u.output_tokens)}</span>
                 <span class="text-gray-500">·</span>
                 <span class="text-emerald-300">${cost}</span>
+              </span>
+            );
+          }}
+        </Show>
+        {/* CTX1 (daemon py-1.28.0) — context-window fill gauge (the little
+            circle). Painted from the last turn's `context` block when the
+            runtime has a known window (claude-code). The ring fills with the
+            ratio; it goes amber once `should_compact` (≥50%) so the operator
+            sees a turn ran hot. Hidden for runtimes with no known window. */}
+        <Show when={convState()?.context?.fill_ratio != null}>
+          {() => {
+            const c = (): ChatContextBlock => convState()!.context!;
+            const pct = (): number => Math.round((c().fill_ratio ?? 0) * 100);
+            const hot = (): boolean => !!c().should_compact;
+            // Conic-gradient ring: filled arc + track. Amber when hot, else emerald.
+            const ring = (): string => {
+              const deg = Math.round((c().fill_ratio ?? 0) * 360);
+              const fill = hot() ? '#f59e0b' : '#34d399';
+              return `conic-gradient(${fill} ${deg}deg, rgba(75,85,99,0.4) ${deg}deg)`;
+            };
+            const tip = (): string =>
+              `Context window: ${pct()}% full `
+              + `(${c().prompt_tokens.toLocaleString()} / ${(c().window ?? 0).toLocaleString()} tokens, `
+              + `${c().platform})`
+              + (hot() ? ' — running hot; will compact at next turn boundary.' : '.');
+            return (
+              <span
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono flex-shrink-0 border"
+                classList={{
+                  'text-amber-200 bg-amber-500/10 border-amber-500/30': hot(),
+                  'text-gray-300 bg-gray-800/60 border-gray-700/50': !hot(),
+                }}
+                title={tip()}
+              >
+                <span
+                  class="inline-block w-3 h-3 rounded-full"
+                  style={{ background: ring() }}
+                  aria-hidden="true"
+                />
+                <span>{pct()}%</span>
               </span>
             );
           }}
