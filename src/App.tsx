@@ -137,7 +137,16 @@ export default function App() {
         log.debug('[swap-guard] dropping post-swap chatSnapshot/runs fetch — active changed', { from: swapActiveId, to: daemonStore.state.activeId });
         return;
       }
-      void client.chatSnapshot().then((res) => {
+      // FC-2 — SHORT per-attempt timeout + one retry, same rationale as
+      // server.doRefresh: a stale keep-alive socket (right after a daemon
+      // restart) used to hang the snapshot past the 10s boot grace, so the
+      // cockpit rendered with convs={} → the agent rail fell back to the
+      // localStorage convMeta cache (leaking ARCHIVED convs) and AgentsPanel
+      // showed "0". Failing fast and retrying on a fresh socket lands the real
+      // snapshot in ~1s, so only the 5 active agents show.
+      void (async () => {
+        let res = await client.chatSnapshot(AbortSignal.timeout(4000));
+        if (!res.ok) res = await client.chatSnapshot(AbortSignal.timeout(6000));
         if (!stillCurrent()) {
           log.debug('[swap-guard] dropping stale chatSnapshot result', { from: swapActiveId, to: daemonStore.state.activeId });
           return;
@@ -153,7 +162,7 @@ export default function App() {
         } else {
           log.error('chat.snapshot fetch failed; daemon may be older than py-1.11.0', { status: res.status });
         }
-      });
+      })();
       // V89 — fetch any active runs from the daemon so the UI paints
       // ground truth immediately (the WS handles updates from here on).
       void storyStore.hydrate(client).then(() => {

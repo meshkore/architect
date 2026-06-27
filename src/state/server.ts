@@ -195,7 +195,15 @@ async function doRefresh(client: DaemonClient, key: string): Promise<void> {
     if (attempt > 0) {
       await new Promise((r) => setTimeout(r, 400 * attempt));
     }
-    const res = await client.state();
+    // FC-2 — SHORT per-attempt timeout (4s) so a STALLED connection fails fast
+    // and we retry on a fresh socket. The default 15s request timeout was
+    // longer than the cockpit's 10s boot hard-grace, so a stale keep-alive
+    // socket (common right after a daemon restart, when the browser reuses a
+    // dead connection to the same host:port) hung /state past the grace → the
+    // cockpit gave up with snapshot=null → "No roadmap yet" on a project that
+    // actually HAS a roadmap. A 4s cap means attempt 1 retries on a clean
+    // connection and the snapshot lands well inside the grace window.
+    const res = await client.state(AbortSignal.timeout(4000));
     if (res.ok) {
       consecutiveStateFail.set(key, 0);
       writeSlice(key, {
