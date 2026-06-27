@@ -8,7 +8,18 @@ export const PORT_LO = 5570;
 export const PORT_HI = 5589;
 const PROBE_TIMEOUT_MS = 500;
 
-export type LiveProbe = { port: number; base: string; cluster_id: string | null; cluster_name: string | null };
+export type LiveProbe = {
+  port: number;
+  base: string;
+  cluster_id: string | null;
+  cluster_name: string | null;
+  // FC-2 — true when this entry came from the daemon's AUTHORITATIVE /projects
+  // table (vs the single-cluster /health fallback for old daemons). When a port
+  // returns an authoritative list, that list is the COMPLETE set of projects on
+  // that daemon — anything else cached for it (the server home, deleted
+  // projects) is a ghost and gets pruned.
+  authoritative?: boolean;
+};
 
 export const [livePorts, setLivePorts] = createSignal<Set<number>>(new Set());
 export const [liveClusters, setLiveClusters] = createSignal<Map<string, LiveProbe>>(new Map());
@@ -34,6 +45,7 @@ async function probe(port: number): Promise<LiveProbe[]> {
             port, base,
             cluster_id: p.id as string,
             cluster_name: p.name ?? (p.id as string),
+            authoritative: true,
           }));
         }
       }
@@ -68,6 +80,30 @@ export async function discoverProjects(opts: { fullScan?: boolean } = {}): Promi
   const portSet = new Set(live.map((l) => l.port));
   const clusterMap = new Map<string, LiveProbe>();
 
+  // FC-2 (daemon-centralized) — RECONCILE the local cache against the daemon's
+  // AUTHORITATIVE /projects table. For every port that returned a real list,
+  // that list is the COMPLETE set of projects on that daemon; any cached
+  // known-projects entry on the same port whose cluster_id is NOT in the list
+  // is a ghost (the server HOME, a deleted project, a renamed cluster) and is
+  // forgotten. This makes the daemon's table the single source of truth — the
+  // operator's request — so stale entries can never reappear in the rail.
+  const authoritative = new Map<number, Set<string>>();
+  for (const l of live) {
+    if (l.authoritative && l.cluster_id) {
+      let s = authoritative.get(l.port);
+      if (!s) { s = new Set(); authoritative.set(l.port, s); }
+      s.add(l.cluster_id);
+    }
+  }
+  for (const k of known) {
+    const allowed = authoritative.get(k.port);
+    if (!allowed) continue; // this daemon didn't return an authoritative list — leave its cache alone
+    if (k.cluster_id && !allowed.has(k.cluster_id)) {
+      log.info('discover · pruning ghost project not in daemon table', { cluster_id: k.cluster_id, port: k.port });
+      kp.forget({ cluster_id: k.cluster_id });
+    }
+  }
+
   // Collapse every setSignal + upsert into one reactive tick. Without
   // this, downstream memos (rows, orderedRows) recompute once per
   // upsert + once per livePorts/liveClusters change — boot fired the
@@ -84,6 +120,7 @@ export async function discoverProjects(opts: { fullScan?: boolean } = {}): Promi
     }
     setLivePorts(portSet);
     setLiveClusters(clusterMap);
+    projectsStore.refresh(); // reflect the pruned cache in the store
   });
   log.debug('discover · live', live.length, 'known', known.length, 'fullScan', !!opts.fullScan);
 }
