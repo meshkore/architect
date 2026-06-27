@@ -158,25 +158,79 @@ export async function connect(setStatus: (s: ConnectionStatus) => void): Promise
   }
 
   const userToken = readStoredToken(probe.health, probe.port);
-  // FC-1/FC-2 — carry the boot project's id (X-MeshKore-Project) for daemon
-  // routing; matches the daemon's default project today.
-  const transport = localTransport(
-    probe.port,
-    userToken,
-    probe.health.cluster_id ?? undefined,
-  );
+
+  // FC-2 (daemon-centralized) — the daemon's DEFAULT project is the server HOME
+  // (its .meshkore IS the global store), NOT a real project. Landing the boot on
+  // the home and THEN auto-switching to a real project reset the boot gate and
+  // chained a second full load (the ~13s switch the operator hit). Instead,
+  // when the boot daemon is the home, resolve a REAL project up-front and
+  // connect DIRECTLY to it — one load, no home detour, no gate reset.
+  let health = probe.health;
+  let projectId = probe.health.cluster_id ?? undefined;
+  if ((probe.health as { server_home?: boolean }).server_home) {
+    const real = await pickRealProject(probe.port, userToken);
+    if (real) {
+      projectId = real;
+      // Re-probe /health WITH the project header so the connected health carries
+      // the REAL project's cluster_id/name (DC-4 makes /health honour it).
+      try {
+        const r = await fetch(`${daemonHttpBase(probe.port)}/health`, {
+          headers: { 'X-MeshKore-Project': real },
+          signal: AbortSignal.timeout(4000),
+        });
+        if (r.ok) health = (await r.json()) as HealthResponse;
+      } catch { /* fall back to the home health below; bus still routes by projectId */ }
+    }
+    // No real project yet (fresh machine) → stay on the home so the cockpit can
+    // show "add a project" rather than a dead end.
+  }
+
+  // FC-1/FC-2 — carry the resolved project's id (X-MeshKore-Project) for daemon
+  // routing. One daemon, one bearer token (auth), header selects the project.
+  const transport = localTransport(probe.port, userToken, projectId);
   const client = new DaemonClient(transport);
 
   // Authenticated probe — /state requires a Bearer. If 401 we ask the
   // user for the token in the UI. M1.1: DaemonClient returns Result<T>
   // instead of throwing on non-2xx, so branch on `.ok`.
-  const stateRes = await client.state();
-  const clusterKey = clusterTokenKey({ cluster_id: probe.health.cluster_id, port: probe.port });
+  const stateRes = await client.state(AbortSignal.timeout(4000));
+  const clusterKey = clusterTokenKey({ cluster_id: health.cluster_id, port: probe.port });
   if (stateRes.ok) {
-    setStatus({ kind: 'connected', client, health: probe.health });
+    setStatus({ kind: 'connected', client, health });
   } else if (stateRes.status === 401) {
     setStatus({ kind: 'unauthorized', transport, clusterKey });
   } else {
     setStatus({ kind: 'error', message: stateRes.error ?? stateRes.body.slice(0, 200) });
+  }
+}
+
+const LAST_PROJECT_KEY = 'mc-last-project-id-v1';
+
+/** Remember the real project the operator last viewed (written by App.tsx on
+ *  every switch to a non-home project) so the next boot lands there directly. */
+export function rememberLastProject(projectId: string): void {
+  try { localStorage.setItem(LAST_PROJECT_KEY, projectId); } catch { /* quota */ }
+}
+
+/** Resolve which REAL project to land on when the boot daemon is the home:
+ *  the last-viewed project if it still exists, else the daemon's default, else
+ *  the first listed. Returns null when the daemon serves no real project yet. */
+async function pickRealProject(port: number, token: string): Promise<string | null> {
+  try {
+    const r = await fetch(`${daemonHttpBase(port)}/projects`, {
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!r.ok) return null;
+    const data = (await r.json()) as { projects?: { id: string }[]; default?: string | null };
+    const ids = (data.projects ?? []).map((p) => p.id).filter(Boolean);
+    if (ids.length === 0) return null;
+    let last: string | null = null;
+    try { last = localStorage.getItem(LAST_PROJECT_KEY); } catch { /* ignore */ }
+    if (last && ids.includes(last)) return last;
+    if (data.default && ids.includes(data.default)) return data.default;
+    return ids[0] ?? null;
+  } catch {
+    return null;
   }
 }

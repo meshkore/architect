@@ -19,6 +19,7 @@ import {
   connect,
   storeToken,
   readStoredToken,
+  rememberLastProject,
   type ConnectionStatus,
 } from '~/lib/connection';
 import { adoptTokenFromUrl } from '~/lib/adopt';
@@ -107,6 +108,9 @@ export default function App() {
           status: 'live',
         });
         projectsStore.setActive(health.port, health.cluster_id ?? null);
+        // FC-2 — remember the real project so the NEXT boot lands here directly
+        // (skips the home detour entirely).
+        if (health.cluster_id) rememberLastProject(health.cluster_id);
       }
       chatStore.bindCluster(health.cluster_id ?? null);
       viewStore.bindCluster(health.cluster_id ?? null);
