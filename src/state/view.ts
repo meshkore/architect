@@ -41,6 +41,10 @@ interface ProjectView {
   /** V107.34 — context-tree node path → true when expanded. Used by
    *  the CONTEXT panel's filesystem-driven tree (standard v14 §3.5). */
   contextNodes?: Record<string, boolean>;
+  /** FC-2 — the roadmap visibility filter (queue|all|active|backlog|archived)
+   *  the operator last selected. Persisted per-project so a refresh keeps the
+   *  QUEUE tab (and any filter) instead of snapping back to ACTIVE. */
+  roadmapFilter?: string;
 }
 
 interface ViewState {
@@ -71,6 +75,7 @@ function loadFor(cluster: string | null): ProjectView {
       archivedInitiatives: parsed.archivedInitiatives ?? {},
       initiativeTab: parsed.initiativeTab ?? {},
       contextNodes: parsed.contextNodes ?? {},
+      roadmapFilter: parsed.roadmapFilter,
     };
   } catch {
     return { ...EMPTY };
@@ -164,6 +169,16 @@ function setInitiativeTab(id: string, tab: 'tasks' | 'activity'): void {
   persist();
 }
 
+// FC-2 — roadmap visibility filter, persisted per-project so a refresh restores
+// the operator's tab (QUEUE / ALL / ACTIVE / …) instead of resetting to ACTIVE.
+function roadmapFilter(): string | null {
+  return state.view.roadmapFilter ?? null;
+}
+function setRoadmapFilter(filter: string): void {
+  setState('view', 'roadmapFilter', filter);
+  persist();
+}
+
 // V107.34 — Standard v14 context tree expand state. Persisted per-cluster.
 function isContextNodeExpanded(path: string): boolean {
   return state.view.contextNodes?.[path] === true;
@@ -254,6 +269,8 @@ export const viewStore = {
   setInitiativeArchived,
   initiativeTab,
   setInitiativeTab,
+  roadmapFilter,
+  setRoadmapFilter,
   isContextNodeExpanded,
   toggleContextNode,
   markRecentlyCreatedInit,
