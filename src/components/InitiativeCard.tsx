@@ -621,7 +621,15 @@ function TaskRow(props: { task: ServerTask; archived?: boolean }) {
          *  something to show; clamped 2-3 lines via CollapsibleText. */}
         <Show when={summaryText().length > 0}>
           <div
-            class={`rt-task-summary rt-task-summary-${view()}`}
+            class={`rt-task-summary rt-task-summary-${view()}${
+              view() === 'res'
+                ? vstate() === 'done'
+                  ? ' rt-task-summary-ok'
+                  : vstate() === 'blocked'
+                    ? ' rt-task-summary-err'
+                    : ''
+                : ''
+            }`}
             onClick={(e) => e.stopPropagation()}
           >
             <CollapsibleText text={summaryText()} markdown />

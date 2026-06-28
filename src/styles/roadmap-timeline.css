@@ -653,8 +653,12 @@
 
 .rt-task-text {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-  font-size: 12.5px;
-  color: #d4dae3;          /* brighter than the old #aab2bd — close to title-bright without competing */
+  /* The TITLE: clearly the primary line. Larger + semibold + bright so the
+   * eye separates it instantly from the summary/result line below it
+   * (operator: "no se entiende qué es el título y qué es el resumen"). */
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #e8edf3;
   min-width: 0;
   flex: 1;
   overflow: hidden;
@@ -720,19 +724,35 @@
  * positions + colors the block. */
 .rt-task-summary {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-  font-size: 11.5px;
+  /* The SUMMARY / RESULT line: clearly SECONDARY to the title — smaller and
+   * dimmer so the hierarchy reads at a glance while a queue runs. */
+  font-size: 11px;
   line-height: 1.5;
-  color: #aab2bd;
+  color: #8b95a3;
   /* Indent under the state glyph + code so the summary lines up with the
    * title, not the timeline node. (16px state + 9px gap + 58px code + 9px gap = 92px.) */
   padding-left: 92px;
 }
-/* Visually distinguish DES vs RES — RES gets a faint left rule in the
- * done hue so the eye knows "this is the result, not the brief". */
+/* DES (the brief) stays neutral-grey. */
+.rt-task-summary-des { color: #828b96; }
+/* RES (the execution RESULT) is colour-coded by outcome so the operator
+ * watching a queue run can tell success from failure at a glance:
+ *   ok  → green  (the task finished)
+ *   err → red    (it failed / is blocked)
+ *   neutral → the running/other hue (a result with no terminal verdict yet)
+ * Each gets a matching left rule (the 2px border eats 2px of the 92px indent). */
 .rt-task-summary-res {
-  border-left: 2px solid color-mix(in srgb, var(--theme-status-done, #a78bfa) 60%, transparent);
-  padding-left: 90px;             /* compensate for the 2px border */
+  border-left: 2px solid color-mix(in srgb, var(--theme-status-done, #a78bfa) 55%, transparent);
+  padding-left: 90px;
   margin-left: 0;
+}
+.rt-task-summary-res.rt-task-summary-ok {
+  border-left-color: color-mix(in srgb, #34d399 70%, transparent);
+  color: #93e6c0;                 /* soft emerald — "done OK" */
+}
+.rt-task-summary-res.rt-task-summary-err {
+  border-left-color: color-mix(in srgb, #f87171 75%, transparent);
+  color: #f5a8a3;                 /* soft red — "failed / blocked" */
 }
 /* On narrow widths the indent gets in the way — drop it under 520px. */
 @media (max-width: 520px) {
