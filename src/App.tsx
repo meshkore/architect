@@ -29,6 +29,7 @@ import { serverStore, isProjectEmpty } from '~/state/server';
 import { projectsStore } from '~/state/projects';
 import { chatStore, ONBOARDING_CONV_ID, loadLastActiveConv } from '~/state/chat';
 import { viewStore } from '~/state/view';
+import { bindCluster as queueBindCluster } from '~/lib/queue';
 import { storyStore } from '~/state/story';
 import { log } from '~/lib/log';
 import { applyStoredLayout } from '~/components/Splitter';
@@ -114,6 +115,10 @@ export default function App() {
       }
       chatStore.bindCluster(health.cluster_id ?? null);
       viewStore.bindCluster(health.cluster_id ?? null);
+      // FC-2 — bind the execution queue to this project too (same cluster_id
+      // path as the stores above) so staged items persist per-project across
+      // refresh, instead of the queue racing daemonStore reads for its key.
+      queueBindCluster(health.cluster_id ?? null);
       // V89 — run state is now daemon-owned. Reset the in-memory
       // mirror so the previous cluster's runs don't bleed in, then
       // hydrate from `/runs?active=1` once attach() resolves.
