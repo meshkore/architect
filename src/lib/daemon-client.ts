@@ -519,6 +519,21 @@ export function setDaemonVersionListener(fn: DaemonVersionListener | null): void
   daemonVersionListener = fn;
 }
 
+/** FC-2 (daemon-centralized) — 401 self-heal. ANY authed request that comes
+ *  back 401 (a stale per-cluster token — common after the per-daemon→central
+ *  daemon migration, where the old per-project token was cached under the
+ *  cluster key) calls this handler to re-fetch the daemon's CURRENT local token
+ *  for that httpBase. If it returns a fresh token, request() updates the
+ *  transport and retries ONCE — so a stale token recovers silently instead of
+ *  bricking a chat dispatch with "Unauthorized — re-unlock". Returns null when
+ *  it can't auto-acquire (remote daemon / opt-out) → the 401 surfaces normally.
+ *  Wired from state/daemon.ts (which owns fetchLocalToken + the token store). */
+type ReauthHandler = (httpBase: string) => Promise<string | null>;
+let reauthHandler: ReauthHandler | null = null;
+export function setReauthHandler(fn: ReauthHandler | null): void {
+  reauthHandler = fn;
+}
+
 /** V107.26 — Map a cluster-relative `.meshkore/<area>/...` path into
  *  the static-file route the daemon actually exposes. See readMarkdownFile
  *  for context. Returns the input untouched if no rule matches (caller
@@ -996,6 +1011,7 @@ export class DaemonClient {
     body: unknown,
     signal: AbortSignal | undefined,
     requireAuth = true,
+    _reauthRetried = false,
   ): Promise<Result<T>> {
     const url = `${this.transport.httpBase}${path}`;
     const headers: Record<string, string> = {};
@@ -1030,6 +1046,17 @@ export class DaemonClient {
       const msg = e instanceof Error ? e.message : String(e);
       log.warn('daemon request failed', method, path, msg);
       return { ok: false, status: 0, body: '', error: msg };
+    }
+    // FC-2 — 401 self-heal: a stale token recovers by re-fetching the daemon's
+    // current local token and retrying ONCE, instead of surfacing "Unauthorized".
+    if (res.status === 401 && requireAuth && reauthHandler && !_reauthRetried) {
+      try {
+        const fresh = await reauthHandler(this.transport.httpBase);
+        if (fresh && fresh !== this.transport.token) {
+          this.transport.token = fresh;
+          return this.request<T>(method, path, body, signal, requireAuth, true);
+        }
+      } catch { /* fall through to the normal 401 result below */ }
     }
     const daemonVersion = res.headers.get('x-meshkore-daemon-version') ?? undefined;
     // V94 — fan-out the version header to the registered listener so

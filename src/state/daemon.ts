@@ -22,7 +22,7 @@
 
 import { batch } from 'solid-js';
 import { createStore } from 'solid-js/store';
-import { DaemonClient, type HealthResponse, setDaemonVersionListener } from '~/lib/daemon-client';
+import { DaemonClient, type HealthResponse, setDaemonVersionListener, setReauthHandler } from '~/lib/daemon-client';
 import { DaemonWS, type DaemonWSState } from '~/lib/ws';
 import { parseDaemonVersion, meetsMinimum, isDaemonAhead, isFeatureGapped, type DaemonVersion } from '~/lib/version';
 import { attachEventBus } from '~/lib/event-bus';
@@ -191,6 +191,25 @@ const [state, setState] = createStore<DaemonStoreState>(initial);
  * flags. Closes the gap where a daemon self-update mid-session left
  * the cockpit thinking it was still talking to the old version.
  */
+// FC-2 — 401 self-heal handler. Any authed request that 401s re-fetches the
+// daemon's current local token (origin-gated /auth/local-token) and persists it
+// under the matching instance's cluster key, so a stale token (e.g. cached from
+// the per-daemon era before centralization) recovers silently + retries once.
+setReauthHandler(async (httpBase) => {
+  const m = /:(\d+)(?:\/|$)/.exec(httpBase);
+  const port = m && m[1] ? parseInt(m[1], 10) : 0;
+  if (!port) return null;
+  const fresh = await fetchLocalToken(port);
+  if (!fresh) return null;
+  const inst = Object.values(state.instances).find(
+    (i) => i.client.transport.httpBase === httpBase,
+  );
+  const clusterId = inst?.health.cluster_id ?? null;
+  saveTokenForCluster(clusterTokenKey({ cluster_id: clusterId, port }), fresh);
+  log.info('401 self-heal — refreshed local token', { port, cluster: clusterId });
+  return fresh;
+});
+
 setDaemonVersionListener((httpBase, version) => {
   // Find the instance whose client's transport matches this URL base.
   // Iterating is fine — operators rarely connect to >5 projects.
