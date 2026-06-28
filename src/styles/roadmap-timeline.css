@@ -746,13 +746,23 @@
   padding-left: 90px;
   margin-left: 0;
 }
+/* OK (task done ✓) → the WHOLE result line in BLUE so a good outcome reads
+ * calm-positive (operator: "lo de completado en azul"). Theme-aware via the
+ * accent var, sky-300 fallback. */
 .rt-task-summary-res.rt-task-summary-ok {
-  border-left-color: color-mix(in srgb, #34d399 70%, transparent);
-  color: #93e6c0;                 /* soft emerald — "done OK" */
+  border-left-color: color-mix(in srgb, var(--theme-accent, #7dd3fc) 70%, transparent);
+  color: var(--theme-accent, #7dd3fc);
 }
+/* ERR (failed / blocked !) → the WHOLE line in RED so "hay que atenderlo"
+ * jumps out. */
 .rt-task-summary-res.rt-task-summary-err {
-  border-left-color: color-mix(in srgb, #f87171 75%, transparent);
-  color: #f5a8a3;                 /* soft red — "failed / blocked" */
+  border-left-color: color-mix(in srgb, #f87171 80%, transparent);
+  color: #f5a8a3;
+}
+/* Needs-input / pending-operator → amber (waiting on the human, not a failure). */
+.rt-task-summary-res.rt-task-summary-wait {
+  border-left-color: color-mix(in srgb, #fbbf24 75%, transparent);
+  color: #fcd34d;
 }
 /* On narrow widths the indent gets in the way — drop it under 520px. */
 @media (max-width: 520px) {
@@ -977,6 +987,31 @@
   border-color: rgba(148, 163, 184, .25);
 }
 .rt-qbtn-clear:not(:disabled):hover { color: #cbd5e1; border-color: rgba(148, 163, 184, .45); }
+/* "En curso…" running pill — coherent with the chat's STOP. Uses the running
+ * hue so the eye reads "this is live", paired with the ⏹ Parar button. */
+.rt-qbtn-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--theme-status-running-ring, #f9a8d4) 45%, transparent);
+  background: color-mix(in srgb, var(--theme-status-running-ring, #f9a8d4) 14%, transparent);
+  color: var(--theme-status-running-ring, #f9a8d4);
+}
+.rt-qbar-spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--theme-status-running-ring, #f9a8d4) 30%, transparent);
+  border-top-color: var(--theme-status-running-ring, #f9a8d4);
+  animation: rt-task-spin .8s linear infinite;
+}
+@keyframes rt-task-spin { to { transform: rotate(360deg); } }
 
 /* Agent badge (running task — who owns it) */
 .rt-task-agent {

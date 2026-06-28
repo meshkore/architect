@@ -513,6 +513,19 @@ function TaskRow(props: { task: ServerTask; archived?: boolean }) {
   };
   const summaryText = (): string => (view() === 'res' ? resolution() : description());
 
+  // Colour the RES (result) line by OUTCOME so the operator scanning a running
+  // queue tells success from failure from needs-input at a glance:
+  //   done → ok (blue)   blocked → err (red)   pending-operator → wait (amber)
+  // DES (the brief) stays neutral. Empty for non-res views.
+  const resOutcomeClass = (): string => {
+    if (view() !== 'res') return '';
+    const st = (props.task.status || '').toLowerCase();
+    if (vstate() === 'done') return ' rt-task-summary-ok';
+    if (vstate() === 'blocked') return ' rt-task-summary-err';
+    if (st === 'pending_operator' || st === 'pending-operator') return ' rt-task-summary-wait';
+    return '';
+  };
+
   // Toggle the deep inline detail from the TITLE only (operator 2026-06-19) —
   // open state is module-level so it survives the 2s /state poll.
   const open = (): boolean => isTaskOpen(props.task.id);
@@ -621,15 +634,7 @@ function TaskRow(props: { task: ServerTask; archived?: boolean }) {
          *  something to show; clamped 2-3 lines via CollapsibleText. */}
         <Show when={summaryText().length > 0}>
           <div
-            class={`rt-task-summary rt-task-summary-${view()}${
-              view() === 'res'
-                ? vstate() === 'done'
-                  ? ' rt-task-summary-ok'
-                  : vstate() === 'blocked'
-                    ? ' rt-task-summary-err'
-                    : ''
-                : ''
-            }`}
+            class={`rt-task-summary rt-task-summary-${view()}${resOutcomeClass()}`}
             onClick={(e) => e.stopPropagation()}
           >
             <CollapsibleText text={summaryText()} markdown />

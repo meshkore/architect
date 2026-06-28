@@ -236,7 +236,16 @@ export default function InitiativesPanel() {
     const conv = activeArchConv();
     if (!conv) return false;
     const s = chatStore.state.convs[conv];
-    return !!s && (s.live || s.coordinating);
+    if (s && (s.live || s.coordinating)) return true;
+    // COHERENCE FIX — mirror ChatScopeStrip.isWorking's fallback. The chat's
+    // STOP button shows whenever there's a streaming assistant bubble in the
+    // local convMap, even before the daemon snapshot's `live` flag lands. The
+    // queue bar must read the SAME truth, otherwise the chat says "running +
+    // STOP" while this bar still offers "▶ Ejecutar cola" (the incoherence the
+    // operator hit). So check the streaming bubble too.
+    const msgs = chatStore.state.convMap[conv] ?? [];
+    const last = msgs[msgs.length - 1];
+    return !!(last && last.kind === 'assistant' && last.streaming && !last.cancelled);
   });
 
   // ── Execution queue — derived state ─────────────────────────────────
@@ -403,15 +412,27 @@ export default function InitiativesPanel() {
                 {queueProgress().done}/{queueProgress().total} tareas · {queueInitiatives().length} en cola
               </span>
               <div class="ml-auto flex items-center gap-2 flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => { void onRunQueue(); }}
-                  disabled={architectLive() || queueInitiatives().length === 0}
-                  class="rt-qbtn rt-qbtn-run"
-                  title="Ejecutar las historias en cola, en orden"
+                {/* Coherent with the chat's STOP: while the architect runs we
+                    show a "running" pill + the Parar button (NOT an enabled
+                    play). When idle, the play button runs the queue. */}
+                <Show
+                  when={!architectLive()}
+                  fallback={
+                    <span class="rt-qbtn rt-qbtn-running" title="La cola se está ejecutando — el Roadmap Architect está trabajando">
+                      <span class="rt-qbar-spinner" aria-hidden="true" /> En curso…
+                    </span>
+                  }
                 >
-                  ▶ Ejecutar cola
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => { void onRunQueue(); }}
+                    disabled={queueInitiatives().length === 0}
+                    class="rt-qbtn rt-qbtn-run"
+                    title="Ejecutar las historias en cola, en orden"
+                  >
+                    ▶ Ejecutar cola
+                  </button>
+                </Show>
                 <Show when={architectLive()}>
                   <button
                     type="button"
