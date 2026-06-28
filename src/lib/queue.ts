@@ -9,23 +9,43 @@
  * auto-archives. Reset just empties the list.
  *
  * Storage is per-project localStorage (the cockpit's own memory), keyed
- * by the active daemon id. It is deliberately NOT the shared `next` wall
- * and NOT persisted into the .meshkore roadmap — earlier the queue WAS
- * the next wall (v26); that conflated "queued to run" with the roadmap
- * status and is reverted here.
+ * by the active project's CLUSTER ID. It is deliberately NOT the shared
+ * `next` wall and NOT persisted into the .meshkore roadmap.
  *
  * Order = insertion order (the execution order). The list is deduped.
+ *
+ * FC-2 persistence hardening (2026-06-28): the queue was keyed by
+ * `daemonStore.state.activeId` and RELOADED on every change of it. In the
+ * centralized-daemon boot the active id can briefly be null / flip while the
+ * connection settles, and the reload-on-change clobbered a freshly-staged list
+ * with an empty load — so staged items vanished on refresh. Now:
+ *   • the key is the active CLUSTER ID (stable per project),
+ *   • we only reload when the project key CHANGES to a real, different value
+ *     (a transient null never clobbers),
+ *   • writes never persist under a null key,
+ *   • a one-time migration pulls a legacy `activeId`-keyed list forward.
  */
 
 import { createEffect, createRoot, createSignal } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
+import { log } from '~/lib/log';
 
 const KEY_PREFIX = 'mc-exec-queue::';
 const keyFor = (id: string | null): string => `${KEY_PREFIX}${id ?? 'default'}`;
 
-function load(id: string | null): string[] {
+/** The active project's stable id — prefer the connected instance's
+ *  cluster_id, fall back to the daemon store's activeId (same value in
+ *  practice; both resolve to the cluster id). Null until connected. */
+function activeProjectId(): string | null {
+  const cid = daemonStore.state.health?.cluster_id;
+  if (cid && cid.trim()) return cid.trim();
+  const aid = daemonStore.state.activeId;
+  return aid && aid.trim() ? aid.trim() : null;
+}
+
+function readRaw(key: string): string[] {
   try {
-    const raw = localStorage.getItem(keyFor(id));
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
     const arr = JSON.parse(raw);
     return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : [];
@@ -34,23 +54,41 @@ function load(id: string | null): string[] {
   }
 }
 
+function load(id: string | null): string[] {
+  return readRaw(keyFor(id));
+}
+
 function persist(id: string | null, ids: string[]): void {
-  try { localStorage.setItem(keyFor(id), JSON.stringify(ids)); } catch { /* quota */ }
+  if (!id) return; // never persist under the null/"default" key — would split state
+  try {
+    localStorage.setItem(keyFor(id), JSON.stringify(ids));
+  } catch {
+    /* quota */
+  }
 }
 
 const { ids, setIds } = createRoot(() => {
-  const [ids, setIds] = createSignal<string[]>(load(daemonStore.state.activeId));
-  // Reload the queue when the active project changes (per-project memory).
+  const initial = activeProjectId();
+  const [ids, setIds] = createSignal<string[]>(load(initial));
+  // Track which project the in-memory list belongs to, so we ONLY reload on a
+  // genuine project change — never on a transient null/flip during boot.
+  let loadedFor: string | null = initial;
   createEffect(() => {
-    const id = daemonStore.state.activeId;
+    const id = activeProjectId();
+    if (!id) return; // not connected yet / transient — keep what we have
+    if (id === loadedFor) return; // same project — don't clobber
+    loadedFor = id;
     setIds(load(id));
+    log.debug('[queue] loaded for project', { project: id, count: ids().length });
   });
   return { ids, setIds };
 });
 
 function write(next: string[]): void {
   setIds(next);
-  persist(daemonStore.state.activeId, next);
+  const id = activeProjectId();
+  persist(id, next);
+  log.debug('[queue] persisted', { project: id, count: next.length });
 }
 
 /** The queued initiative ids, in execution (insertion) order. Reactive. */
