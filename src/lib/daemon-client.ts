@@ -376,6 +376,18 @@ export interface ProtocolDetail {
 //     when `chat.snapshot.v1` is in `health.features`; older daemons
 //     keep the legacy /state + /chat/archives path. ────────────────
 
+/** py-1.28.3 — live-task overlay row from GET /roadmap/live. */
+export interface LiveTaskEntry {
+  conv: string;
+  task_id: string;
+  initiative_id: string | null;
+  agent_id: string | null;
+}
+export interface LiveTasksResponse {
+  tasks: LiveTaskEntry[];
+  ts: string;
+}
+
 export interface ChatUsageTotal {
   input_tokens: number;
   output_tokens: number;
@@ -570,6 +582,13 @@ export class DaemonClient {
 
   async state(signal?: AbortSignal): Promise<Result<unknown>> {
     return this.request<unknown>('GET', '/state', undefined, signal);
+  }
+
+  /** py-1.28.3 — tiny live-task overlay (which task each live subagent works on
+   *  RIGHT NOW). Polled (~2.5s) so the roadmap loader is reliable even if a
+   *  conv.* WS event was missed (reconnect / project switch). */
+  async liveTasks(signal?: AbortSignal): Promise<Result<LiveTasksResponse>> {
+    return this.request<LiveTasksResponse>('GET', '/roadmap/live', undefined, signal);
   }
 
   async stateSubset(name: string, signal?: AbortSignal): Promise<Result<unknown>> {

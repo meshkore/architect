@@ -284,7 +284,29 @@ export default function App() {
     }).finally(() => { homeSwitchInFlight = false; });
   });
 
+  // py-1.28.3 — poll the active project's live-task overlay so the roadmap
+  // shows a loader on each task a subagent is working on RIGHT NOW, reliably,
+  // even if a conv.* WS event was missed (reconnect / project switch). Cheap
+  // endpoint (~<1KB). Cleared immediately on project switch to avoid a flash of
+  // the previous project's live set.
+  let lastOverlayProject: string | null = null;
+  const liveTimer = setInterval(() => {
+    const c = daemonStore.state.client;
+    const active = daemonStore.state.activeId;
+    if (!c || !active) { serverStore.setActiveLiveTasks([]); lastOverlayProject = null; return; }
+    if (active !== lastOverlayProject) {
+      serverStore.setActiveLiveTasks([]); // switch — drop the old project's set at once
+      lastOverlayProject = active;
+    }
+    void c.liveTasks().then((r) => {
+      // Guard against a result landing after a switch.
+      if (daemonStore.state.activeId !== active) return;
+      if (r.ok) serverStore.setActiveLiveTasks(r.data.tasks ?? []);
+    });
+  }, 2500);
+
   onCleanup(() => {
+    clearInterval(liveTimer);
     detachActive();
     daemonStore.disconnectAll();
   });

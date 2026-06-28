@@ -20,8 +20,8 @@
  */
 
 import { createStore } from 'solid-js/store';
-import { createMemo, createEffect, createRoot } from 'solid-js';
-import type { DaemonClient, ChatConvSummary } from '~/lib/daemon-client';
+import { createMemo, createEffect, createRoot, createSignal } from 'solid-js';
+import type { DaemonClient, ChatConvSummary, LiveTaskEntry } from '~/lib/daemon-client';
 import { chatStore } from '~/state/chat';
 import { log } from '~/lib/log';
 
@@ -322,6 +322,7 @@ export const serverStore = {
   clearForCluster,
   clearAll,
   setActiveCluster,
+  setActiveLiveTasks,
 };
 
 // ── Derived selectors (read from the facade = active cluster) ────────
@@ -392,14 +393,28 @@ export const activeInitiativeIds = createMemo<Set<string>>(() => {
   return s;
 });
 
+// py-1.28.3 — live-task overlay polled from GET /roadmap/live (App bus, ~2.5s).
+// The per-task loader used to depend ONLY on conv.* WS events; after a reconnect
+// / project switch those can be missed, so a running subagent showed no loader
+// even though the daemon knew it was live. This overlay is the authoritative,
+// WS-independent source; the memos below UNION it with the WS-derived convs.
+const [liveOverlay, setLiveOverlay] = createSignal<LiveTaskEntry[]>([]);
+/** Set by the App bus poller with the active project's live tasks (or [] on
+ *  switch / when idle). */
+export function setActiveLiveTasks(entries: LiveTaskEntry[]): void {
+  setLiveOverlay(Array.isArray(entries) ? entries : []);
+}
+export const liveTaskOverlay = (): LiveTaskEntry[] => liveOverlay();
+
 /** Task ids currently being worked on by a live conv. Drives the
  *  per-task chip pulse in the roadmap regardless of the task file's
- *  on-disk `status` field. */
+ *  on-disk `status` field. UNION of WS-live convs + the polled overlay. */
 export const activeTaskIds = createMemo<Set<string>>(() => {
   const s = new Set<string>();
   for (const c of allConvs()) {
     if (c.live && c.task_id) s.add(c.task_id);
   }
+  for (const e of liveOverlay()) if (e.task_id) s.add(e.task_id);
   return s;
 });
 
@@ -407,9 +422,32 @@ export const activeTaskIds = createMemo<Set<string>>(() => {
  *  the actual agent ids working on it (e.g. "A015 · A902"). */
 export const activeEntriesByInitiative = createMemo<Record<string, ChatConvSummary[]>>(() => {
   const out: Record<string, ChatConvSummary[]> = {};
+  const seen = new Set<string>();
   for (const c of allConvs()) {
     if (!c.live || !c.initiative_id) continue;
     (out[c.initiative_id] ??= []).push(c);
+    seen.add(c.conv);
+  }
+  // Fold in overlay entries the WS path didn't surface (missed conv.*).
+  for (const e of liveOverlay()) {
+    if (!e.initiative_id || seen.has(e.conv)) continue;
+    (out[e.initiative_id] ??= []).push({
+      conv: e.conv,
+      agent_id: e.agent_id,
+      agent_type: null,
+      parent_conv: null,
+      initiative_id: e.initiative_id,
+      task_id: e.task_id,
+      archived: false,
+      archived_at: null,
+      archived_by: null,
+      live: true,
+      coordinating: false,
+      waiting_on: [],
+      created_at: '',
+      last_activity_at: '',
+      msg_count: 0,
+    });
   }
   return out;
 });
@@ -423,6 +461,9 @@ export const activeAgentByTask = createMemo<Record<string, string>>(() => {
   for (const c of allConvs()) {
     if (!c.live || !c.task_id) continue;
     out[c.task_id] = c.agent_id || c.conv;
+  }
+  for (const e of liveOverlay()) {
+    if (e.task_id && !out[e.task_id]) out[e.task_id] = e.agent_id || e.conv;
   }
   return out;
 });
