@@ -168,26 +168,15 @@ export default function Cockpit(props: {
       <div class="flex-1 flex min-h-0">
         <ProjectsRail />
         <main class="flex-1 min-h-0 relative">
-          {/* A-ERR-SURFACE-01 (V109) — the roadmap /state failed but the
-              boot escape (A-BOOT-01) rendered the cockpit anyway. Surface
-              it with an inline retry instead of a silent console warning,
-              so the operator isn't left staring at an empty roadmap with
-              no explanation. */}
-          <Show when={booted() && serverStore.state.error}>
-            <div class="absolute top-0 inset-x-0 z-40 flex items-center justify-center gap-3 px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-amber-200 text-xs">
-              <span>No se pudo cargar el roadmap del daemon.</span>
-              <button
-                class="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 font-medium"
-                onClick={() => {
-                  const c = daemonStore.state.client;
-                  const id = daemonStore.state.activeId;
-                  if (c && id) void serverStore.refreshNow(c, id);
-                }}
-              >
-                Reintentar
-              </button>
-            </div>
-          </Show>
+          {/* FC-2 — NO inline "couldn't load the roadmap" banner. With one
+              central daemon, a /state failure is a CONNECTION problem, not a
+              roadmap problem: the self-heal path (server.ts doRefresh →
+              markActiveDisconnected after repeated failures, + the WS-fatal
+              path) drops the centre zone into the OfflinePanel, which
+              auto-reconnects and reloads the roadmap on its own. A transient
+              single-cycle miss recovers on the next refresh. Either way the
+              operator never sees a dead-end error strip — connected ⇒ it loads,
+              disconnected ⇒ the reconnect screen. */}
           {/* 2026-06-11 UX fix — when no daemon is connected (boot probe
               in flight, no-daemon, or unauthorized) the ConnectionGate
               replaces RailEmptyPanel in the main area. ProjectsRail stays
