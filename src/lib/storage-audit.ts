@@ -63,6 +63,11 @@ const ALLOWED_PREFIXES = [
   'mc-conv-meta-v1::',   // convMeta cache (daemon snapshot is source of truth;
                           // chatStore.hydrateFromSnapshot prunes stale entries
                           // every boot — kept for fast first-paint only)
+  'mc-exec-queue::',      // execution queue per cluster (lib/queue.ts). It is a
+                          // deliberate per-browser list (NOT daemon-owned), so it
+                          // MUST survive the boot audit — otherwise staged items
+                          // vanish on refresh (the audit was silently wiping it,
+                          // which the FC-2 binding fixes couldn't cure).
 ];
 
 /** Audit prefixes — drop any key starting with one of these that isn't allowed. */
