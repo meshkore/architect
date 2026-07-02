@@ -38,7 +38,10 @@ export const MODEL_CATALOG: readonly ModelMeta[] = [
   { id: 'opus',   label: 'Opus (latest)',   short: 'opus', hint: 'Highest quality · most expensive · always newest Opus', group: 'Latest (alias)' },
   { id: 'sonnet', label: 'Sonnet (latest)', short: 'son',  hint: 'Balanced workhorse · always newest Sonnet',             group: 'Latest (alias)' },
   { id: 'haiku',  label: 'Haiku (latest)',  short: 'hai',  hint: 'Fastest · cheapest · always newest Haiku',              group: 'Latest (alias)' },
-  // Pinned versions (current 4.x family)
+  // Pinned versions — Claude 5 family
+  { id: 'claude-fable-5',    label: 'Fable 5',    short: 'f5',   hint: 'Pinned — Fable 5 · most capable · native 1M context', group: 'Pinned version' },
+  { id: 'claude-sonnet-5',   label: 'Sonnet 5',   short: 's5',   hint: 'Pinned — Sonnet 5 · near-Opus quality at Sonnet cost', group: 'Pinned version' },
+  // Pinned versions — Opus / Haiku 4.x
   { id: 'claude-opus-4-8',   label: 'Opus 4.8',   short: 'o4.8', hint: 'Pinned — Opus 4.8',   group: 'Pinned version' },
   { id: 'claude-opus-4-7',   label: 'Opus 4.7',   short: 'o4.7', hint: 'Pinned — Opus 4.7',   group: 'Pinned version' },
   { id: 'claude-opus-4-6',   label: 'Opus 4.6',   short: 'o4.6', hint: 'Pinned — Opus 4.6',   group: 'Pinned version' },
@@ -78,6 +81,14 @@ export function modelShort(id: string | null | undefined): string {
   if (!id) return DEFAULT_MODEL_SHORT;
   const hit = MODEL_BY_ID.get(id);
   if (hit) return hit.short;
+  // Family fallback for unlisted variants (e.g. a [1m]-suffixed or newer id).
+  // Fable/Mythos version as "5" (single-number line); opus/sonnet/haiku as
+  // "<letter><major>.<minor>" from a "4-8"-style id.
+  const fm = id.match(/fable|mythos/i);
+  if (fm) {
+    const v = id.match(/-(\d+)(?![\d-])/);
+    return v ? `${fm[0][0].toLowerCase()}${v[1]}` : fm[0].slice(0, 3).toLowerCase();
+  }
   const m = id.match(/opus|sonnet|haiku/i);
   if (m) {
     const fam = m[0].slice(0, 3).toLowerCase();

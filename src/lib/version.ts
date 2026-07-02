@@ -107,7 +107,7 @@ export const MIN_DAEMON_VERSION = 'py-1.11.0';
 // the CDN doesn't serve. The modularize agent re-points this when it
 // publishes 1.14.4. Build this with `npx vite build` (skips the
 // prebuild sync) until then.
-export const EXPECTED_DAEMON_VERSION = 'py-1.28.3';
+export const EXPECTED_DAEMON_VERSION = 'py-1.28.5';
 
 /** Convenience: gate against the project's MIN. */
 export function meetsMinimum(actual: string | DaemonVersion | undefined | null): boolean {
