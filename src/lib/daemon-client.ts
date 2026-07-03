@@ -485,6 +485,12 @@ export interface DispatchBody {
   text: string;
   agent_type?: string;
   agent_id?: string;
+  /** agent-team (ATM10) — the roster member this turn is bound to
+   *  (`developer`, `api-developer`, …). The daemon loads that member's
+   *  init prompt + refs on turn 1 and stamps conv_meta so chained turns
+   *  keep the identity. `model` / `effort` in this body still override
+   *  the member's defaults on ANY turn. */
+  member?: string;
   /** MP1 (daemon py-1.13.3) — per-conv model. `auto` / empty = let
    *  claude-code pick; otherwise one of `opus` / `sonnet` / `haiku`
    *  (or an explicit model id like `claude-opus-4-7`). */
@@ -507,6 +513,96 @@ export interface TaskCreateBody {
   initiative?: string;
   body?: string;
   [k: string]: unknown;
+}
+
+// ─── agent-team (ATM9 daemon contract) ──────────────────────────────
+//
+// The team roster is a set of member profiles under `.meshkore/team/`.
+// Each member is a markdown file: frontmatter (identity + defaults) +
+// an init-prompt body. The daemon serves them at /team; the cockpit's
+// teamStore (state/team.ts) mirrors the list and lazy-loads bodies.
+//
+//   GET    /team           → TeamMember[] (frontmatter + instances count),
+//                            sorted by pinned_order
+//   GET    /team/<id>      → TeamMemberDetail (frontmatter + body)
+//   POST   /team           → create (always kind:'profile'; model required)
+//   PATCH  /team/<id>      → partial update (kind & required immutable)
+//   DELETE /team/<id>      → 409 when required:true
+//   POST   /team/draft     → LLM normaliser: free text → structured draft
+//
+// WS events team.created | team.updated | team.deleted { id, ts }.
+
+export type TeamMemberKind = 'singleton' | 'profile';
+
+/** One roster member's frontmatter + live instance count. */
+export interface TeamMember {
+  id: string;
+  name: string;
+  emoji: string;
+  color?: string;
+  kind: TeamMemberKind;
+  required: boolean;
+  agent_type?: string;
+  /** Default model for instances of this member (required by the schema). */
+  model: string;
+  effort?: string;
+  pinned_order?: number;
+  refs?: string[];
+  credentials_hint?: string;
+  created?: string;
+  updated?: string;
+  /** Non-archived live convs currently bound to this member (from GET /team). */
+  instances?: number;
+}
+
+/** Full member incl. the init-prompt markdown body (GET /team/<id>). */
+export interface TeamMemberDetail extends TeamMember {
+  body: string;
+}
+
+/** POST /team — the final shape the operator confirms in the dialog.
+ *  `kind` is always `profile` for operator-created members; the daemon
+ *  rejects anything else. `model` is mandatory (no auto). */
+export interface TeamCreateBody {
+  name: string;
+  emoji: string;
+  model: string;
+  effort?: string;
+  kind?: 'profile';
+  refs?: string[];
+  /** The init-prompt markdown body. */
+  prompt: string;
+  color?: string;
+}
+
+/** PATCH /team/<id> — only the editable fields. `kind`/`required` are
+ *  immutable (daemon rejects them). Each caller sends only the section
+ *  it edited (ATM6 per-section save). */
+export interface TeamPatchBody {
+  name?: string;
+  emoji?: string;
+  color?: string;
+  model?: string;
+  effort?: string;
+  refs?: string[];
+  prompt?: string;
+}
+
+/** POST /team/draft — LLM normaliser input + output. */
+export interface TeamDraftBody {
+  name: string;
+  emoji: string;
+  raw_text: string;
+}
+export interface TeamDraftResponse {
+  id?: string;
+  name: string;
+  emoji: string;
+  model: string;
+  effort: string;
+  kind?: string;
+  refs: string[];
+  prompt: string;
 }
 
 // ─── Client ─────────────────────────────────────────────────────────
@@ -962,6 +1058,41 @@ export class DaemonClient {
     return this.request<unknown>('POST', '/tasks', body, signal);
   }
 
+  // ── agent-team roster (ATM9 daemon contract) ──────────────────────
+
+  /** GET /team — full roster (frontmatter + live instance counts),
+   *  sorted by pinned_order. Anonymous read (matches /chat/snapshot). */
+  async teamList(signal?: AbortSignal): Promise<Result<TeamMember[]>> {
+    return this.request<TeamMember[]>('GET', '/team', undefined, signal, /*requireAuth*/ false);
+  }
+
+  /** GET /team/<id> — one member incl. its init-prompt body. */
+  async teamGet(id: string, signal?: AbortSignal): Promise<Result<TeamMemberDetail>> {
+    return this.request<TeamMemberDetail>('GET', `/team/${encodeURIComponent(id)}`, undefined, signal, /*requireAuth*/ false);
+  }
+
+  /** POST /team — create a new member (always kind:'profile'). */
+  async teamCreate(body: TeamCreateBody, signal?: AbortSignal): Promise<Result<TeamMember>> {
+    return this.request<TeamMember>('POST', '/team', body, signal);
+  }
+
+  /** PATCH /team/<id> — partial update. `kind`/`required` are immutable
+   *  (the daemon rejects them); send only the edited section's fields. */
+  async teamUpdate(id: string, body: TeamPatchBody, signal?: AbortSignal): Promise<Result<TeamMember>> {
+    return this.request<TeamMember>('PATCH', `/team/${encodeURIComponent(id)}`, body, signal);
+  }
+
+  /** DELETE /team/<id> — 409 when the member is required. */
+  async teamDelete(id: string, signal?: AbortSignal): Promise<Result<{ deleted: boolean; id: string }>> {
+    return this.request<{ deleted: boolean; id: string }>('DELETE', `/team/${encodeURIComponent(id)}`, undefined, signal);
+  }
+
+  /** POST /team/draft — LLM normaliser: free-text mission → structured
+   *  draft the operator reviews before saving (ATM4/ATM5). */
+  async teamDraft(body: TeamDraftBody, signal?: AbortSignal): Promise<Result<TeamDraftResponse>> {
+    return this.request<TeamDraftResponse>('POST', '/team/draft', body, signal);
+  }
+
   async taskTransition(id: string, status: string, signal?: AbortSignal): Promise<Result<unknown>> {
     return this.request<unknown>('POST', `/tasks/${encodeURIComponent(id)}/transition`, { status }, signal);
   }
@@ -1025,7 +1156,7 @@ export class DaemonClient {
   // ── Internals ─────────────────────────────────────────────────────
 
   private async request<T>(
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     body: unknown,
     signal: AbortSignal | undefined,
@@ -1034,7 +1165,7 @@ export class DaemonClient {
   ): Promise<Result<T>> {
     const url = `${this.transport.httpBase}${path}`;
     const headers: Record<string, string> = {};
-    const sendsBody = method === 'POST' || method === 'PUT';
+    const sendsBody = method === 'POST' || method === 'PUT' || method === 'PATCH';
     if (sendsBody) headers['content-type'] = 'application/json';
     if (requireAuth && this.transport.token) {
       headers['authorization'] = `Bearer ${this.transport.token}`;

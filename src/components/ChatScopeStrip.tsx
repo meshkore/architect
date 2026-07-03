@@ -14,12 +14,13 @@
  * other panel is open; it highlights to show which view is current.
  */
 
-import { Show, createMemo, createSignal } from 'solid-js';
+import { For, Show, createMemo, createSignal } from 'solid-js';
 import { chatStore, ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
+import { teamStore } from '~/state/team';
 import { agentVisualInfo } from '~/lib/agent-types';
-import { modelLabel } from '~/lib/models';
-import type { ChatContextBlock } from '~/lib/daemon-client';
+import { MODEL_CATALOG, EFFORT_CATALOG } from '~/lib/models';
+import type { ChatContextBlock, TeamMember } from '~/lib/daemon-client';
 import { debugDropCount } from '~/lib/debug-transport';
 import { log } from '~/lib/log';
 
@@ -52,6 +53,27 @@ export default function ChatScopeStrip(props: Props) {
   // render with the cyan cap even if conv_meta has drifted.
   const typeInfo = () => agentVisualInfo(props.conv, props.meta);
   const chatActive = () => !props.historyOpen;
+
+  // ATM7 — the roster member this conv is bound to (developer, …), and
+  // whether it's still a DRAFT (no messages yet). Member + name are
+  // editable while draft; frozen to a read-only badge after the first
+  // dispatch. Onboarding is never a draft (it's the always-on master).
+  const boundMember = () => teamStore.get(props.meta?.member);
+  const isDraft = (): boolean => {
+    if (props.conv === ONBOARDING_CONV_ID) return false;
+    const msgs = chatStore.state.convMap[props.conv] ?? [];
+    return !msgs.some((m) => m.kind === 'user' || m.kind === 'assistant');
+  };
+  const rebindMember = (id: string): void => {
+    const m = teamStore.get(id);
+    chatStore.setConvMember(props.conv, id, {
+      model: m?.model,
+      effort: m?.effort,
+      // Only rename if the title still matches the previous member's name
+      // (operator hasn't typed a custom one).
+      title: props.meta?.title === boundMember()?.name ? m?.name : undefined,
+    });
+  };
 
   const beginEdit = () => {
     setDraft(props.meta?.title ?? '');
@@ -180,33 +202,64 @@ export default function ChatScopeStrip(props: Props) {
             return src.length <= 2 ? src.toUpperCase() : src[0]!.toUpperCase();
           })()}
         </span>
+        {/* ATM7 — member identity: emoji + NAME. Dropdown while the conv
+            is a draft (no messages), read-only badge after first dispatch.
+            This tells the operator which init prompt the instance got. */}
+        <Show when={props.meta?.member}>
+          <Show
+            when={isDraft()}
+            fallback={
+              <span
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium text-gray-100 bg-gray-800/60 border border-gray-700/60 flex-shrink-0"
+                title={`Member: ${boundMember()?.name ?? props.meta?.member} — frozen after the first message`}
+              >
+                <span aria-hidden="true">{boundMember()?.emoji ?? '🤖'}</span>
+                <span class="truncate max-w-[120px]">{boundMember()?.name ?? props.meta?.member}</span>
+              </span>
+            }
+          >
+            <MemberPicker current={props.meta!.member!} onPick={rebindMember} />
+          </Show>
+        </Show>
         <span class="flex-1 text-sm font-semibold text-gray-100 truncate">
           {title()}
         </span>
-        {/* MP1/MP3 (2026-06-12) — model + effort badge. Shows the
-            running model (full label, e.g. "Opus 4.8") when an explicit
-            override was picked, plus the effort level when non-default.
-            `auto` model + `default` effort → hidden (no value adding
-            noise). Daemon-authoritative (chat.snapshot) wins over the
-            cockpit-local convMeta if they disagree. */}
+        {/* ATM7 — Model + Effort are LIVE pickers, editable for the whole
+            life of the conv. Every turn is a fresh `claude -p`, so a
+            change applies from the NEXT message. Persisted to conv_meta
+            (chatStore.setConvModel/Effort) and sent in the next dispatch.
+            Daemon-authoritative (chat.snapshot) value wins on first paint;
+            once the operator picks, convMeta carries it forward. */}
         {(() => {
-          const modelId = () => convState()?.model ?? props.meta?.model ?? null;
-          const effortId = () => convState()?.effort ?? props.meta?.effort ?? null;
-          const showModel = () => modelId() && modelId() !== 'auto';
-          const showEffort = () => effortId() && effortId() !== 'default';
+          const modelId = () => convState()?.model ?? props.meta?.model ?? 'auto';
+          const effortId = () => convState()?.effort ?? props.meta?.effort ?? 'default';
           return (
-            <Show when={showModel() || showEffort()}>
-              <span
-                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-purple-200 bg-purple-500/10 border border-purple-500/30 flex-shrink-0"
-                title={`Model: ${modelLabel(modelId())}${showEffort() ? ` · effort: ${effortId()}` : ''} — daemon launches claude-code with --model / --effort.`}
+            <div class="flex items-center gap-1 flex-shrink-0">
+              <select
+                value={modelId()}
+                onChange={(e) => chatStore.setConvModel(props.conv, e.currentTarget.value)}
+                title="Model — applies from the next turn (daemon launches claude-code --model)"
+                class="bg-purple-500/10 border border-purple-500/30 rounded px-1.5 py-0.5 text-[10px] font-mono text-purple-200 focus:outline-none focus:border-purple-400/60 max-w-[110px]"
               >
-                <Show when={showModel()}>{modelLabel(modelId())}</Show>
-                <Show when={showEffort()}>
-                  <span class="text-purple-300/70">·</span>
-                  <span class="uppercase tracking-wider text-amber-200/90">{effortId()}</span>
-                </Show>
-              </span>
-            </Show>
+                <For each={['Latest (alias)', 'Pinned version', 'Auto'] as const}>{(grp) => (
+                  <optgroup label={grp}>
+                    <For each={MODEL_CATALOG.filter((m) => m.group === grp)}>
+                      {(m) => <option value={m.id}>{m.label}</option>}
+                    </For>
+                  </optgroup>
+                )}</For>
+              </select>
+              <select
+                value={effortId()}
+                onChange={(e) => chatStore.setConvEffort(props.conv, e.currentTarget.value)}
+                title="Effort (reasoning depth) — applies from the next turn (claude-code --effort)"
+                class="bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5 text-[10px] font-mono text-amber-200/90 focus:outline-none focus:border-amber-400/60"
+              >
+                <For each={EFFORT_CATALOG}>
+                  {(e) => <option value={e.id}>{e.label}</option>}
+                </For>
+              </select>
+            </div>
           );
         })()}
         {/* CU1 (2026-06-12) — token usage + cost chip. Hidden until the
@@ -379,5 +432,29 @@ export default function ChatScopeStrip(props: Props) {
         </div>
       </Show>
     </div>
+  );
+}
+
+/** ATM7 — draft-only member picker. Lists pickable members (singletons
+ *  with a live instance are hidden) plus the currently-bound member so
+ *  it always stays selectable. */
+function MemberPicker(props: { current: string; onPick: (id: string) => void }) {
+  const options = createMemo<TeamMember[]>(() => {
+    const list = teamStore.pickable();
+    const cur = teamStore.get(props.current);
+    if (cur && !list.some((m) => m.id === cur.id)) return [cur, ...list];
+    return list;
+  });
+  return (
+    <select
+      value={props.current}
+      onChange={(e) => props.onPick(e.currentTarget.value)}
+      title="Member — the init prompt this instance receives (editable until the first message)"
+      class="bg-gray-800/60 border border-gray-700/60 rounded px-1.5 py-0.5 text-[11px] text-gray-100 focus:outline-none focus:border-emerald-500/55 flex-shrink-0 max-w-[150px]"
+    >
+      <For each={options()}>
+        {(m) => <option value={m.id}>{m.emoji} {m.name}</option>}
+      </For>
+    </select>
   );
 }

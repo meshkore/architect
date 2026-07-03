@@ -31,6 +31,7 @@ import { chatStore, ONBOARDING_CONV_ID, loadLastActiveConv } from '~/state/chat'
 import { viewStore } from '~/state/view';
 import { bindCluster as queueBindCluster } from '~/lib/queue';
 import { storyStore } from '~/state/story';
+import { teamStore } from '~/state/team';
 import { log } from '~/lib/log';
 import { applyStoredLayout } from '~/components/Splitter';
 import { ModalHost } from '~/lib/modal';
@@ -39,7 +40,6 @@ import { ProjectDebugModalHost } from '~/components/modals/ProjectDebugModal';
 // inline DaemonOutdatedPanel mounted by Cockpit.tsx (mandatory full-
 // area block + auto-poll). No more floating dismissable modal.
 import { AutoUpdateFlowHost } from '~/components/modals/AutoUpdateFlow';
-import { NewAgentWizardHost } from '~/components/modals/NewAgentWizard';
 import { AddProjectWizardHost } from '~/components/modals/AddProjectWizard';
 import StoryRunner from '~/components/story/StoryRunner';
 import ConnectionGate from '~/components/ConnectionGate';
@@ -115,6 +115,9 @@ export default function App() {
       }
       chatStore.bindCluster(health.cluster_id ?? null);
       viewStore.bindCluster(health.cluster_id ?? null);
+      // agent-team (ATM3) — reset the roster mirror on project switch;
+      // hydrate() below repopulates it from the new cluster's /team.
+      teamStore.bindCluster(health.cluster_id ?? null);
       // FC-2 — bind the execution queue to this project too (same cluster_id
       // path as the stores above) so staged items persist per-project across
       // refresh, instead of the queue racing daemonStore reads for its key.
@@ -172,6 +175,13 @@ export default function App() {
           log.error('chat.snapshot fetch failed; daemon may be older than py-1.11.0', { status: res.status });
         }
       })();
+      // agent-team (ATM3) — hydrate the roster so the Team panel + the
+      // chat-rail picker have members immediately. Guarded by the same
+      // swap check; a daemon without /team returns 404 → empty roster.
+      void teamStore.hydrate(client).then(() => {
+        if (!stillCurrent()) return;
+        log.info('team roster hydrated', { members: teamStore.state.list.length });
+      });
       // V89 — fetch any active runs from the daemon so the UI paints
       // ground truth immediately (the WS handles updates from here on).
       void storyStore.hydrate(client).then(() => {
@@ -341,7 +351,6 @@ export default function App() {
       {/* V97 — DaemonOutdatedHost removed; daemon-outdated is now an
           inline panel in Cockpit.tsx */}
       <AutoUpdateFlowHost />
-      <NewAgentWizardHost />
       <AddProjectWizardHost />
       <StoryRunner />
     </>

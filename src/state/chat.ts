@@ -49,6 +49,11 @@ export interface ConvMeta {
   effort?: string;
   type: AgentType;
   title: string;
+  /** agent-team (ATM7/ATM10) — the roster member this conv is bound to
+   *  (`developer`, `api-developer`, …). Set at creation from the picker
+   *  and frozen after the first dispatch. Passed as `member` on every
+   *  dispatch so the daemon loads that member's init prompt + refs. */
+  member?: string;
   location: { type: 'local' | 'remote'; host?: string; provider?: string };
 }
 
@@ -659,6 +664,7 @@ function ensureConvMeta(convId: string, init: Partial<ConvMeta> = {}): ConvMeta 
     effort: init.effort ?? 'default',
     type: (init.type ?? 'custom') as AgentType,
     title: init.title ?? '',
+    member: init.member,
     location: init.location ?? { type: 'local', host: 'this machine' },
   };
   setState('convMeta', convId, meta);
@@ -727,15 +733,18 @@ function onboardingHasUserMessages(): boolean {
 
 /**
  * Create an empty conversation with metadata and select it. Used by the
- * NewAgentWizard (M6.5). Slug mirrors V79's `newConvSlugFromScope`:
- * scope-encoded for custom agents, type+timestamp for services. Returns
- * the slug so the caller can focus the composer.
+ * chat-rail `+` (ATM7 — binds a `developer` member draft) and story
+ * runs. Slug mirrors V79's `newConvSlugFromScope`: scope-encoded for
+ * custom agents, type+timestamp for services. Returns the slug so the
+ * caller can focus the composer.
  */
 function createConv(opts: {
   type: AgentType;
   title: string;
   model: string;
   effort?: string;
+  /** agent-team (ATM7) — bind the new conv to a roster member. */
+  member?: string;
   scope?: { module?: string | null; taskId?: string | null };
 }): string {
   const stamp = new Date().toISOString().slice(5, 16).replace(/[:T-]/g, '').toLowerCase();
@@ -757,7 +766,7 @@ function createConv(opts: {
   // (welcomeForAgentType) live in onboarding-brief.ts for the
   // operator's own reference but no longer auto-render.
   if (!state.convMap[slug]) setState('convMap', slug, []);
-  ensureConvMeta(slug, { type: opts.type, title: opts.title, model: opts.model, effort: opts.effort });
+  ensureConvMeta(slug, { type: opts.type, title: opts.title, model: opts.model, effort: opts.effort, member: opts.member });
   // V107.30 — Use setActiveConv (not raw setState) so the picked slug
   // is persisted in localStorage (`mc-last-conv-v1::<cluster>`). Pre-fix,
   // reloading right after creating an agent dropped the selection back
@@ -791,6 +800,36 @@ function createStoryConv(opts: { initiativeId: string; initiativeTitle: string }
 function setConvTitle(conv: string, title: string): void {
   ensureConvMeta(conv);
   setState('convMeta', conv, 'title', title);
+  saveConvMeta();
+}
+
+/** agent-team (ATM7) — set the conv's model live. Every turn is a fresh
+ *  `claude -p`, so the change applies from the NEXT dispatch (which reads
+ *  meta.model). Persisted to convMeta so it survives reloads. */
+function setConvModel(conv: string, model: string): void {
+  ensureConvMeta(conv);
+  setState('convMeta', conv, 'model', model);
+  saveConvMeta();
+}
+
+/** agent-team (ATM7) — set the conv's effort (reasoning depth) live.
+ *  Same next-turn semantics as setConvModel. */
+function setConvEffort(conv: string, effort: string): void {
+  ensureConvMeta(conv);
+  setState('convMeta', conv, 'effort', effort);
+  saveConvMeta();
+}
+
+/** agent-team (ATM7) — rebind a DRAFT conv (no messages yet) to another
+ *  roster member. Also refreshes model/effort to the member's defaults
+ *  and the title if it still matches the previous member. Refused once
+ *  the conv has any messages (the picker collapses to a badge by then). */
+function setConvMember(conv: string, member: string, defaults?: { model?: string; effort?: string; title?: string }): void {
+  ensureConvMeta(conv);
+  setState('convMeta', conv, 'member', member);
+  if (defaults?.model) setState('convMeta', conv, 'model', defaults.model);
+  if (defaults?.effort) setState('convMeta', conv, 'effort', defaults.effort);
+  if (defaults?.title) setState('convMeta', conv, 'title', defaults.title);
   saveConvMeta();
 }
 
@@ -1059,6 +1098,10 @@ async function dispatchMessage(client: DaemonClient, opts: DispatchOpts): Promis
   const finalType = slugImplied ?? meta?.type;
   if (finalType) body.agent_type = finalType;
   if (meta?.agentId) body.agent_id = meta.agentId;
+  // agent-team (ATM10) — bind the turn to the conv's roster member so
+  // the daemon loads that member's init prompt + refs and stamps
+  // conv_meta. model/effort below still override the member's defaults.
+  if (meta?.member) body.member = meta.member;
   // MP2 (2026-06-12) — propagate the per-conv model preference from
   // convMeta (set by NewAgentWizard) to the dispatch. Daemon py-1.13.3+
   // persists it in conv_meta and ChatRunner.spawn injects
@@ -1805,6 +1848,9 @@ export const chatStore = {
   seedOnboardingConv,
   onboardingHasUserMessages,
   setConvTitle,
+  setConvModel,
+  setConvEffort,
+  setConvMember,
   archiveConv,
   unarchiveConv,
   findActiveArchitectConv,

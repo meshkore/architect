@@ -136,14 +136,11 @@ export const AGENT_TYPES: Record<AgentType, AgentTypeInfo> = {
   },
 };
 
-/** Ordered list — service types first (deploy → review) then custom last,
- * matching the V80 wizard pill order. The roadmap-architect is spawned
- * exclusively by the Run all button (not via the new-agent wizard) so
- * it stays off this list — the wizard would otherwise let the operator
- * create orphan coordinators that nobody dispatched. */
-export const AGENT_TYPE_ORDER: AgentType[] = [
-  'deploy', 'db', 'testing', 'audit', 'docs', 'review', 'custom',
-];
+// agent-team (ATM7) — `AGENT_TYPE_ORDER` was the New Agent wizard's pill
+// order. The wizard is deleted (the chat-rail `+` now spawns a
+// `developer` member directly, and typed service work is a team member),
+// so the ordered list is gone. The registry (`AGENT_TYPES`) stays — the
+// rail/chat badges still resolve colours + labels through it.
 
 export function agentTypeInfo(t: AgentType | string | undefined | null): AgentTypeInfo {
   if (t && t in AGENT_TYPES) return AGENT_TYPES[t as AgentType];

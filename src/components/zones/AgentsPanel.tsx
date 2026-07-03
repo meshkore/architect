@@ -1,43 +1,34 @@
 /**
- * AgentsPanel — V88. Global view of "who is working on what".
+ * AgentsPanel — the Team zone (ATM3).
  *
- * Two stacked tables:
+ * Rescoped 2026-07-03 from "who is working on what" into the TEAM
+ * ROSTER manager. Three stacked parts:
  *
- *  1. Runs (top, only when any are in flight) — every active story run
- *     with progress, the agent assigned, the initiative + current
- *     task, elapsed timer, and a stop button.
+ *  1. Roster (top) — a card grid of team members from `GET /team`
+ *     (teamStore). Create (ATM4 dialog) / edit (ATM6 detail panel) /
+ *     delete, with live instance counts and required/kind badges.
  *
- *  2. Agents (always) — every conv in `chatStore.convMeta` (excluding
- *     archived) sorted by activity. Per row: id chip · title · type ·
- *     status (idle/streaming) · current task if in a run · last message
- *     preview · "open chat" button that activates the conv.
+ *  2. Active runs (only when any are in flight) — every active story
+ *     run with progress + stop, unchanged from the pre-rescope panel.
  *
- * The panel reads from existing stores — no daemon changes needed.
- * It's the operator's answer to "necesito ver la lista de agentes y
- * qué tarea están haciendo, con relación a la iniciativa".
+ *  3. Instances (always) — every non-archived conv, grouped under its
+ *     bound member when `conv_meta.member` is present (ATM10).
  *
- * Future evolution: when the daemon RunCoordinator lands (audit fases
- * 2-3, captured in initiative `agent-run-coordinator`), this panel
- * will read agent.busy / current_run_id directly from the daemon
- * instead of deriving from convMap+storyStore. The component contract
- * doesn't change.
+ * Parts 2–3 read from chatStore / storyStore; part 1 reads teamStore.
  */
 
-import { For, Show, createMemo } from 'solid-js';
+import { For, Show, createMemo, createResource, createSignal } from 'solid-js';
 import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
-import type { ChatConvSummary } from '~/lib/daemon-client';
+import type { ChatConvSummary, TeamMember } from '~/lib/daemon-client';
 import { storyStore } from '~/state/story';
 import { daemonStore } from '~/state/daemon';
+import { teamStore } from '~/state/team';
 import { allTasks, allInitiatives } from '~/state/server';
 import { uiStore } from '~/state/ui';
+import { modelLabel } from '~/lib/models';
 import { log } from '~/lib/log';
-
-// V107.24 — Panel reads `chatStore.state.convs` (snapshot.v1,
-// daemon-authoritative). Operator field report 2026-06-06: cavioca
-// cockpit showed 13+ ghost "Architect" agents because the panel was
-// pulling from the localStorage `convMeta` cache, which survives long
-// after the daemon archives those convs. Snapshot source = no ghosts
-// by construction.
+import NewMemberDialog from '~/components/team/NewMemberDialog';
+import MemberDetailPanel from '~/components/team/MemberDetailPanel';
 
 interface AgentRow {
   conv: string;
@@ -46,6 +37,7 @@ interface AgentRow {
   runInitiativeId: string | null;
   runTaskId: string | null;
   isOnboarding: boolean;
+  member: string | null;
 }
 
 function fmtRelative(ts: string | null): string {
@@ -64,7 +56,23 @@ function typeBadge(t: string | null | undefined): string {
   return t;
 }
 
+/** First paragraph of the init prompt, trimmed to ~120 chars — the
+ *  card's one-line mission (ATM3). Strips a leading `# Heading`. */
+function missionLine(body: string | null | undefined): string {
+  if (!body) return '';
+  const paras = body
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p && !/^#{1,6}\s/.test(p) && !/^(##\s*Mission)/i.test(p));
+  const first = paras[0] ?? '';
+  const flat = first.replace(/\s+/g, ' ').replace(/^#{1,6}\s+/, '');
+  return flat.length > 120 ? flat.slice(0, 117) + '…' : flat;
+}
+
 export default function AgentsPanel() {
+  const [newMemberOpen, setNewMemberOpen] = createSignal(false);
+  const [detailId, setDetailId] = createSignal<string | null>(null);
+
   const activeRuns = createMemo(() => storyStore.state.runs.filter(
     (r) => r.status !== 'done' && r.status !== 'cancelled' && r.status !== 'failed',
   ));
@@ -82,6 +90,7 @@ export default function AgentsPanel() {
         runInitiativeId: run?.initiativeId ?? null,
         runTaskId: run ? (run.taskIds[run.cursor] ?? null) : null,
         isOnboarding: summary.conv === ONBOARDING_CONV_ID,
+        member: chatStore.state.convMeta[summary.conv]?.member ?? null,
       });
     }
     out.sort((a, b) => {
@@ -96,6 +105,28 @@ export default function AgentsPanel() {
       return bTs - aTs;
     });
     return out;
+  });
+
+  // ATM10 — group instance rows under their bound member. Rows with no
+  // member (legacy convs, onboarding) fall into an "Unassigned" bucket.
+  const grouped = createMemo(() => {
+    const byMember = new Map<string | null, AgentRow[]>();
+    for (const r of rows()) {
+      const key = r.member;
+      const arr = byMember.get(key) ?? [];
+      arr.push(r);
+      byMember.set(key, arr);
+    }
+    const order: Array<{ member: TeamMember | null; key: string | null; rows: AgentRow[] }> = [];
+    for (const m of teamStore.state.list) {
+      const rs = byMember.get(m.id);
+      if (rs && rs.length) { order.push({ member: m, key: m.id, rows: rs }); byMember.delete(m.id); }
+    }
+    // Any member ids not in the roster (renamed/removed) + unassigned.
+    for (const [key, rs] of byMember.entries()) {
+      order.push({ member: null, key, rows: rs });
+    }
+    return order;
   });
 
   const runRows = createMemo(() => {
@@ -123,39 +154,59 @@ export default function AgentsPanel() {
     uiStore.setActiveZone('architect');
   };
 
-  // V107.9 — Archive directly from the list. Operator complaint:
-  // having to switch chat then double-click the trash icon to clear
-  // 3 agents was unworkable. Now a small × on each row archives
-  // immediately (one click). Onboarding/Coordinator stays unarchivable
-  // — guarded by chatStore.archiveConv.
   const archiveConv = async (conv: string): Promise<void> => {
-    log.warn('[agents-panel:archive] start', { conv });
     chatStore.archiveConv(conv);
-    log.warn('[agents-panel:archive] local archiveConv done', {
-      conv,
-      archivedNow: chatStore.state.archivedConvs[conv] === true,
-    });
     if (chatStore.state.activeConv === conv) chatStore.setActiveConv(null);
     const client = daemonStore.state.client;
-    if (!client) {
-      log.warn('[agents-panel:archive] no daemon client — local-only');
-      return;
-    }
+    if (!client) return;
     const res = await client.chatArchive(conv);
-    log.warn('[agents-panel:archive] /chat/archive', { ok: res.ok, status: res.status });
     if (!res.ok) log.warn('[agents-panel:archive] sync to daemon failed', res.status);
   };
 
   return (
     <section class="zone-host p-4 overflow-y-auto">
-      <header class="mb-4">
-        <h2 class="text-sm font-mono uppercase tracking-wider text-gray-400">Agents</h2>
-        <p class="text-[11px] text-gray-600 mt-0.5">
-          Every chat agent on this cluster. Active story runs surface
-          on top; click an agent to open its chat.
-        </p>
+      {/* Roster toolbar */}
+      <header class="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 class="text-sm font-mono uppercase tracking-wider text-gray-400">Team</h2>
+          <p class="text-[11px] text-gray-600 mt-0.5">
+            The members that make up this cluster's team. Create, edit and
+            see live instances of each.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setNewMemberOpen(true)}
+          class="flex-shrink-0 text-[12px] font-mono text-emerald-300 hover:text-emerald-200 border border-emerald-500/40 hover:border-emerald-500/70 bg-emerald-500/5 rounded px-3 py-1.5 transition-colors"
+        >+ New member</button>
       </header>
 
+      {/* Roster grid */}
+      <Show
+        when={teamStore.state.list.length > 0}
+        fallback={
+          <p class="text-[12px] text-gray-600 italic py-4 mb-6">
+            <Show when={teamStore.state.loading} fallback="No team members yet. Click “+ New member” to add one.">
+              Loading team…
+            </Show>
+          </p>
+        }
+      >
+        <div class="grid gap-3 mb-8" style={{ 'grid-template-columns': 'repeat(auto-fill, minmax(240px, 1fr))' }}>
+          <For each={teamStore.state.list}>
+            {(m) => (
+              <MemberCard
+                member={m}
+                highlight={teamStore.state.recentlyCreated === m.id}
+                onOpen={() => setDetailId(m.id)}
+                onDelete={() => setDetailId(m.id)}
+              />
+            )}
+          </For>
+        </div>
+      </Show>
+
+      {/* Active runs */}
       <Show when={runRows().length > 0}>
         <section class="mb-6">
           <h3 class="text-[10px] font-mono uppercase tracking-wider text-emerald-400/80 mb-2">
@@ -211,32 +262,140 @@ export default function AgentsPanel() {
         </section>
       </Show>
 
+      {/* Instances, grouped by member */}
       <section>
         <h3 class="text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-2">
-          Agents · {rows().length}
+          Instances · {rows().length}
         </h3>
         <Show
           when={rows().length > 0}
           fallback={
             <p class="text-[12px] text-gray-600 italic py-4">
-              No agents on this cluster yet. Send a message in chat or run an initiative.
+              No live instances. Click + in the chat rail or run an initiative.
             </p>
           }
         >
-          <ul class="space-y-1.5">
-            <For each={rows()}>
-              {(r) => (
-                <AgentRowItem
-                  row={r}
-                  onOpen={() => goToChat(r.conv)}
-                  onArchive={() => { void archiveConv(r.conv); }}
-                />
+          <div class="space-y-4">
+            <For each={grouped()}>
+              {(grp) => (
+                <div>
+                  <div class="flex items-center gap-1.5 mb-1.5">
+                    <span class="text-[13px]" aria-hidden="true">{grp.member?.emoji ?? '•'}</span>
+                    <span class="text-[11px] font-medium text-gray-400">
+                      {grp.member?.name ?? (grp.key ?? 'Unassigned')}
+                    </span>
+                    <span class="text-[10px] font-mono text-gray-600">· {grp.rows.length}</span>
+                  </div>
+                  <ul class="space-y-1.5">
+                    <For each={grp.rows}>
+                      {(r) => (
+                        <AgentRowItem
+                          row={r}
+                          onOpen={() => goToChat(r.conv)}
+                          onArchive={() => { void archiveConv(r.conv); }}
+                        />
+                      )}
+                    </For>
+                  </ul>
+                </div>
               )}
             </For>
-          </ul>
+          </div>
         </Show>
       </section>
+
+      {/* Dialogs */}
+      <Show when={newMemberOpen()}>
+        <NewMemberDialog onClose={() => setNewMemberOpen(false)} />
+      </Show>
+      <Show when={detailId()}>
+        <MemberDetailPanel
+          memberId={detailId()!}
+          onClose={() => setDetailId(null)}
+          onDeleted={() => setDetailId(null)}
+        />
+      </Show>
     </section>
+  );
+}
+
+function MemberCard(props: {
+  member: TeamMember;
+  highlight: boolean;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
+  const m = () => props.member;
+  const client = () => daemonStore.state.client;
+  // Lazy-load the body for the one-line mission (roster is small).
+  const [body] = createResource(
+    () => props.member.id,
+    async (id) => {
+      const c = client();
+      if (!c) return '';
+      const d = await teamStore.detail(c, id);
+      return d?.body ?? '';
+    },
+  );
+  const color = () => m().color || '#34d399';
+
+  return (
+    <div
+      class="group relative rounded-lg border bg-gray-900/40 hover:bg-gray-800/50 px-3 py-3 cursor-pointer transition-colors"
+      classList={{
+        'border-emerald-500/60 ring-1 ring-emerald-500/40': props.highlight,
+        'border-gray-800/60': !props.highlight,
+      }}
+      onClick={props.onOpen}
+    >
+      <div class="flex items-start gap-2.5">
+        <span
+          class="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-xl"
+          style={{ background: `${color()}1a`, border: `1px solid ${color()}55` }}
+          aria-hidden="true"
+        >{m().emoji || '🤖'}</span>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1.5">
+            <span class="text-[13px] font-semibold text-gray-100 truncate">{m().name}</span>
+            <Show when={m().required}>
+              <span title="Required member — cannot be deleted" class="text-amber-300 text-[11px]">🔒</span>
+            </Show>
+          </div>
+          <div class="flex flex-wrap items-center gap-1 mt-1">
+            <span class="font-mono text-[9px] text-purple-200 bg-purple-500/10 border border-purple-500/30 rounded px-1.5 py-0.5">
+              {modelLabel(m().model)}
+            </span>
+            <span class="font-mono text-[9px] uppercase tracking-wider text-gray-400 bg-gray-800/60 border border-gray-700/60 rounded px-1.5 py-0.5">
+              {m().kind}
+            </span>
+            <span
+              class="font-mono text-[9px] rounded px-1.5 py-0.5 border"
+              classList={{
+                'text-emerald-300 bg-emerald-500/15 border-emerald-500/40': (m().instances ?? 0) > 0,
+                'text-gray-500 bg-gray-800/40 border-gray-700/50': (m().instances ?? 0) === 0,
+              }}
+              title="Live non-archived instances"
+            >{m().instances ?? 0} live</span>
+          </div>
+        </div>
+      </div>
+      <p class="text-[11px] text-gray-500 mt-2 leading-snug min-h-[2.4em]">
+        {body.loading ? '' : (missionLine(body()) || 'No mission set.')}
+      </p>
+      {/* Delete (hidden when required) */}
+      <Show when={!m().required}>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); props.onDelete(); }}
+          title="Manage / delete this member"
+          class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 inline-flex items-center justify-center w-6 h-6 rounded text-gray-500 hover:text-red-300 border border-transparent hover:border-red-500/40 hover:bg-red-500/5 transition-all"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+          </svg>
+        </button>
+      </Show>
+    </div>
   );
 }
 
@@ -275,15 +434,11 @@ function AgentRowItem(props: { row: AgentRow; onOpen: () => void; onArchive: () 
           </span>
         </Show>
         <span class="ml-auto text-[10px] font-mono text-gray-600">{fmtRelative(r().summary.last_activity_at)}</span>
-        {/* V107.9 — Inline archive button. Hidden on the Coordinator
-            (onboarding conv is unarchivable by design). Visible on
-            hover so the resting row stays clean. One click archives —
-            restore via History → Archived filter. */}
         <Show when={!r().isOnboarding}>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); props.onArchive(); }}
-            title="Archive this agent (restore via History → Archived)"
+            title="Archive this instance (restore via History → Archived)"
             class="opacity-0 group-hover:opacity-100 inline-flex items-center justify-center w-6 h-6 rounded text-gray-500 hover:text-red-300 border border-transparent hover:border-red-500/40 hover:bg-red-500/5 transition-all flex-shrink-0"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

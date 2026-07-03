@@ -80,7 +80,7 @@ function openAboutModal(): void {
 
 const ZONES: { id: Zone; label: string; title: string }[] = [
   { id: 'architect', label: 'Architect', title: 'Architect — project dashboard (modules · roadmap · chat)' },
-  { id: 'agents',    label: 'Equipo',    title: 'Equipo — global view of who is working on what' },
+  { id: 'agents',    label: 'Team',      title: 'Team — roster of members + who is working on what' },
   { id: 'bookmarks', label: 'Bookmarks', title: 'Bookmarks — quick-access shelf' },
   { id: 'crons',     label: 'Crons',     title: 'Crons — scheduled jobs' },
   { id: 'links',     label: 'Links',     title: 'Links — deployment registry' },

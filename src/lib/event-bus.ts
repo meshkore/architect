@@ -26,6 +26,7 @@ import type { RunnerAuthRequest } from '~/state/daemon';
 import { chatStore } from '~/state/chat';
 import { serverStore } from '~/state/server';
 import { storyStore } from '~/state/story';
+import { teamStore } from '~/state/team';
 import { daemonStore } from '~/state/daemon';
 import { bumpContextRev } from '~/state/context-sync';
 import { log } from './log';
@@ -56,6 +57,9 @@ const QUEUE_TYPE_PREFIX = 'queue.';
 // polling /state. Active-cluster only — non-active clusters refetch
 // on switch back via bindCluster's hydration path.
 const CONV_TYPE_PREFIX = 'conv.';
+// agent-team (ATM3) — roster lifecycle events (team.created | updated |
+// deleted). Active-cluster only, same isolation rule as conv.*/run.*.
+const TEAM_TYPE_PREFIX = 'team.';
 
 /**
  * Attach the bus. Returns a teardown function — call it from
@@ -136,6 +140,17 @@ export function attachEventBus(
         return;
       }
       chatStore.ingestQueueEvent(ev);
+      return;
+    }
+    if (t.startsWith(TEAM_TYPE_PREFIX)) {
+      // agent-team (ATM3) — roster changed. Active-cluster only; a
+      // non-active bus's roster refreshes on switch-back via
+      // teamStore.hydrate in the boot chain.
+      if (!isActiveCluster()) {
+        log.debug('[event-bus] dropping team.* from non-active cluster', { clusterKey, active: daemonStore.state.activeId, type: t });
+        return;
+      }
+      teamStore.onTeamEvent(client, ev);
       return;
     }
     if (t.startsWith(RUN_TYPE_PREFIX)) {

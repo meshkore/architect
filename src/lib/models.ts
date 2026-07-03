@@ -1,6 +1,7 @@
 /**
  * models.ts — the cockpit's LLM model + effort catalog, shared by the
- * NewAgentWizard (pickers) and AgentCard / ChatScopeStrip (badges).
+ * team member dialog/editor (pickers), the chat header's live pickers,
+ * and AgentCard / ChatScopeStrip (badges).
  *
  * Two knobs map 1:1 onto what the `claude` CLI (claude-code 2.1.145)
  * accepts and what the daemon forwards (MP1/MP3, daemon py-1.13.3+):
@@ -68,9 +69,11 @@ export const EFFORT_CATALOG: readonly EffortMeta[] = [
 ];
 
 /** A freshly-created agent's model + effort. Explicit model (not auto)
- *  so the operator always knows what's running; default effort = the
- *  CLI default (no flag) to avoid silently inflating cost. */
-export const DEFAULT_MODEL = 'sonnet';
+ *  so the operator always knows what's running. Strongest-model policy
+ *  (agent-team): default to `opus` — the operator dials down per-member
+ *  or per-conv when a lighter model is enough. Default effort = the CLI
+ *  default (no flag) to avoid silently inflating cost. */
+export const DEFAULT_MODEL = 'opus';
 export const DEFAULT_EFFORT = 'default';
 
 const MODEL_BY_ID = new Map(MODEL_CATALOG.map((m) => [m.id, m]));

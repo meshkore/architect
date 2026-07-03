@@ -46,10 +46,11 @@ import DiaryPanel from '~/components/zones/DiaryPanel';
 import Splitter, { setLayoutWidth } from '~/components/Splitter';
 import { MODULES_COLLAPSE_PX } from '~/components/modules-tree/widths';
 import ColumnDragGrip from '~/components/ColumnDragGrip';
-import { openNewAgentWizard } from '~/components/modals/NewAgentWizard';
 import { daemonStore } from '~/state/daemon';
 import { serverStore } from '~/state/server';
 import { chatStore } from '~/state/chat';
+import { teamStore } from '~/state/team';
+import { DEFAULT_MODEL, DEFAULT_EFFORT } from '~/lib/models';
 import { nav } from '~/state/nav';
 import { uiStore, type Zone } from '~/state/ui';
 import { layoutStore, type ColumnId } from '~/state/layout';
@@ -403,7 +404,32 @@ function RoadmapColumn(props: {
  * agents rail (resizable via `chat-rail`) + the chat thread.
  */
 function AgentsColumn(props: { selectedModule: string | null }) {
-  const onNewAgent = () => openNewAgentWizard({ scope: { module: props.selectedModule } });
+  // ATM7 — `+` opens NO modal. It immediately creates a draft conv
+  // pre-bound to the generic `developer` member and focuses it. The
+  // member + model + effort stay editable in the chat header until the
+  // first message is sent. Empty-team edge case: fall back to a free
+  // `custom` agent so the rail never dead-ends.
+  const onNewAgent = () => {
+    const dev = teamStore.developer();
+    if (dev) {
+      chatStore.createConv({
+        type: 'custom',
+        title: dev.name,
+        model: dev.model,
+        effort: dev.effort ?? DEFAULT_EFFORT,
+        member: dev.id,
+        scope: { module: props.selectedModule },
+      });
+    } else {
+      chatStore.createConv({
+        type: 'custom',
+        title: '',
+        model: DEFAULT_MODEL,
+        effort: DEFAULT_EFFORT,
+        scope: { module: props.selectedModule },
+      });
+    }
+  };
   return (
     <div data-panel-id="agents" class="center-col col" id="chat-col">
       <div class="col-header-row" style={{ 'justify-content': 'space-between', gap: '8px' }}>
