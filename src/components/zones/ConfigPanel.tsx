@@ -1,4 +1,4 @@
-import { ClusterBlock, TokenBlock, DaemonBlock, MembersBlock, ModulesBlock, CredentialsBlock, StorageBlock } from './config/blocks';
+import { ClusterBlock, TokenBlock, DaemonBlock, RemoteControlBlock, MembersBlock, ModulesBlock, CredentialsBlock, StorageBlock } from './config/blocks';
 
 export default function ConfigPanel() {
   return (
@@ -7,6 +7,7 @@ export default function ConfigPanel() {
       <ClusterBlock />
       <TokenBlock />
       <DaemonBlock />
+      <RemoteControlBlock />
       <StorageBlock />
       <CredentialsBlock />
       <MembersBlock />

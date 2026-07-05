@@ -632,6 +632,21 @@ export interface TeamDraftResponse {
   prompt: string;
 }
 
+// ─── master-copilot (CPL-2/CPL-4) — remote-control token ────────────
+//
+// Machine-level (one per daemon) operator credential. GET returns the
+// live token; after a DELETE the daemon 404s with minted:false.
+export interface RemoteTokenResponse {
+  /** The bearer value. Present on 200 (minted / just-rotated). */
+  token?: string;
+  /** true when a token exists; false in the 404 "absent" body. */
+  minted?: boolean;
+  /** ISO timestamp, only on the rotate response. */
+  rotated_at?: string;
+  /** e.g. "remote_token_absent" in the 404 body. */
+  error?: string;
+}
+
 // ─── Client ─────────────────────────────────────────────────────────
 
 /**
@@ -1169,6 +1184,40 @@ export class DaemonClient {
    *  for an external member; the old one stops working immediately. */
   async teamRotateToken(id: string, signal?: AbortSignal): Promise<Result<{ token: string }>> {
     return this.request<{ token: string }>('POST', `/team/${encodeURIComponent(id)}/token/rotate`, {}, signal);
+  }
+
+  // ── master-copilot (CPL-2/CPL-4) — machine-level remote-control token ──
+  //
+  // ONE operator-grade credential per DAEMON (not per project). It
+  // authorizes project discovery/creation + master ask/poll across ALL
+  // projects (header-routed). The daemon mints it on boot; the cockpit's
+  // "Remote control" block (Config → daemon section) views/rotates/revokes
+  // it. All three calls are portal-authed (same transport.token as the
+  // other privileged endpoints). Observed daemon contract (py-1.30.1):
+  //   GET    /remote/token         → 200 {token, minted:true}
+  //                                   404 {error:"remote_token_absent", minted:false} after delete
+  //   POST   /remote/token/rotate  → 200 {token, rotated_at}  (mints if absent)
+  //   DELETE /remote/token         → 200 {deleted:true}       (GET 401s remote calls until re-minted)
+
+  /** GET /remote/token — current machine remote token. 404 (mapped to
+   *  ok:false, status:404) means "not minted" (deleted); the block reads
+   *  that as an absent state rather than an error. */
+  async remoteTokenGet(signal?: AbortSignal): Promise<Result<RemoteTokenResponse>> {
+    return this.request<RemoteTokenResponse>('GET', '/remote/token', undefined, signal);
+  }
+
+  /** POST /remote/token/rotate — mint a fresh remote token; the old one
+   *  dies instantly. Also mints when the token was previously deleted
+   *  (the block's "Mint token" path). */
+  async remoteTokenRotate(signal?: AbortSignal): Promise<Result<RemoteTokenResponse>> {
+    return this.request<RemoteTokenResponse>('POST', '/remote/token/rotate', {}, signal);
+  }
+
+  /** DELETE /remote/token — destroy the remote token. Remote callers 401
+   *  immediately (the personal agent loses access to ALL projects) until a
+   *  new one is minted via rotate. */
+  async remoteTokenDelete(signal?: AbortSignal): Promise<Result<{ deleted: boolean }>> {
+    return this.request<{ deleted: boolean }>('DELETE', '/remote/token', undefined, signal);
   }
 
   async taskTransition(id: string, status: string, signal?: AbortSignal): Promise<Result<unknown>> {
