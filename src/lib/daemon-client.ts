@@ -531,8 +531,26 @@ export interface TaskCreateBody {
 //   POST   /team/draft     → LLM normaliser: free text → structured draft
 //
 // WS events team.created | team.updated | team.deleted { id, ts }.
+//
+// TEG-3 (team-external-gateway, py-1.30.0) — exposure + tokens:
+//
+//   PATCH  /team/<id> {exposure}       → flip internal|external. Revoke =
+//                                        PATCH {exposure:'internal'} (the
+//                                        daemon destroys the token).
+//   GET    /team/<id> (cockpit auth)   → includes `token` when external.
+//                                        GET /team NEVER includes tokens.
+//   POST   /team/<id>/token/rotate     → {token} — new value, old one dead.
+//
+// External callers use the token (NOT the portal token) against
+// POST /team/<id>/ask + GET /team/requests/<rid>. WS events
+// team.request.created | done | error { member, request_id, ts }.
 
 export type TeamMemberKind = 'singleton' | 'profile';
+
+/** TEG-3 — who can reach this member. `internal` (default): cockpit
+ *  only. `external`: any local software holding the member's bearer
+ *  token (ask/poll surface on the shared daemon). */
+export type TeamMemberExposure = 'internal' | 'external';
 
 /** One roster member's frontmatter + live instance count. */
 export interface TeamMember {
@@ -551,6 +569,8 @@ export interface TeamMember {
   credentials_hint?: string;
   created?: string;
   updated?: string;
+  /** TEG-3 — internal (default) or external (token-reachable). */
+  exposure?: TeamMemberExposure;
   /** Non-archived live convs currently bound to this member (from GET /team). */
   instances?: number;
 }
@@ -558,6 +578,10 @@ export interface TeamMember {
 /** Full member incl. the init-prompt markdown body (GET /team/<id>). */
 export interface TeamMemberDetail extends TeamMember {
   body: string;
+  /** TEG-3 — the member's bearer token. Present ONLY when the member is
+   *  external AND the GET was cockpit-authed. Kept in memory only —
+   *  never persisted to localStorage. */
+  token?: string;
 }
 
 /** POST /team — the final shape the operator confirms in the dialog.
@@ -586,6 +610,9 @@ export interface TeamPatchBody {
   effort?: string;
   refs?: string[];
   prompt?: string;
+  /** TEG-3 — flip exposure. `internal` revokes: the daemon destroys the
+   *  member's token server-side, cutting external callers off instantly. */
+  exposure?: TeamMemberExposure;
 }
 
 /** POST /team/draft — LLM normaliser input + output. */
@@ -665,6 +692,39 @@ export function rewriteMeshkoreStaticPath(rel: string): string {
   // route shape; helps diagnosis vs silently rewriting to something
   // the daemon also doesn't serve.
   return rel;
+}
+
+// ── agent-team response normalisers ─────────────────────────────────
+//
+// The py-1.29.0 daemon envelopes its team responses:
+//   GET  /team      → { members: [...], count }
+//   GET  /team/<id> → { frontmatter: {...}, body, instances, token? }
+//   POST /team, PATCH /team/<id> → { frontmatter: {...}, body }
+// The cockpit-facing types (TeamMember / TeamMemberDetail) are flat, so
+// normalise here — one chokepoint — and tolerate both the enveloped and
+// a flat shape so older/newer daemons keep working.
+
+function normalizeTeamList(data: unknown): TeamMember[] {
+  if (Array.isArray(data)) return data as TeamMember[];
+  if (data && typeof data === 'object') {
+    const members = (data as { members?: unknown }).members;
+    if (Array.isArray(members)) return members as TeamMember[];
+  }
+  return [];
+}
+
+function flattenTeamMember(data: unknown): TeamMemberDetail {
+  const obj = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+  const fm = (obj.frontmatter && typeof obj.frontmatter === 'object'
+    ? obj.frontmatter
+    : obj) as Record<string, unknown>;
+  const out = { ...fm } as unknown as TeamMemberDetail;
+  if (typeof obj.body === 'string') out.body = obj.body;
+  if (typeof obj.instances === 'number') out.instances = obj.instances;
+  // TEG-3 — the bearer token may arrive top-level or (defensively) in
+  // the frontmatter block; surface it flat either way.
+  if (typeof obj.token === 'string') out.token = obj.token;
+  return out;
 }
 
 export class DaemonClient {
@@ -1061,25 +1121,37 @@ export class DaemonClient {
   // ── agent-team roster (ATM9 daemon contract) ──────────────────────
 
   /** GET /team — full roster (frontmatter + live instance counts),
-   *  sorted by pinned_order. Anonymous read (matches /chat/snapshot). */
+   *  sorted by pinned_order. Anonymous read (matches /chat/snapshot).
+   *  The daemon envelopes as {members, count}; normalised to a flat
+   *  array here. Tokens are NEVER present in the list. */
   async teamList(signal?: AbortSignal): Promise<Result<TeamMember[]>> {
-    return this.request<TeamMember[]>('GET', '/team', undefined, signal, /*requireAuth*/ false);
+    const res = await this.request<unknown>('GET', '/team', undefined, signal, /*requireAuth*/ false);
+    if (!res.ok) return res;
+    return { ...res, data: normalizeTeamList(res.data) };
   }
 
-  /** GET /team/<id> — one member incl. its init-prompt body. */
+  /** GET /team/<id> — one member incl. its init-prompt body. Authed
+   *  (TEG-3): the daemon only includes the bearer `token` of an
+   *  external member on cockpit-authed reads. */
   async teamGet(id: string, signal?: AbortSignal): Promise<Result<TeamMemberDetail>> {
-    return this.request<TeamMemberDetail>('GET', `/team/${encodeURIComponent(id)}`, undefined, signal, /*requireAuth*/ false);
+    const res = await this.request<unknown>('GET', `/team/${encodeURIComponent(id)}`, undefined, signal);
+    if (!res.ok) return res;
+    return { ...res, data: flattenTeamMember(res.data) };
   }
 
   /** POST /team — create a new member (always kind:'profile'). */
   async teamCreate(body: TeamCreateBody, signal?: AbortSignal): Promise<Result<TeamMember>> {
-    return this.request<TeamMember>('POST', '/team', body, signal);
+    const res = await this.request<unknown>('POST', '/team', body, signal);
+    if (!res.ok) return res;
+    return { ...res, data: flattenTeamMember(res.data) };
   }
 
   /** PATCH /team/<id> — partial update. `kind`/`required` are immutable
    *  (the daemon rejects them); send only the edited section's fields. */
   async teamUpdate(id: string, body: TeamPatchBody, signal?: AbortSignal): Promise<Result<TeamMember>> {
-    return this.request<TeamMember>('PATCH', `/team/${encodeURIComponent(id)}`, body, signal);
+    const res = await this.request<unknown>('PATCH', `/team/${encodeURIComponent(id)}`, body, signal);
+    if (!res.ok) return res;
+    return { ...res, data: flattenTeamMember(res.data) };
   }
 
   /** DELETE /team/<id> — 409 when the member is required. */
@@ -1091,6 +1163,12 @@ export class DaemonClient {
    *  draft the operator reviews before saving (ATM4/ATM5). */
   async teamDraft(body: TeamDraftBody, signal?: AbortSignal): Promise<Result<TeamDraftResponse>> {
     return this.request<TeamDraftResponse>('POST', '/team/draft', body, signal);
+  }
+
+  /** TEG-3 — POST /team/<id>/token/rotate. Mints a fresh bearer token
+   *  for an external member; the old one stops working immediately. */
+  async teamRotateToken(id: string, signal?: AbortSignal): Promise<Result<{ token: string }>> {
+    return this.request<{ token: string }>('POST', `/team/${encodeURIComponent(id)}/token/rotate`, {}, signal);
   }
 
   async taskTransition(id: string, status: string, signal?: AbortSignal): Promise<Result<unknown>> {

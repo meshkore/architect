@@ -368,6 +368,19 @@ function MemberCard(props: {
             <span class="font-mono text-[9px] uppercase tracking-wider text-gray-400 bg-gray-800/60 border border-gray-700/60 rounded px-1.5 py-0.5">
               {m().kind}
             </span>
+            {/* TEG-3 — externally exposed member (token-reachable by other
+                local software). Pulses briefly on team.request.* activity. */}
+            <Show when={m().exposure === 'external'}>
+              <span
+                class="inline-flex items-center gap-1 font-mono text-[9px] uppercase tracking-wider text-sky-200 bg-sky-500/10 border border-sky-500/30 rounded px-1.5 py-0.5"
+                title="Externally exposed — other software on this machine can query this member with its token"
+              >
+                ↗ external
+                <Show when={teamStore.state.requestPulse[m().id]}>
+                  <span class="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-ping" aria-hidden="true" />
+                </Show>
+              </span>
+            </Show>
             <span
               class="font-mono text-[9px] rounded px-1.5 py-0.5 border"
               classList={{

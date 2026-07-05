@@ -6,6 +6,11 @@
  * Optimistic store update with rollback + inline error on 4xx (handled
  * inside teamStore.update). A concurrent-edit warning fires when the
  * on-disk `updated:` timestamp moves while the panel is open.
+ *
+ * TEG-3 — "External access" section: exposure toggle (PATCH), token
+ * reveal/copy/regenerate/revoke, and a ready-to-paste connection
+ * snippet for the consuming project. The token is read from the
+ * in-memory teamStore detail cache only (never localStorage).
  */
 
 import { For, Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
@@ -76,6 +81,88 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
   );
 
   const required = () => member()?.required === true;
+
+  // ── TEG-3 · External access ─────────────────────────────────────────
+  const exposure = () => member()?.exposure ?? 'internal';
+  const isExternal = () => exposure() === 'external';
+  // Token comes from the store's in-memory detail cache (authed
+  // GET /team/<id>); reading the store directly keeps it reactive to
+  // rotate / revoke without re-running the resource.
+  const token = () => teamStore.state.details[props.memberId]?.token ?? null;
+  const [extOpen, setExtOpen] = createSignal(false);
+  const [tokenRevealed, setTokenRevealed] = createSignal(false);
+  const [copied, setCopied] = createSignal<'token' | 'snippet' | null>(null);
+  // Open the section by default for already-external members (the
+  // member may not be loaded yet on mount, so seed reactively once).
+  createEffect(() => { if (isExternal()) setExtOpen(true); });
+
+  const copy = async (what: 'token' | 'snippet', text: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(what);
+      setTimeout(() => setCopied((c) => (c === what ? null : c)), 1500);
+    } catch {
+      setError('Copy failed — your browser blocked clipboard access.');
+    }
+  };
+
+  /** External callers hit the shared daemon on loopback; derive the
+   *  port from this client's transport instead of hardcoding it. */
+  const askBase = (): string => {
+    let port = 5573;
+    try {
+      const raw = new URL(client()?.transport.httpBase ?? '').port;
+      if (raw) port = Number(raw);
+    } catch { /* keep default */ }
+    return `https://127.0.0.1:${port}`;
+  };
+  const clusterId = (): string =>
+    client()?.transport.projectId ?? daemonStore.state.activeId ?? '<cluster-id>';
+
+  const connectionSnippet = (tok: string): string => {
+    const base = askBase();
+    const id = props.memberId;
+    return [
+      `# 1. Ask ${id} — returns {"request_id": "..."}`,
+      `curl -sk -X POST ${base}/team/${id}/ask \\`,
+      `  -H "Authorization: Bearer ${tok}" \\`,
+      `  -H "X-MeshKore-Project: ${clusterId()}" \\`,
+      `  -H "content-type: application/json" \\`,
+      `  -d '{"text": "Your question here"}'`,
+      ``,
+      `# 2. Poll until status is "done" — the answer is in result_text`,
+      `curl -sk ${base}/team/requests/<request_id> \\`,
+      `  -H "Authorization: Bearer ${tok}" \\`,
+      `  -H "X-MeshKore-Project: ${clusterId()}"`,
+    ].join('\n');
+  };
+
+  const setExposureExternal = async (): Promise<void> => {
+    if (isExternal()) return;
+    await saveSection('exposure', { exposure: 'external' });
+    // The PATCH response is frontmatter-only; force-refetch the detail
+    // so the freshly minted token lands in the cache.
+    const c = client();
+    if (c) await teamStore.detail(c, props.memberId, /*force*/ true);
+  };
+
+  const revokeAccess = async (): Promise<void> => {
+    if (!isExternal()) return;
+    if (!confirm('The member becomes private and its token is destroyed — external callers are cut off immediately. Revoke access?')) return;
+    setTokenRevealed(false);
+    await saveSection('exposure', { exposure: 'internal' });
+  };
+
+  const regenerateToken = async (): Promise<void> => {
+    const c = client();
+    if (!c) return;
+    if (!confirm('The old token stops working immediately. Regenerate?')) return;
+    setSavingSection('token');
+    setError(null);
+    const res = await teamStore.rotateToken(c, props.memberId);
+    setSavingSection(null);
+    if (!res.ok) setError(`Token regeneration failed (HTTP ${res.status}).`);
+  };
 
   const saveSection = async (section: string, body: Record<string, unknown>): Promise<void> => {
     const c = client();
@@ -255,7 +342,142 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
             </div>
           </section>
 
-          {/* Section 4 — Danger zone (hidden when required) */}
+          {/* Section 4 — External access (TEG-3) */}
+          <section class="space-y-3 pt-2 border-t border-gray-800/60">
+            <button
+              type="button"
+              onClick={() => setExtOpen((o) => !o)}
+              class="w-full flex items-center justify-between gap-2 text-left"
+              aria-expanded={extOpen()}
+            >
+              <h3 class="font-mono text-[10px] uppercase tracking-[0.14em] text-gray-500">
+                <span class="inline-block w-3 text-gray-600" aria-hidden="true">{extOpen() ? '▾' : '▸'}</span>
+                External access
+              </h3>
+              <Show when={isExternal()}>
+                <span class="inline-flex items-center gap-1 font-mono text-[9px] uppercase tracking-wider text-sky-200 bg-sky-500/10 border border-sky-500/30 rounded px-1.5 py-0.5">
+                  ↗ external
+                </span>
+              </Show>
+            </button>
+
+            <Show when={extOpen()}>
+              <div class="space-y-3">
+                <p class="text-[11px] text-gray-500 leading-snug">
+                  External members can be queried by other software on this
+                  machine (another project, a bare CLI session) via a
+                  per-member token. Internal members are reachable from this
+                  cockpit only.
+                </p>
+
+                {/* Segmented Internal / External */}
+                <div class="flex gap-1" role="group" aria-label="Exposure">
+                  <button
+                    type="button"
+                    onClick={() => void revokeAccess()}
+                    disabled={savingSection() === 'exposure'}
+                    aria-pressed={!isExternal()}
+                    class="px-2.5 py-1.5 text-[12px] font-mono border transition flex-shrink-0 disabled:opacity-50"
+                    classList={{
+                      'bg-emerald-500/12 border-emerald-500/60 text-white': !isExternal(),
+                      'bg-[rgba(11,18,32,0.5)] border-gray-700/40 text-gray-300 hover:text-gray-100': isExternal(),
+                    }}
+                  >Internal</button>
+                  <button
+                    type="button"
+                    onClick={() => void setExposureExternal()}
+                    disabled={savingSection() === 'exposure'}
+                    aria-pressed={isExternal()}
+                    class="px-2.5 py-1.5 text-[12px] font-mono border transition flex-shrink-0 disabled:opacity-50"
+                    classList={{
+                      'bg-sky-500/12 border-sky-500/60 text-white': isExternal(),
+                      'bg-[rgba(11,18,32,0.5)] border-gray-700/40 text-gray-300 hover:text-gray-100': !isExternal(),
+                    }}
+                  >External</button>
+                  <Show when={savingSection() === 'exposure'}>
+                    <span class="self-center text-[11px] font-mono text-gray-500">Saving…</span>
+                  </Show>
+                </div>
+
+                <Show when={isExternal()}>
+                  {/* Token */}
+                  <div class="space-y-1.5">
+                    <div class="flex items-center justify-between">
+                      <span class="font-mono text-[10px] uppercase tracking-wider text-gray-500">Bearer token</span>
+                      <span class="text-[10px] text-gray-600">Never expires — rotate or revoke below.</span>
+                    </div>
+                    <Show
+                      when={token()}
+                      fallback={
+                        <p class="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded px-2.5 py-1.5">
+                          Token unavailable — the daemon didn't return it (needs py-1.30.0+). Try reopening this panel.
+                        </p>
+                      }
+                    >
+                      <div class="flex gap-1.5 items-center">
+                        <code class="flex-1 min-w-0 truncate bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[12px] font-mono text-gray-100 select-all">
+                          {tokenRevealed() ? token() : '••••••••••••••••••••••••'}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => setTokenRevealed((v) => !v)}
+                          class="flex-shrink-0 text-[11px] font-mono text-gray-400 hover:text-gray-100 border border-gray-700/50 hover:border-gray-500/60 rounded px-2 py-1.5"
+                          title={tokenRevealed() ? 'Hide token' : 'Reveal token'}
+                        >{tokenRevealed() ? 'Hide' : 'Reveal'}</button>
+                        <button
+                          type="button"
+                          onClick={() => void copy('token', token() ?? '')}
+                          class="flex-shrink-0 text-[11px] font-mono text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1.5"
+                          title="Copy token to clipboard"
+                        >{copied() === 'token' ? 'Copied ✓' : 'Copy'}</button>
+                      </div>
+                    </Show>
+                    <div class="flex gap-1.5 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => void regenerateToken()}
+                        disabled={savingSection() === 'token'}
+                        class="text-[11px] font-mono text-amber-300 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 rounded px-2.5 py-1.5 disabled:opacity-50"
+                        title="Mint a new token — the old one stops working immediately"
+                      >{savingSection() === 'token' ? 'Regenerating…' : 'Regenerate'}</button>
+                      <button
+                        type="button"
+                        onClick={() => void revokeAccess()}
+                        disabled={savingSection() === 'exposure'}
+                        class="text-[11px] font-mono text-red-300 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 rounded px-2.5 py-1.5 disabled:opacity-50"
+                        title="Make the member private and destroy its token"
+                      >Revoke access</button>
+                    </div>
+                  </div>
+
+                  {/* Connection snippet */}
+                  <Show when={token()}>
+                    <div class="space-y-1.5">
+                      <div class="flex items-center justify-between">
+                        <span class="font-mono text-[10px] uppercase tracking-wider text-gray-500">Connection snippet</span>
+                        <button
+                          type="button"
+                          onClick={() => void copy('snippet', connectionSnippet(token()!))}
+                          class="text-[11px] font-mono uppercase tracking-wider text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1"
+                          title="Copy the ready-to-paste snippet (includes the real token)"
+                        >{copied() === 'snippet' ? 'Copied ✓' : 'Copy'}</button>
+                      </div>
+                      <pre class="bg-[#020617] border border-gray-700/40 rounded px-2.5 py-2 text-[11px] font-mono leading-relaxed text-gray-200 overflow-x-auto whitespace-pre">
+                        {connectionSnippet(tokenRevealed() ? token()! : '<token — use Copy>')}
+                      </pre>
+                      <p class="text-[10px] text-gray-600 leading-snug">
+                        Hand this to the consuming project. The copied version
+                        always contains the real token; the endpoint is this
+                        machine's shared daemon (loopback only).
+                      </p>
+                    </div>
+                  </Show>
+                </Show>
+              </div>
+            </Show>
+          </section>
+
+          {/* Section 5 — Danger zone (hidden when required) */}
           <Show when={!required()}>
             <section class="space-y-2 pt-2 border-t border-gray-800/60">
               <h3 class="font-mono text-[10px] uppercase tracking-[0.14em] text-red-400/80">Danger zone</h3>

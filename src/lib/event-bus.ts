@@ -59,6 +59,9 @@ const QUEUE_TYPE_PREFIX = 'queue.';
 const CONV_TYPE_PREFIX = 'conv.';
 // agent-team (ATM3) — roster lifecycle events (team.created | updated |
 // deleted). Active-cluster only, same isolation rule as conv.*/run.*.
+// TEG-3 — the same prefix also carries the external-gateway request
+// lifecycle (team.request.created | done | error {member, request_id,
+// ts}); teamStore.onTeamEvent fans them into the roster activity pulse.
 const TEAM_TYPE_PREFIX = 'team.';
 
 /**
@@ -143,9 +146,10 @@ export function attachEventBus(
       return;
     }
     if (t.startsWith(TEAM_TYPE_PREFIX)) {
-      // agent-team (ATM3) — roster changed. Active-cluster only; a
-      // non-active bus's roster refreshes on switch-back via
-      // teamStore.hydrate in the boot chain.
+      // agent-team (ATM3) — roster changed; TEG-3 — team.request.*
+      // external-gateway activity. Active-cluster only; a non-active
+      // bus's roster refreshes on switch-back via teamStore.hydrate
+      // in the boot chain.
       if (!isActiveCluster()) {
         log.debug('[event-bus] dropping team.* from non-active cluster', { clusterKey, active: daemonStore.state.activeId, type: t });
         return;

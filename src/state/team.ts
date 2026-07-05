@@ -43,6 +43,10 @@ interface TeamStoreState {
   error: string | null;
   /** Member id highlighted briefly after create (ATM4 step 4). */
   recentlyCreated: string | null;
+  /** TEG-3 — member id → ms timestamp of the last team.request.* WS
+   *  event. Drives the subtle "external activity" pulse on the roster
+   *  card; entries clear themselves after a few seconds. */
+  requestPulse: Record<string, number>;
 }
 
 const [state, setState] = createStore<TeamStoreState>({
@@ -52,6 +56,7 @@ const [state, setState] = createStore<TeamStoreState>({
   loading: false,
   error: null,
   recentlyCreated: null,
+  requestPulse: {},
 });
 
 let activeCluster: string | null = null;
@@ -59,7 +64,7 @@ let activeCluster: string | null = null;
 function bindCluster(clusterId: string | null): void {
   if (activeCluster === clusterId) return;
   activeCluster = clusterId;
-  setState({ list: [], details: {}, hydrated: false, loading: false, error: null, recentlyCreated: null });
+  setState({ list: [], details: {}, hydrated: false, loading: false, error: null, recentlyCreated: null, requestPulse: {} });
 }
 
 function sortByPinned(members: TeamMember[]): TeamMember[] {
@@ -162,7 +167,29 @@ async function update(
   }
   setState('list', (m) => m.id === id, () => res.data);
   if (prevDetail) setState('details', id, (d) => ({ ...d, ...res.data }));
+  // TEG-3 — revoke hygiene: flipping to internal destroys the token
+  // server-side; drop the cached copy immediately so no stale token
+  // lingers in memory (the merge above wouldn't clear it).
+  if (body.exposure === 'internal' && state.details[id]) {
+    setState('details', id, 'token', undefined);
+  }
   return { ok: true, member: res.data };
+}
+
+/** TEG-3 — POST /team/<id>/token/rotate. On success, patches the cached
+ *  detail so the panel shows the fresh token without a refetch. The
+ *  token lives ONLY in this in-memory store — never in localStorage. */
+async function rotateToken(
+  client: DaemonClient,
+  id: string,
+): Promise<{ ok: true; token: string } | { ok: false; status: number; error?: string }> {
+  const res = await client.teamRotateToken(id);
+  if (!res.ok) {
+    log.warn('teamStore.rotateToken failed', { id, status: res.status });
+    return { ok: false, status: res.status, error: res.body };
+  }
+  if (state.details[id]) setState('details', id, 'token', res.data.token);
+  return { ok: true, token: res.data.token };
 }
 
 async function remove(
@@ -185,6 +212,21 @@ async function remove(
  *  roster is small and this endpoint is anonymous. */
 function onTeamEvent(client: DaemonClient, ev: DaemonEvent): void {
   const t = ev.type;
+  // TEG-3 — external request lifecycle { member, request_id, ts }.
+  // External convs are ordinary instances (counts move via conv.*);
+  // here we only flash a short-lived activity pulse on the card.
+  if (t === 'team.request.created' || t === 'team.request.done' || t === 'team.request.error') {
+    const member = typeof ev.member === 'string' ? ev.member : null;
+    if (!member) return;
+    const stamp = Date.now();
+    setState('requestPulse', member, stamp);
+    setTimeout(() => {
+      if (state.requestPulse[member] === stamp) {
+        setState('requestPulse', member, undefined as unknown as number);
+      }
+    }, 4000);
+    return;
+  }
   if (t === 'team.created' || t === 'team.updated' || t === 'team.deleted') {
     const id = typeof ev.id === 'string' ? ev.id : null;
     if (t === 'team.deleted' && id) {
@@ -211,6 +253,7 @@ export const teamStore = {
   create,
   update,
   remove,
+  rotateToken,
   onTeamEvent,
 };
 
