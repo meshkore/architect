@@ -155,7 +155,10 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
 
   const regenerateToken = async (): Promise<void> => {
     const c = client();
-    if (!c) return;
+    if (!c) {
+      setError('Not connected to the daemon — reconnect (reload the page) and try again.');
+      return;
+    }
     if (!confirm('The old token stops working immediately. Regenerate?')) return;
     setSavingSection('token');
     setError(null);
@@ -166,7 +169,10 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
 
   const saveSection = async (section: string, body: Record<string, unknown>): Promise<void> => {
     const c = client();
-    if (!c) return;
+    if (!c) {
+      setError('Not connected to the daemon — reconnect (reload the page) and try again.');
+      return;
+    }
     setSavingSection(section);
     setError(null);
     const res = await teamStore.update(c, props.memberId, body);
@@ -182,7 +188,10 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
 
   const del = async (): Promise<void> => {
     const c = client();
-    if (!c) return;
+    if (!c) {
+      setError('Not connected to the daemon — reconnect (reload the page) and try again.');
+      return;
+    }
     if (!confirm(`Delete member "${member()?.name ?? props.memberId}"? This cannot be undone.`)) return;
     const res = await teamStore.remove(c, props.memberId);
     if (res.ok) {
