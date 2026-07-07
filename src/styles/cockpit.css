@@ -50,9 +50,6 @@
 
       --theme-byline-agent:         #f3f4f6;
       --theme-byline-user:          #7dd3fc;
-      /* ATM12 follow-up — shared role-identity colour for the two fixed
-         system agents (Architect Agent + Roadmap Architect). */
-      --theme-byline-fixed:         #c2410c;
 
       /* Surface tint — subtle accents on panel borders + headers.
          The theme stays dark; surface tones only nudge the chrome. */

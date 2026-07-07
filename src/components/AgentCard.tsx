@@ -158,7 +158,17 @@ export default function AgentCard(props: AgentCardProps) {
             style={{
               'font-size': 'var(--fs-body, 13px)',
               'text-overflow': 'clip',
-              ...(fixed() ? { color: typeInfo().color } : {}),
+              // 2nd correction (2026-07-07) — fixed agents no longer get a
+              // unique text colour (operator: "este rojo no pega ni con
+              // cola"). They stand out via a soft ACCENT background pill
+              // instead, text stays the normal white/gray. Same accent
+              // the rest of the theme already uses, so it never clashes.
+              ...(fixed() ? {
+                background: 'var(--theme-accent-soft-bg)',
+                border: '1px solid var(--theme-accent-soft-border)',
+                'border-radius': '4px',
+                padding: '0 4px',
+              } : {}),
             }}
             class="w-full leading-tight overflow-hidden whitespace-nowrap"
           >
@@ -175,7 +185,14 @@ export default function AgentCard(props: AgentCardProps) {
             style={{
               'font-size': 'var(--fs-body, 13px)',
               'text-overflow': 'clip',
-              ...(fixed() ? { color: typeInfo().color } : {}),
+              // See the compact-layout span above for why this is a
+              // background pill, not a text colour.
+              ...(fixed() ? {
+                background: 'var(--theme-accent-soft-bg)',
+                border: '1px solid var(--theme-accent-soft-border)',
+                'border-radius': '4px',
+                padding: '0 4px',
+              } : {}),
             }}
           >
             {title()}

@@ -84,11 +84,6 @@ export const THEME_VAR_NAMES = [
   '--theme-status-done-glow',
   '--theme-byline-agent',
   '--theme-byline-user',
-  // ATM12 follow-up (2026-07-07) — the two fixed system agents
-  // (Architect Agent + Roadmap Architect) share ONE role-identity
-  // colour, distinct from any per-service AGENT_TYPES colour, that
-  // still adapts per theme like every other role/status hue here.
-  '--theme-byline-fixed',
   '--theme-surface-tint',
   '--theme-text-primary',
   '--theme-text-secondary',
@@ -131,7 +126,6 @@ export const THEMES: Record<ThemeId, Record<ThemeVar, string>> = {
     '--theme-status-done-glow': 'rgba(167, 139, 250, 0.4)',
     '--theme-byline-agent': '#f3f4f6',
     '--theme-byline-user': '#7dd3fc',
-    '--theme-byline-fixed': '#c2410c',
     '--theme-surface-tint': 'rgba(120, 130, 150, 0.22)',
     '--theme-text-primary': '#e5e7eb',
     '--theme-text-secondary': '#cbd5e1',
@@ -166,7 +160,6 @@ export const THEMES: Record<ThemeId, Record<ThemeVar, string>> = {
     '--theme-status-done-glow': 'rgba(167, 139, 250, 0.40)',
     '--theme-byline-agent': '#f3f4f6',
     '--theme-byline-user': '#fbcfe8',
-    '--theme-byline-fixed': '#c2410c',
     '--theme-surface-tint': 'rgba(129, 140, 248, 0.22)',
     '--theme-text-primary': '#eef2ff',
     '--theme-text-secondary': '#c7d2fe',
@@ -201,10 +194,6 @@ export const THEMES: Record<ThemeId, Record<ThemeVar, string>> = {
     '--theme-status-done-glow': 'rgba(251, 146, 60, 0.45)',
     '--theme-byline-agent': '#fef3c7',
     '--theme-byline-user': '#fde68a',
-    // Redder than the other 3 presets — the Amber theme's own accent/
-    // status hues already saturate orange/yellow, so the fixed-agent
-    // marker leans red here to stay visually distinct.
-    '--theme-byline-fixed': '#b91c1c',
     '--theme-surface-tint': 'rgba(251, 191, 36, 0.22)',
     '--theme-text-primary': '#fef3c7',
     '--theme-text-secondary': '#fde68a',
@@ -239,7 +228,6 @@ export const THEMES: Record<ThemeId, Record<ThemeVar, string>> = {
     '--theme-status-done-glow': 'rgba(196, 181, 253, 0.35)',
     '--theme-byline-agent': '#e5e7eb',
     '--theme-byline-user': '#cbd5e1',
-    '--theme-byline-fixed': '#c2410c',
     '--theme-surface-tint': 'rgba(148, 163, 184, 0.22)',
     '--theme-text-primary': '#e5e7eb',
     '--theme-text-secondary': '#cbd5e1',

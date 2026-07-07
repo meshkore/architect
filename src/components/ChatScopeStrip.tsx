@@ -450,9 +450,14 @@ export default function ChatScopeStrip(props: Props) {
       </Show>
     </div>
     <Show when={fixedNote()}>
+      {/* 2nd correction (2026-07-07) — pushed flush right (was left-
+          aligned under the name) + a real bottom margin (was only
+          the box's own padding, no visible gap before the thread
+          below). Colour switched off the rejected orange/red onto
+          the theme's own accent — same reasoning as AgentCard's pill. */}
       <p
-        class="px-2.5 pb-1.5 text-[10px] leading-snug"
-        style={{ color: 'var(--theme-byline-fixed, #c2410c)' }}
+        class="px-2.5 pb-1.5 mb-1.5 text-[10px] leading-snug text-right"
+        style={{ color: 'var(--theme-accent-bright, #34d399)' }}
       >
         {fixedNote()}
       </p>

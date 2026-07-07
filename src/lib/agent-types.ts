@@ -40,15 +40,20 @@ export interface AgentTypeInfo {
   role: string;
 }
 
-/** ATM12 follow-up (2026-07-07) — the ONE shared colour for both fixed
- *  system agents (Master/Architect Agent + Roadmap Architect). A theme
- *  CSS var (`theme-presets.ts` / `cockpit.css :root`), not a bare hex,
- *  so it reacts to the operator's theme choice like every other
- *  role/status colour in the cockpit — see `--theme-byline-fixed`.
+/** ATM12 follow-up (2026-07-07, 2nd correction) — the ONE shared colour
+ *  for both fixed system agents (Master/Architect Agent + Roadmap
+ *  Architect). First pass introduced a dedicated hue (`--theme-byline-
+ *  fixed`, dark orange/red) — operator rejected it as clashing with the
+ *  rest of the palette. Reusing the theme's OWN accent
+ *  (`--theme-accent-bright`, already themed per preset) instead
+ *  guarantees it's always "in the same chromatic range" as everything
+ *  else on screen, by construction. The two fixed agents no longer get
+ *  a unique hue — they stand out via a soft accent BACKGROUND behind
+ *  the name (see `AgentCard.tsx`), not via text colour.
  *  Every consumer of `AgentTypeInfo.color` MUST treat it as an opaque
  *  CSS `<color>` value (never slice/concat it as a raw hex — use
  *  `color-mix(in srgb, ${color} N%, transparent)` for tints). */
-const FIXED_AGENT_COLOR = 'var(--theme-byline-fixed, #c2410c)';
+const FIXED_AGENT_COLOR = 'var(--theme-accent-bright, #34d399)';
 
 export const AGENT_TYPES: Record<AgentType, AgentTypeInfo> = {
   custom: {
@@ -176,15 +181,17 @@ export function isServiceType(t: AgentType | string | undefined | null): boolean
 // the project's principal architect at a glance versus the generic
 // coder fleet.
 //
-// Color choice (revised ATM12 follow-up, 2026-07-07): shares
+// Color choice (revised ATM12 follow-up, 2026-07-07, 2nd pass): shares
 // FIXED_AGENT_COLOR with `roadmap-architect` — both are protected
-// system agents, so they read as one "family" (was pink vs cyan,
-// two unrelated-looking colours, before the operator asked for one
-// shared colour). Distinct from the generic per-service colours:
-//   • emerald  (#34d399) — general coder
-//   • purple   (#a78bfa) — db
-//   • red      (#f87171) — audit
-//   • amber    (#fbbf24) — testing
+// system agents, so they read as one "family". First pass gave them a
+// unique hue (pink vs cyan, then a bespoke orange/red); operator
+// rejected the standalone-hue idea entirely — the accent already IS
+// the theme's most prominent colour, so reusing it (rather than
+// inventing a new one) is what "matches the rest of the palette"
+// means here. The two fixed agents stand out via a soft accent
+// BACKGROUND behind the rail name (`AgentCard.tsx`), not a unique text
+// colour — sharing the accent hue with `custom`'s stripe colour is
+// harmless since `custom` never colours its OWN name text.
 const MASTER_ARCHITECT_INFO: AgentTypeInfo = {
   id: 'custom' as AgentType, // back-fill — daemon-side type is still 'custom'
   label: 'Master Architect',
