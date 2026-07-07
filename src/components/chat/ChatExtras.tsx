@@ -20,10 +20,13 @@ export function AgentRoleHint(props: { type: AgentType }) {
   return (
     <div
       class="mx-3 mb-3 px-3 py-2 rounded-md border text-[11px] leading-snug text-gray-300"
-      /* dynamic: tinted with the agent-type colour from the registry */
+      /* dynamic: tinted with the agent-type colour from the registry.
+         color-mix, not hex+alpha concat — info().color is a bare hex
+         for most types but a `var(--theme-...)` ref for roadmap-architect
+         (ATM12 follow-up: shares the fixed-agents' theme colour). */
       style={{
-        'border-color': `${info().color}40`,
-        background: `${info().color}10`,
+        'border-color': `color-mix(in srgb, ${info().color} 25%, transparent)`,
+        background: `color-mix(in srgb, ${info().color} 6%, transparent)`,
       }}
     >
       {/* dynamic: same agent-type colour */}

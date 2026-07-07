@@ -40,6 +40,16 @@ export interface AgentTypeInfo {
   role: string;
 }
 
+/** ATM12 follow-up (2026-07-07) — the ONE shared colour for both fixed
+ *  system agents (Master/Architect Agent + Roadmap Architect). A theme
+ *  CSS var (`theme-presets.ts` / `cockpit.css :root`), not a bare hex,
+ *  so it reacts to the operator's theme choice like every other
+ *  role/status colour in the cockpit — see `--theme-byline-fixed`.
+ *  Every consumer of `AgentTypeInfo.color` MUST treat it as an opaque
+ *  CSS `<color>` value (never slice/concat it as a raw hex — use
+ *  `color-mix(in srgb, ${color} N%, transparent)` for tints). */
+const FIXED_AGENT_COLOR = 'var(--theme-byline-fixed, #c2410c)';
+
 export const AGENT_TYPES: Record<AgentType, AgentTypeInfo> = {
   custom: {
     id: 'custom',
@@ -126,7 +136,10 @@ export const AGENT_TYPES: Record<AgentType, AgentTypeInfo> = {
     label: 'Roadmap Architect',
     shortLabel: 'Architect',
     emoji: '🗺️',
-    color: '#22d3ee', // cyan — distinct from the generalist coordinator's emerald
+    // ATM12 follow-up (2026-07-07 operator correction) — shares the
+    // Master Architect's FIXED_AGENT_COLOR: both are protected system
+    // agents and should read as one visual "family", not two.
+    color: FIXED_AGENT_COLOR,
     role:
       'Spawned by Run all. Reads the active roadmap, plans the order, ' +
       'dispatches sub-agents (coding / deploy / db / testing / docs / ' +
@@ -163,19 +176,21 @@ export function isServiceType(t: AgentType | string | undefined | null): boolean
 // the project's principal architect at a glance versus the generic
 // coder fleet.
 //
-// Color choice: pink-500 (#ec4899) — clearly distinct from
+// Color choice (revised ATM12 follow-up, 2026-07-07): shares
+// FIXED_AGENT_COLOR with `roadmap-architect` — both are protected
+// system agents, so they read as one "family" (was pink vs cyan,
+// two unrelated-looking colours, before the operator asked for one
+// shared colour). Distinct from the generic per-service colours:
 //   • emerald  (#34d399) — general coder
-//   • cyan     (#22d3ee) — roadmap-architect (Run All coordinator)
 //   • purple   (#a78bfa) — db
 //   • red      (#f87171) — audit
 //   • amber    (#fbbf24) — testing
-// Pink signals authority/identity without overlapping any service.
 const MASTER_ARCHITECT_INFO: AgentTypeInfo = {
   id: 'custom' as AgentType, // back-fill — daemon-side type is still 'custom'
   label: 'Master Architect',
   shortLabel: 'Master',
   emoji: '👑',
-  color: '#ec4899',
+  color: FIXED_AGENT_COLOR,
   role:
     'The cluster\'s principal coordinator. Always-on conv anchored at ' +
     '`_onboarding_v1`. Sets up the project, designs the roadmap, owns ' +

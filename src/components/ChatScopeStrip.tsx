@@ -54,6 +54,19 @@ export default function ChatScopeStrip(props: Props) {
   const typeInfo = () => agentVisualInfo(props.conv, props.meta);
   const chatActive = () => !props.historyOpen;
 
+  // ATM12 follow-up (2026-07-07 operator correction) — moved out of the
+  // Agents column header and into a second line under THIS agent's own
+  // name/model row, shown only while that fixed agent is selected.
+  const fixedNote = (): string | null => {
+    if (props.conv === ONBOARDING_CONV_ID) {
+      return 'Fixed system agent — plans only (roadmap, context, links, crons). Never writes code.';
+    }
+    if (isFixedAgentConv(props.conv)) {
+      return 'Fixed system agent — executes the queue and may dispatch agents. Never writes code itself.';
+    }
+    return null;
+  };
+
   // ATM7 — the roster member this conv is bound to (developer, …), and
   // whether it's still a DRAFT (no messages yet). Member + name are
   // editable while draft; frozen to a read-only badge after the first
@@ -145,7 +158,8 @@ export default function ChatScopeStrip(props: Props) {
   };
 
   return (
-    <div class="flex items-center gap-2 px-2 py-1.5 border-b border-gray-800/60">
+    <div class="flex flex-col border-b border-gray-800/60">
+    <div class="flex items-center gap-2 px-2 py-1.5">
       <Show when={!editing()} fallback={
         <>
           {/* V104 — Editing UX rewritten so the operator gets visible
@@ -190,7 +204,10 @@ export default function ChatScopeStrip(props: Props) {
           class="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-mono flex-shrink-0"
           style={{
             background: 'rgba(17,24,39,0.7)',
-            border: `1px solid ${typeInfo().color}55`,
+            // color-mix, not a hex+alpha string concat — typeInfo().color
+            // is a bare hex for most types but a `var(--theme-...)` ref
+            // for the two fixed system agents (ATM12 follow-up).
+            border: `1px solid color-mix(in srgb, ${typeInfo().color} 33%, transparent)`,
             color: typeInfo().color,
             'min-width': '20px',
           }}
@@ -431,6 +448,15 @@ export default function ChatScopeStrip(props: Props) {
           </Show>
         </div>
       </Show>
+    </div>
+    <Show when={fixedNote()}>
+      <p
+        class="px-2.5 pb-1.5 text-[10px] leading-snug"
+        style={{ color: 'var(--theme-byline-fixed, #c2410c)' }}
+      >
+        {fixedNote()}
+      </p>
+    </Show>
     </div>
   );
 }
