@@ -121,16 +121,27 @@ function fresh(p: KnownProject): boolean {
 }
 
 // ── server-home id store (FC-2) ──────────────────────────────────────────────
+// Hardcoded backstop (operator-directed 2026-07-07): the central daemon's own
+// home (`meshkore-server`) is the global store, never a project. The daemon
+// already excludes it from /projects, but this client-side denylist guarantees
+// it stays filtered even if a /health.server_home signal is ever missed — the
+// home "kept reappearing" in the rail and this makes the exclusion unconditional
+// on both ends. The daemon uses the matching MESHKORE_HOME_IDS / _DEFAULT_HOME_IDS.
+const HARDCODED_HOME_IDS: readonly string[] = ['meshkore-server'];
+
 function readHomeIds(): Set<string> {
+  const ids = new Set<string>(HARDCODED_HOME_IDS);
   try {
     const raw = localStorage.getItem(HOME_IDS_KEY);
-    if (!raw) return new Set();
+    if (!raw) return ids;
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(parsed.filter((x): x is string => typeof x === 'string'));
+    if (Array.isArray(parsed)) {
+      for (const x of parsed) if (typeof x === 'string') ids.add(x);
+    }
   } catch {
-    return new Set();
+    /* fall through to the hardcoded set */
   }
+  return ids;
 }
 
 /** Returns the durable set of known server-home cluster ids (consumers that
