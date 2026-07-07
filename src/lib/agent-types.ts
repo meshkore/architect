@@ -23,7 +23,9 @@
  * pattern. Pure cosmetics, zero behavioural impact.
  */
 import type { AgentType } from '~/state/chat';
-import { ONBOARDING_CONV_ID } from '~/state/chat';
+import { ONBOARDING_CONV_ID, isFixedAgentConv } from '~/state/chat';
+
+export { isFixedAgentConv };
 
 export interface AgentTypeInfo {
   id: AgentType;

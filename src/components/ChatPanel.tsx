@@ -1,5 +1,5 @@
 import { Show, createMemo, createSignal, createEffect } from 'solid-js';
-import { chatStore, ONBOARDING_CONV_ID, type ChatMsg } from '~/state/chat';
+import { chatStore, isFixedAgentConv, type ChatMsg } from '~/state/chat';
 import { log } from '~/lib/log';
 import ChatScopeStrip from '~/components/ChatScopeStrip';
 import ChatHistoryView from '~/components/ChatHistoryView';
@@ -118,14 +118,15 @@ export default function ChatPanel() {
       log.warn('[archive] no active conv — ignored');
       return;
     }
-    // V107.12 — Architect Agent (onboarding conv) is never archivable.
-    // The button is hidden in ChatScopeStrip but this guards against
-    // any future call path (keyboard shortcut, programmatic invoke,
-    // misconfiguration). Daemon-side guard in chatStore.archiveConv
-    // is the canonical local enforcement; this prevents the daemon
-    // round-trip from happening at all.
-    if (c === ONBOARDING_CONV_ID) {
-      log.warn('[archive] refused: Architect Agent (onboarding conv) is hardcoded as never-archivable', { conv: c });
+    // V107.12 (extended) — neither fixed system agent (Architect Agent /
+    // onboarding conv, or the live Roadmap Architect conv) is ever
+    // archivable. The button is hidden in ChatScopeStrip but this guards
+    // against any future call path (keyboard shortcut, programmatic
+    // invoke, misconfiguration). Daemon-side guard in
+    // chatStore.archiveConv is the canonical local enforcement; this
+    // prevents the daemon round-trip from happening at all.
+    if (isFixedAgentConv(c)) {
+      log.warn('[archive] refused: fixed system agent is hardcoded as never-archivable', { conv: c });
       return;
     }
     // V107.9 — promoted to log.warn so the operator sees the trace

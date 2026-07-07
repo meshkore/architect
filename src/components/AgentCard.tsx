@@ -26,6 +26,7 @@
 
 import { Show } from 'solid-js';
 import type { ConvMeta, AgentStatusKind } from '~/state/chat';
+import { isFixedAgentConv } from '~/state/chat';
 import { agentVisualInfo } from '~/lib/agent-types';
 import { modelShort } from '~/lib/models';
 
@@ -61,6 +62,11 @@ export default function AgentCard(props: AgentCardProps) {
   // slug + meta; for `_onboarding_v1` this resolves to Master Architect
   // regardless of stored agent_type.
   const typeInfo = () => agentVisualInfo(props.conv, props.meta);
+  // The two fixed system agents (Architect Agent + Roadmap Architect) —
+  // pinned at the rail's head, never draggable, coloured by their type
+  // so the operator can tell them apart from the project's own agents
+  // at a glance.
+  const fixed = () => isFixedAgentConv(props.conv);
 
   // Rail width — drives the "idle" hint visibility (the metadata row now
   // shows model + L/R always; no per-pill width gating).
@@ -70,7 +76,7 @@ export default function AgentCard(props: AgentCardProps) {
     if (props.compact) {
       const base = [
         'group relative w-full text-left',
-        'transition-colors cursor-grab active:cursor-grabbing',
+        `transition-colors ${fixed() ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`,
         'flex items-center justify-start',
         'tracking-tight select-none',
         'border-l-[3px]',
@@ -86,7 +92,7 @@ export default function AgentCard(props: AgentCardProps) {
     }
     const base = [
       'group relative w-full text-left px-2.5 py-1.5',
-      'transition-colors flex flex-col gap-1 cursor-grab active:cursor-grabbing',
+      `transition-colors flex flex-col gap-1 ${fixed() ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`,
       'border-l-[3px]',
     ];
     if (props.dragging) base.push('opacity-35');
@@ -127,7 +133,7 @@ export default function AgentCard(props: AgentCardProps) {
   return (
     <button
       type="button"
-      draggable={true}
+      draggable={!fixed()}
       data-conv={props.conv}
       onClick={onClickRow}
       onDragStart={onDragStartRow}
@@ -137,7 +143,7 @@ export default function AgentCard(props: AgentCardProps) {
       onDrop={onDropRow}
       title={`${title()} · ${props.meta.agentId} · ${typeInfo().label} · ${
         isRemote() ? 'remote' : 'local'
-      }${props.pendingReview ? ' · review pending' : ''}`}
+      }${props.pendingReview ? ' · review pending' : ''}${fixed() ? ' · fixed system agent' : ''}`}
       class={cardClasses()}
     >
       <Show
@@ -149,7 +155,11 @@ export default function AgentCard(props: AgentCardProps) {
            * Same font-size as the expanded body. */
           <span
             aria-label={`${title()} ${props.status}`}
-            style={{ 'font-size': 'var(--fs-body, 13px)', 'text-overflow': 'clip' }}
+            style={{
+              'font-size': 'var(--fs-body, 13px)',
+              'text-overflow': 'clip',
+              ...(fixed() ? { color: typeInfo().color } : {}),
+            }}
             class="w-full leading-tight overflow-hidden whitespace-nowrap"
           >
             {title()}
@@ -162,7 +172,11 @@ export default function AgentCard(props: AgentCardProps) {
             class={`flex-1 min-w-0 leading-tight overflow-hidden whitespace-nowrap ${
               props.active ? 'text-gray-50 font-semibold' : 'text-gray-200'
             }`}
-            style={{ 'font-size': 'var(--fs-body, 13px)', 'text-overflow': 'clip' }}
+            style={{
+              'font-size': 'var(--fs-body, 13px)',
+              'text-overflow': 'clip',
+              ...(fixed() ? { color: typeInfo().color } : {}),
+            }}
           >
             {title()}
           </span>

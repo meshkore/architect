@@ -15,7 +15,7 @@
  */
 
 import { For, Show, createMemo, createSignal } from 'solid-js';
-import { chatStore, ONBOARDING_CONV_ID, type ConvMeta } from '~/state/chat';
+import { chatStore, ONBOARDING_CONV_ID, isFixedAgentConv, type ConvMeta } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
 import { teamStore } from '~/state/team';
 import { agentVisualInfo } from '~/lib/agent-types';
@@ -409,14 +409,14 @@ export default function ChatScopeStrip(props: Props) {
               </svg>
             </button>
           </Show>
-          {/* Archive — single-click (V107.9). Hidden entirely on the
-              Architect Agent (onboarding conv) per V107.12: the master
-              that owns the project must never be archivable. The
-              hardcoded guard chain is defense-in-depth:
+          {/* Archive — single-click (V107.9). Hidden entirely on the two
+              fixed system agents (Architect Agent + the live Roadmap
+              Architect conv) per V107.12 (extended): neither must ever
+              be archivable. The hardcoded guard chain is defense-in-depth:
                 1. button hidden here so the operator can't trigger it.
-                2. chatStore.archiveConv() returns early for ONBOARDING.
+                2. chatStore.archiveConv() returns early for isFixedAgentConv.
                 3. ChatPanel.archive() guards before calling /chat/archive. */}
-          <Show when={props.conv !== ONBOARDING_CONV_ID}>
+          <Show when={!isFixedAgentConv(props.conv)}>
             <button type="button" onClick={armArchive}
               class={confirmArchive()
                 ? 'inline-flex items-center justify-center w-7 h-7 rounded-md border border-red-500/50 text-red-300 bg-red-500/10'

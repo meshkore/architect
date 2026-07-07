@@ -39,6 +39,15 @@ import { viewStore } from '~/state/view';
 
 export const ONBOARDING_CONV_ID = '_onboarding_v1';
 
+/** The two fixed/system agents present in every project: the Architect
+ *  Agent (`_onboarding_v1`, the planner) and the live Roadmap Architect
+ *  conv (`roadmap-architect-*`, the queue executor). Neither can be
+ *  archived, reordered, or removed from the rail's pinned head — see
+ *  ChatRail's head/body split and AgentCard's draggable guard. */
+export function isFixedAgentConv(conv: string | null | undefined): boolean {
+  return conv === ONBOARDING_CONV_ID || !!(conv && conv.startsWith('roadmap-architect-'));
+}
+
 export type AgentType = 'custom' | 'deploy' | 'db' | 'testing' | 'audit' | 'docs' | 'review' | 'roadmap-architect';
 
 export interface ConvMeta {
@@ -837,8 +846,9 @@ function archiveConv(conv: string): void {
   // V82 — Coordinator is never archivable; it's the always-on agent
   // for roadmap / cluster comms. Silently ignore archive attempts on
   // the synthetic conv so a stray click in the UI doesn't strand the
-  // operator without a default chat.
-  if (conv === ONBOARDING_CONV_ID) return;
+  // operator without a default chat. Extended to cover the live
+  // Roadmap Architect conv too — both are fixed system agents.
+  if (isFixedAgentConv(conv)) return;
   setState('archivedConvs', conv, true);
   saveArchivedConvs();
 }

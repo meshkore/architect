@@ -444,6 +444,16 @@ function AgentsColumn(props: { selectedModule: string | null }) {
           title="New agent / conversation"
         >＋</button>
       </div>
+      {/* Fixed-agents subheader — Architect Agent + Roadmap Architect are
+          pinned, non-archivable system agents in every project (see
+          ChatRail's head pinning + AgentCard/ChatScopeStrip's fixed-agent
+          guards). Kept to 1-3 lines; this column is narrow. */}
+      <p class="px-2.5 pt-1 pb-1.5 text-[10px] leading-snug text-gray-600 border-b border-gray-800/60">
+        <span style={{ color: '#ec4899' }}>Architect Agent</span> plans only
+        (roadmap/context/links/crons, no code).{' '}
+        <span style={{ color: '#22d3ee' }}>Roadmap Architect</span> executes
+        the queue and may dispatch agents. Both are fixed.
+      </p>
       <div class="chat-body flex-1 flex min-h-0">
         <ChatRail />
         <Splitter resize="chat-rail" title="Drag to resize agent rail" />
