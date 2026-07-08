@@ -214,10 +214,10 @@ export default function InitiativeCard(props: {
       const who = liveAgentsHere().map((e) => e.agent_id || e.conv).join(' · ');
       return `Stop architect — ${who}`;
     }
-    if (vstate() === 'done') return 'Completada — archivada (no se puede mover)';
-    if (vstate() === 'backlog') return 'Pasar a activo';
-    if (isQueued()) return 'En cola — clic para quitarla';
-    return `Añadir a la cola — #${props.initiative.id}`;
+    if (vstate() === 'done') return 'Completed — archived (cannot be moved)';
+    if (vstate() === 'backlog') return 'Move to active';
+    if (isQueued()) return 'Queued — click to remove';
+    return `Add to queue — #${props.initiative.id}`;
   };
 
   let rowRef: HTMLLIElement | undefined;
@@ -466,11 +466,11 @@ function taskModules(task: ServerTask): string[] {
 }
 
 const TASK_STATE_TITLE: Record<TaskVState, string> = {
-  working: 'En curso — un agente está trabajando en esta tarea ahora',
-  done: 'Completada',
-  active: 'Activa — lista para arrancar',
-  blocked: 'Bloqueada',
-  pending: 'Pendiente',
+  working: 'In progress — an agent is working on this task now',
+  done: 'Completed',
+  active: 'Active — ready to start',
+  blocked: 'Blocked',
+  pending: 'Pending',
 };
 
 type SummaryView = 'des' | 'res';
@@ -537,7 +537,7 @@ function TaskRow(props: { task: ServerTask; archived?: boolean }) {
   const modsLabel = (): string => {
     const m = mods();
     if (m.length === 0) return props.task.title;
-    return `${props.task.title} · ${m.length === 1 ? 'módulo' : 'módulos'}: ${m.join(', ')}`;
+    return `${props.task.title} · ${m.length === 1 ? 'module' : 'modules'}: ${m.join(', ')}`;
   };
 
   const onPickView = (v: SummaryView, e: MouseEvent): void => {
@@ -606,13 +606,13 @@ function TaskRow(props: { task: ServerTask; archived?: boolean }) {
           {/* RTR2 — DES/RES selector took the modules slot. Modules moved
            *  into the title's tooltip (zero pixel cost). RES is disabled
            *  until the task has a `## Resolution` body. */}
-          <span class="rt-task-views" role="group" aria-label="Vista del resumen">
+          <span class="rt-task-views" role="group" aria-label="Summary view">
             <button
               type="button"
               class={`rt-task-view-btn${view() === 'des' ? ' is-active' : ''}`}
               onClick={(e) => onPickView('des', e)}
               disabled={!hasDes()}
-              title="Descripción"
+              title="Description"
               aria-pressed={view() === 'des'}
             >
               DES
@@ -622,7 +622,7 @@ function TaskRow(props: { task: ServerTask; archived?: boolean }) {
               class={`rt-task-view-btn${view() === 'res' ? ' is-active' : ''}`}
               onClick={(e) => onPickView('res', e)}
               disabled={!hasRes()}
-              title={hasRes() ? 'Resultado de la ejecución' : 'Sin resultado todavía'}
+              title={hasRes() ? 'Execution result' : 'No result yet'}
               aria-pressed={view() === 'res'}
             >
               RES

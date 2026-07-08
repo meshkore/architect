@@ -246,7 +246,7 @@ export default function InitiativesPanel() {
     // STOP button shows whenever there's a streaming assistant bubble in the
     // local convMap, even before the daemon snapshot's `live` flag lands. The
     // queue bar must read the SAME truth, otherwise the chat says "running +
-    // STOP" while this bar still offers "▶ Ejecutar cola" (the incoherence the
+    // STOP" while this bar still offers "▶ Run queue" (the incoherence the
     // operator hit). So check the streaming bubble too.
     const msgs = chatStore.state.convMap[conv] ?? [];
     const last = msgs[msgs.length - 1];
@@ -299,7 +299,7 @@ export default function InitiativesPanel() {
     return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
   });
 
-  // "Ejecutar cola" — run exactly what the operator staged (a curated
+  // "Run queue" — run exactly what the operator staged (a curated
   // subset), in roadmap order, skipping anything already complete.
   const onRunQueue = async (): Promise<void> => {
     const list = queueInitiatives().filter((it) => {
@@ -331,7 +331,7 @@ export default function InitiativesPanel() {
                     ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/40'
                     : 'text-gray-500 hover:text-cyan-300 border border-transparent'
                 }`}
-                title="Cola de ejecución — historias en cola o ejecutándose ahora"
+                title="Execution queue — stories queued or running now"
               >
                 queue
                 <Show when={queueInitiatives().length > 0}>
@@ -367,7 +367,7 @@ export default function InitiativesPanel() {
                 type="button"
                 onClick={onExpandAll}
                 class="rt-expand-btn"
-                title="Expandir todas las historias y tareas — leer todo de un vistazo"
+                title="Expand all stories and tasks — read everything at a glance"
                 aria-label="Expand all"
               >
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none"
@@ -380,7 +380,7 @@ export default function InitiativesPanel() {
                 type="button"
                 onClick={onCollapseAll}
                 class="rt-expand-btn"
-                title="Plegar todas las historias y tareas"
+                title="Collapse all stories and tasks"
                 aria-label="Collapse all"
               >
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none"
@@ -398,7 +398,7 @@ export default function InitiativesPanel() {
               class="initiatives-filter-input bg-gray-800/70 border border-gray-600 rounded-md px-3 py-1 text-xs text-gray-100 placeholder-gray-400 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-500/40 w-44 min-w-0"
             />
             {/* RUN ALL removed 2026-06-19 — redundant with the queue's
-                "Ejecutar cola"; execution now happens only from the Queue
+                "Run queue"; execution now happens only from the Queue
                 wall. Staging is per-story ▶. */}
           </header>
 
@@ -409,22 +409,22 @@ export default function InitiativesPanel() {
             <div class="rt-queuebar">
               <div
                 class="rt-qbar-progress"
-                title={`${queueProgress().done}/${queueProgress().total} tareas completadas`}
+                title={`${queueProgress().done}/${queueProgress().total} tasks completed`}
               >
                 <span class="rt-qbar-fill" style={{ width: `${queueProgress().pct}%` }} />
               </div>
               <span class="rt-qbar-stat">
-                {queueProgress().done}/{queueProgress().total} tareas · {queueInitiatives().length} en cola
+                {queueProgress().done}/{queueProgress().total} tasks · {queueInitiatives().length} queued
               </span>
               <div class="ml-auto flex items-center gap-2 flex-shrink-0">
                 {/* Coherent with the chat's STOP: while the architect runs we
-                    show a "running" pill + the Parar button (NOT an enabled
+                    show a "running" pill + the Stop button (NOT an enabled
                     play). When idle, the play button runs the queue. */}
                 <Show
                   when={!architectLive()}
                   fallback={
-                    <span class="rt-qbtn rt-qbtn-running" title="La cola se está ejecutando — el Roadmap Architect está trabajando">
-                      <span class="rt-qbar-spinner" aria-hidden="true" /> En curso…
+                    <span class="rt-qbtn rt-qbtn-running" title="The queue is running — the Roadmap Architect is working">
+                      <span class="rt-qbar-spinner" aria-hidden="true" /> Running…
                     </span>
                   }
                 >
@@ -433,9 +433,9 @@ export default function InitiativesPanel() {
                     onClick={() => { void onRunQueue(); }}
                     disabled={queueInitiatives().length === 0}
                     class="rt-qbtn rt-qbtn-run"
-                    title="Ejecutar las historias en cola, en orden"
+                    title="Run the queued stories, in order"
                   >
-                    ▶ Ejecutar cola
+                    ▶ Run queue
                   </button>
                 </Show>
                 <Show when={architectLive()}>
@@ -443,21 +443,21 @@ export default function InitiativesPanel() {
                     type="button"
                     onClick={() => { void stopArchitect(); }}
                     class="rt-qbtn rt-qbtn-stop"
-                    title="Parar la ejecución en curso"
+                    title="Stop the current run"
                   >
-                    ⏹ Parar
+                    ⏹ Stop
                   </button>
                 </Show>
                 <Show
                   when={!confirmingReset()}
                   fallback={
                     <span class="inline-flex items-center gap-1.5">
-                      <span class="rt-qbar-stat">¿Vaciar la cola?</span>
+                      <span class="rt-qbar-stat">Clear the queue?</span>
                       <button
                         type="button"
                         class="rt-qbtn rt-qbtn-stop"
                         onClick={() => { clearQueue(); setConfirmingReset(false); }}
-                      >Sí</button>
+                      >Yes</button>
                       <button
                         type="button"
                         class="rt-qbtn rt-qbtn-clear"
@@ -471,7 +471,7 @@ export default function InitiativesPanel() {
                     onClick={() => setConfirmingReset(true)}
                     disabled={queueInitiatives().length === 0}
                     class="rt-qbtn rt-qbtn-clear"
-                    title="Vaciar la cola (pide confirmación; no afecta a lo que ya se está ejecutando)"
+                    title="Clear the queue (asks for confirmation; doesn't affect what's already running)"
                   >
                     Reset
                   </button>
@@ -540,9 +540,9 @@ export default function InitiativesPanel() {
 function QueueEmpty() {
   return (
     <div class="text-center py-16 text-gray-500">
-      <p class="text-sm">La cola está vacía.</p>
+      <p class="text-sm">The queue is empty.</p>
       <p class="text-xs text-gray-600 mt-2">
-        Pulsa <span class="text-cyan-300/80">＋</span> en una historia <span class="text-amber-300/80">active</span> para añadirla a la cola; luego <span class="text-cyan-300/80">Ejecutar cola</span>. La cola es temporal — no mueve nada del roadmap.
+        Click <span class="text-cyan-300/80">＋</span> on an <span class="text-amber-300/80">active</span> story to add it to the queue, then <span class="text-cyan-300/80">Run queue</span>. The queue is temporary — it doesn't move anything in the roadmap.
       </p>
     </div>
   );

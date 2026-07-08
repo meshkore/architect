@@ -16,27 +16,27 @@ import type { DaemonEvent } from '~/lib/daemon-client';
 const PLATFORM_LABELS: Record<string, { name: string; hint: string }> = {
   cursor: {
     name: 'Cursor Agent',
-    hint: 'Se abrirá el navegador para autorizar Cursor. Acepta el acceso y vuelve aquí.',
+    hint: 'A browser window will open to authorize Cursor. Accept access and come back here.',
   },
   'claude-code': {
     name: 'Claude Code',
-    hint: 'Se abrirá el navegador para autorizar Claude Code (Anthropic). Acepta y vuelve aquí.',
+    hint: 'A browser window will open to authorize Claude Code (Anthropic). Accept and come back here.',
   },
   wrangler: {
     name: 'Cloudflare (Wrangler)',
-    hint: 'Se abrirá el navegador para autorizar Wrangler en tu cuenta de Cloudflare. Necesario para deploys a Pages/Workers.',
+    hint: 'A browser window will open to authorize Wrangler on your Cloudflare account. Required for Pages/Workers deploys.',
   },
   gh: {
     name: 'GitHub CLI',
-    hint: 'Se abrirá el navegador para autorizar el GitHub CLI (gh). Necesario para operaciones con repositorios y Actions.',
+    hint: 'A browser window will open to authorize the GitHub CLI (gh). Required for repository and Actions operations.',
   },
   fly: {
     name: 'Fly.io',
-    hint: 'Se abrirá el navegador para autorizar Fly.io. Necesario para deploys a fly.io.',
+    hint: 'A browser window will open to authorize Fly.io. Required for fly.io deploys.',
   },
   vercel: {
     name: 'Vercel',
-    hint: 'Se abrirá el navegador para autorizar Vercel. Necesario para deploys a vercel.com.',
+    hint: 'A browser window will open to authorize Vercel. Required for vercel.com deploys.',
   },
 };
 
@@ -53,7 +53,7 @@ export default function RunnerAuthCard(props: {
 
   const info = () => PLATFORM_LABELS[props.platform] ?? {
     name: props.platform,
-    hint: 'Se abrirá el navegador para autenticar este runner.',
+    hint: 'A browser window will open to authenticate this runner.',
   };
 
   // Listen for auth WS events from the daemon
@@ -102,7 +102,7 @@ export default function RunnerAuthCard(props: {
     startListening();
 
     const client = daemonStore.state.client;
-    if (!client) { setAuthState('error'); setErrMsg('No hay cliente daemon disponible.'); return; }
+    if (!client) { setAuthState('error'); setErrMsg('No daemon client available.'); return; }
 
     const res = await (client as any).request?.('POST', `/auth/${props.platform}/start`, {}, undefined)
       ?? await fetch(
@@ -119,7 +119,7 @@ export default function RunnerAuthCard(props: {
 
     if (!res || res.ok === false) {
       setAuthState('error');
-      setErrMsg(res?.body ?? res?.msg ?? 'Error al lanzar el login');
+      setErrMsg(res?.body ?? res?.msg ?? 'Failed to launch login');
       stopListening();
     }
     log.info('runner-auth start', { platform: props.platform, res });
@@ -127,11 +127,11 @@ export default function RunnerAuthCard(props: {
 
   const btnLabel = () => {
     switch (authState()) {
-      case 'idle': return `Autenticar ${info().name}`;
-      case 'started': return 'Abriendo navegador…';
-      case 'polling': return `Verificando… ${elapsed()}s`;
-      case 'done': return '✓ Autenticado';
-      case 'error': return 'Reintentar';
+      case 'idle': return `Authenticate ${info().name}`;
+      case 'started': return 'Opening browser…';
+      case 'polling': return `Verifying… ${elapsed()}s`;
+      case 'done': return '✓ Authenticated';
+      case 'error': return 'Retry';
     }
   };
 
@@ -144,7 +144,7 @@ export default function RunnerAuthCard(props: {
         <div class="mt-0.5 flex-shrink-0 text-amber-400 text-lg leading-none">⚠</div>
         <div class="flex-1 min-w-0">
           <p class="font-semibold text-amber-300 mb-1">
-            {info().name} necesita autenticación
+            {info().name} needs authentication
           </p>
           <p class="text-gray-300 mb-3 leading-relaxed">
             {info().hint}
@@ -152,14 +152,14 @@ export default function RunnerAuthCard(props: {
 
           <Show when={authState() === 'polling'}>
             <p class="text-gray-400 text-xs mb-2">
-              Esperando confirmación del daemon… ({elapsed()}s)
+              Waiting for daemon confirmation… ({elapsed()}s)
               <span class="ml-1 inline-block animate-pulse">●</span>
             </p>
           </Show>
 
           <Show when={authState() === 'done'}>
             <p class="text-emerald-400 text-xs mb-2 font-medium">
-              ✓ Autenticación completada — reanudando…
+              ✓ Authentication completed — resuming…
             </p>
           </Show>
 
@@ -185,7 +185,7 @@ export default function RunnerAuthCard(props: {
                 onClick={() => props.onDismiss?.()}
                 class="rounded px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors"
               >
-                Descartar
+                Dismiss
               </button>
             </Show>
           </div>

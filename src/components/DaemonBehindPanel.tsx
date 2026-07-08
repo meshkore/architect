@@ -10,7 +10,7 @@
  *
  * UX:
  *   - mount → if `autoUpdateEnabled` is true, fire `/self-update`
- *     immediately and show a spinner "Actualizando Ikamiro a py-X.Y.Z…"
+ *     immediately and show a spinner "Updating Ikamiro to py-X.Y.Z…"
  *   - daemon re-execs, WS drops, daemon-port-recovery (shipped earlier)
  *     reattaches once it comes back up. When `daemonStore.state.version`
  *     reaches EXPECTED, this panel unmounts naturally (gate flips false).
@@ -151,7 +151,7 @@ export default function DaemonBehindPanel(): JSX.Element {
               when={phase() === 'updating'}
               fallback={<>Update <span class="font-mono text-amber-200">{cluster()}</span> to continue</>}
             >
-              Actualizando <span class="font-mono text-amber-200">{cluster()}</span>…
+              Updating <span class="font-mono text-amber-200">{cluster()}</span>…
             </Show>
           </h1>
           <p class="text-gray-400 leading-relaxed text-sm">

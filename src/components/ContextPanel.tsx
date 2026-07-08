@@ -155,7 +155,7 @@ function SpawnBadge(props: {
   };
   return (
     <div class="flex items-center gap-3 px-4 py-2 border-b border-gray-800/60 text-[11px]">
-      <span class={`font-mono px-2 py-0.5 rounded border ${cls()}`} title="Lo que el daemon inyecta en cada spawn: mapa skeleton + cuerpos pinned">
+      <span class={`font-mono px-2 py-0.5 rounded border ${cls()}`} title="What the daemon injects on each spawn: skeleton map + pinned bodies">
         spawn {props.tree.spawn_tokens.toLocaleString()} / {props.tree.budget_tokens.toLocaleString()} tok · {pct()}%
       </span>
       <Show when={props.tree.skeleton_tokens !== undefined && props.tree.pinned_tokens !== undefined}>
@@ -169,12 +169,12 @@ function SpawnBadge(props: {
         </span>
       </Show>
       <div class="flex-1" />
-      <span class="flex items-center gap-1.5 text-gray-500" title="Sincronizado en vivo con el daemon">
+      <span class="flex items-center gap-1.5 text-gray-500" title="Synced live with the daemon">
         <span class="relative flex h-1.5 w-1.5">
           <span class="absolute inline-flex h-full w-full rounded-full bg-emerald-400/60 animate-ping" />
           <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
         </span>
-        en vivo
+        live
       </span>
     </div>
   );
@@ -183,10 +183,10 @@ function SpawnBadge(props: {
 function Legend() {
   return (
     <div class="flex items-center gap-4 px-4 py-1.5 border-b border-gray-800/40 text-[10px] text-gray-500">
-      <span class="flex items-center gap-1.5"><Dot load="pinned" />pinned — cuerpo en cada spawn</span>
-      <span class="flex items-center gap-1.5"><Dot load="skeleton" />skeleton — solo título + descripción</span>
-      <span class="flex items-center gap-1.5"><Dot load="on-demand" />on-demand — se pide al daemon</span>
-      <span class="text-violet-300/70">◆ alimenta otra superficie</span>
+      <span class="flex items-center gap-1.5"><Dot load="pinned" />pinned — body on every spawn</span>
+      <span class="flex items-center gap-1.5"><Dot load="skeleton" />skeleton — title + description only</span>
+      <span class="flex items-center gap-1.5"><Dot load="on-demand" />on-demand — fetched from the daemon</span>
+      <span class="text-violet-300/70">◆ feeds another surface</span>
     </div>
   );
 }
@@ -310,7 +310,7 @@ function TreeNode(props: {
                 ? 'text-emerald-300 bg-emerald-500/10'
                 : 'text-gray-500 bg-gray-900/60 hover:text-emerald-300 hover:bg-emerald-500/10'
           }`}
-          title={hasBody() ? (isBodyOpen() ? 'cerrar contenido' : 'abrir contenido') : ''}
+          title={hasBody() ? (isBodyOpen() ? 'close content' : 'open content') : ''}
           aria-label={hasBody() ? (isBodyOpen() ? 'collapse body' : 'open body') : ''}
         >
           {hasBody() ? (isBodyOpen() ? '−' : '+') : ''}
@@ -326,7 +326,7 @@ function TreeNode(props: {
 
         {/* feeds pill */}
         <Show when={props.node.feeds}>
-          <span class="flex-shrink-0 text-[9px] text-violet-300/80 border border-violet-500/30 bg-violet-500/10 rounded-full px-1.5 leading-tight py-0.5" title="alimenta otra superficie">
+          <span class="flex-shrink-0 text-[9px] text-violet-300/80 border border-violet-500/30 bg-violet-500/10 rounded-full px-1.5 leading-tight py-0.5" title="feeds another surface">
             ◆ {props.node.feeds}
           </span>
         </Show>
@@ -334,7 +334,7 @@ function TreeNode(props: {
         {/* token weight (pinned only — that's the spawn cost) */}
         <span class="ml-auto flex items-center gap-1.5 flex-shrink-0 pl-2">
           <Show when={props.node.load === 'pinned' && props.node.words}>
-            <span class="text-[10px] font-mono text-emerald-400/70" title="cuerpo inyectado en cada spawn">
+            <span class="text-[10px] font-mono text-emerald-400/70" title="body injected on every spawn">
               {Math.round(props.node.words * 1.5)}t
             </span>
           </Show>
@@ -367,11 +367,11 @@ function TreeNode(props: {
           <div class="px-4 py-3">
             <Show
               when={bodyHtml.state === 'ready' || bodyHtml.state === 'refreshing'}
-              fallback={<p class="text-[11px] text-gray-500 italic">cargando…</p>}
+              fallback={<p class="text-[11px] text-gray-500 italic">loading…</p>}
             >
               <Show
                 when={bodyHtml()}
-                fallback={<p class="text-[11px] text-amber-300/70 italic">no se pudo cargar el contenido</p>}
+                fallback={<p class="text-[11px] text-amber-300/70 italic">couldn't load content</p>}
               >
                 <div class={PROSE} innerHTML={bodyHtml() ?? ''} />
               </Show>

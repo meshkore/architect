@@ -183,12 +183,12 @@ export default function ChatThread(props: {
       <Show when={paging()?.loading}>
         <div class="flex items-center justify-center gap-2 py-2 text-[11px] text-gray-500">
           <span class="inline-block w-3 h-3 rounded-full border-2 border-gray-600 border-t-gray-300 animate-spin" />
-          Cargando mensajes anteriores…
+          Loading earlier messages…
         </div>
       </Show>
       <Show when={paging()?.capped && !paging()?.loading}>
         <div class="text-center py-2 text-[11px] text-gray-600">
-          — mostrando los últimos mensajes · el historial completo sigue en el daemon —
+          — showing the latest messages · full history remains on the daemon —
         </div>
       </Show>
       <Show

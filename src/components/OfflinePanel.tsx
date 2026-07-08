@@ -203,9 +203,9 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }): J
                     responding. The cockpit reconnects the moment <code class="font-mono text-gray-300">/health</code> answers.
                   </>}
                 >
-                  Perdimos la conexión con el daemon en <span class="font-mono text-gray-300">:{props.sel.port}</span>.
-                  Reintentando automáticamente — se reanuda solo en cuanto responda, no tienes que hacer nada.
-                  Tus otros proyectos siguen disponibles en la barra de la izquierda.
+                  We lost the connection to the daemon on <span class="font-mono text-gray-300">:{props.sel.port}</span>.
+                  Retrying automatically — it will resume as soon as it responds, no action needed.
+                  Your other projects are still available in the left sidebar.
                 </Show>
               }
             >
