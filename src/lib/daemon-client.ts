@@ -425,6 +425,9 @@ export interface ChatConvSummary {
   /** MP3 (daemon py-1.14.2) — per-conv effort (reasoning depth).
    *  `null`/`default` → no `--effort` flag. */
   effort?: string | null;
+  /** DM-CLI-02 (daemon, multi-cli-clients) — per-conv CLI-client
+   *  preference. `null` → claude-code. */
+  client?: string | null;
   archived: boolean;
   archived_at: string | null;
   archived_by: string | null;
@@ -547,6 +550,22 @@ export interface TaskCreateBody {
 
 export type TeamMemberKind = 'singleton' | 'profile';
 
+/** DM-CLI-06 (multi-cli-clients) — one entry from GET /clients. Model/
+ *  effort ids are driver-owned (daemon source, see clidrivers/*.py) —
+ *  the frontend never hardcodes a non-claude-code catalog. */
+export interface ClientInfo {
+  id: string;
+  label: string;
+  /** Whether the CLI binary was found on the DAEMON's machine (not this
+   *  browser's) — probed fresh on every request, never cached. */
+  installed: boolean;
+  /** null = "can't tell" (e.g. claude-code's own login state isn't a
+   *  single checkable env var) — never a false positive/negative. */
+  authConfigured: boolean | null;
+  models: { id: string; label: string }[];
+  efforts: { id: string; label: string }[];
+}
+
 /** TEG-3 — who can reach this member. `internal` (default): cockpit
  *  only. `external`: any local software holding the member's bearer
  *  token (ask/poll surface on the shared daemon). */
@@ -561,6 +580,10 @@ export interface TeamMember {
   kind: TeamMemberKind;
   required: boolean;
   agent_type?: string;
+  /** DM-CLI-02 (multi-cli-clients) — which CLI dispatches this member's
+   *  turns. Absent (every member from before this field existed) means
+   *  `claude-code`. */
+  client?: string;
   /** Default model for instances of this member (required by the schema). */
   model: string;
   effort?: string;
@@ -590,6 +613,8 @@ export interface TeamMemberDetail extends TeamMember {
 export interface TeamCreateBody {
   name: string;
   emoji: string;
+  /** DM-CLI-02 — omit for claude-code (the default). */
+  client?: string;
   model: string;
   effort?: string;
   kind?: 'profile';
@@ -606,6 +631,8 @@ export interface TeamPatchBody {
   name?: string;
   emoji?: string;
   color?: string;
+  /** DM-CLI-02 — switch which CLI dispatches this member's turns. */
+  client?: string;
   model?: string;
   effort?: string;
   refs?: string[];
@@ -816,6 +843,13 @@ export class DaemonClient {
 
   async agents(signal?: AbortSignal): Promise<Result<unknown[]>> {
     return this.request<unknown[]>('GET', '/agents', undefined, signal);
+  }
+
+  /** DM-CLI-06 (multi-cli-clients) — GET /clients. 404 on a daemon
+   *  older than this feature; callers (state/clients.ts) treat that as
+   *  "fall back to the claude-code-only default", not a hard error. */
+  async clients(signal?: AbortSignal): Promise<Result<ClientInfo[]>> {
+    return this.request<ClientInfo[]>('GET', '/clients', undefined, signal);
   }
 
   async cronList(signal?: AbortSignal): Promise<Result<CronListResponse>> {

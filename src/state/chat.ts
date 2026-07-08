@@ -56,6 +56,9 @@ export interface ConvMeta {
   /** MP3 (2026-06-12) — reasoning-depth dial → claude-code `--effort`.
    *  'default' / undefined = no flag. */
   effort?: string;
+  /** DM-CLI-02 (multi-cli-clients) — which CLI dispatches this conv's
+   *  turns. undefined/'claude-code' = the default, unchanged today. */
+  client?: string;
   type: AgentType;
   title: string;
   /** agent-team (ATM7/ATM10) — the roster member this conv is bound to
@@ -671,6 +674,7 @@ function ensureConvMeta(convId: string, init: Partial<ConvMeta> = {}): ConvMeta 
     agentId: init.agentId ?? nextAgentId(),
     model: init.model ?? 'auto',
     effort: init.effort ?? 'default',
+    client: init.client ?? 'claude-code',
     type: (init.type ?? 'custom') as AgentType,
     title: init.title ?? '',
     member: init.member,
@@ -1286,6 +1290,7 @@ function hydrateFromSnapshot(snap: ChatSnapshotResponse): void {
       setState('convMeta', c.conv, {
         agentId,
         model: 'auto',
+        client: c.client ?? undefined,
         type: inferredType,
         title: agentId || c.conv,
         location: { type: 'local' },
@@ -1613,16 +1618,20 @@ function ingestConvEvent(ev: DaemonEvent): void {
       msg_count: cur?.msg_count ?? 0,
       model: typeof ev.model === 'string' ? ev.model : (cur?.model ?? null),
       effort: typeof ev.effort === 'string' ? ev.effort : (cur?.effort ?? null),
+      client: typeof ev.client === 'string' ? ev.client : (cur?.client ?? null),
     };
     setState('convs', conv, merged);
-    // MP3 — mirror daemon-authoritative model/effort onto the local
-    // convMeta so the rail card + chat badges + the next dispatch all
-    // agree with what the daemon will actually launch.
+    // MP3 — mirror daemon-authoritative model/effort/client onto the
+    // local convMeta so the rail card + chat badges + the next
+    // dispatch all agree with what the daemon will actually launch.
     if (typeof ev.model === 'string' && state.convMeta[conv]) {
       setState('convMeta', conv, 'model', ev.model);
     }
     if (typeof ev.effort === 'string' && state.convMeta[conv]) {
       setState('convMeta', conv, 'effort', ev.effort);
+    }
+    if (typeof ev.client === 'string' && state.convMeta[conv]) {
+      setState('convMeta', conv, 'client', ev.client);
     }
     return;
   }

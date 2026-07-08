@@ -16,6 +16,7 @@ import { For, Match, Show, Switch, createMemo, createSignal } from 'solid-js';
 import { Modal } from '~/components/Modal';
 import { daemonStore } from '~/state/daemon';
 import { teamStore } from '~/state/team';
+import { clientsStore } from '~/state/clients';
 import { MODEL_CATALOG, EFFORT_CATALOG } from '~/lib/models';
 import type { TeamCreateBody } from '~/lib/daemon-client';
 
@@ -36,6 +37,20 @@ export default function NewMemberDialog(props: { onClose: () => void; onCreated?
   // Step 3 (review) fields — prefilled from the draft.
   const [model, setModel] = createSignal('sonnet');
   const [effort, setEffort] = createSignal('default');
+  // DM-CLI-08 (multi-cli-clients) — which CLI dispatches this member.
+  // Default claude-code; changing it re-populates model/effort below
+  // from that client's own catalog (clientsStore.catalogFor).
+  const [selectedClient, setSelectedClient] = createSignal('claude-code');
+  const catalog = createMemo(() => clientsStore.catalogFor(selectedClient()));
+  const onClientChange = (id: string) => {
+    setSelectedClient(id);
+    const cat = clientsStore.catalogFor(id);
+    // Reset to that client's own first option so a leftover
+    // claude-code model/effort id never gets submitted for a different
+    // client's member.
+    setModel(cat.models[0]?.id ?? '');
+    setEffort(cat.efforts[0]?.id ?? 'default');
+  };
   const [refs, setRefs] = createSignal<string[]>([]);
   const [prompt, setPrompt] = createSignal('');
 
@@ -83,6 +98,7 @@ export default function NewMemberDialog(props: { onClose: () => void; onCreated?
     const body: TeamCreateBody = {
       name: name().trim(),
       emoji: emoji().trim() || '🤖',
+      client: selectedClient(),
       model: model(),
       effort: effort(),
       kind: 'profile',
@@ -221,29 +237,63 @@ export default function NewMemberDialog(props: { onClose: () => void; onCreated?
               </div>
             </div>
 
+            {/* Client — DM-CLI-08. Default claude-code; switching
+                re-populates Model/Effort below from that client's own
+                catalog (clientsStore.catalogFor). */}
+            <div>
+              <label class="block font-mono text-[10px] uppercase tracking-[0.14em] text-gray-500 mb-1.5">Client</label>
+              <select
+                value={selectedClient()}
+                onChange={(e) => onClientChange(e.currentTarget.value)}
+                class="w-full bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[13px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
+              >
+                <For each={clientsStore.options()}>
+                  {(c) => (
+                    <option value={c.id} disabled={c.installed === false}>
+                      {c.label}
+                      {c.installed === false ? ' (not installed on daemon host)' : ''}
+                    </option>
+                  )}
+                </For>
+              </select>
+            </div>
+
             {/* Model — required picker */}
             <div>
               <label class="block font-mono text-[10px] uppercase tracking-[0.14em] text-gray-500 mb-1.5">Model <span class="text-gray-600 normal-case tracking-normal">· required</span></label>
-              <select
-                value={model()}
-                onChange={(e) => setModel(e.currentTarget.value)}
-                class="w-full bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[13px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
+              <Show
+                when={selectedClient() === 'claude-code'}
+                fallback={
+                  <select
+                    value={model()}
+                    onChange={(e) => setModel(e.currentTarget.value)}
+                    class="w-full bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[13px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
+                  >
+                    <For each={catalog().models}>{(m) => <option value={m.id}>{m.label}</option>}</For>
+                  </select>
+                }
               >
-                <For each={MODEL_GROUPS}>{(grp) => (
-                  <optgroup label={grp}>
-                    <For each={MODEL_CATALOG.filter((m) => m.group === grp)}>
-                      {(m) => <option value={m.id}>{m.label}</option>}
-                    </For>
-                  </optgroup>
-                )}</For>
-              </select>
+                <select
+                  value={model()}
+                  onChange={(e) => setModel(e.currentTarget.value)}
+                  class="w-full bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[13px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
+                >
+                  <For each={MODEL_GROUPS}>{(grp) => (
+                    <optgroup label={grp}>
+                      <For each={MODEL_CATALOG.filter((m) => m.group === grp)}>
+                        {(m) => <option value={m.id}>{m.label}</option>}
+                      </For>
+                    </optgroup>
+                  )}</For>
+                </select>
+              </Show>
             </div>
 
             {/* Effort */}
             <div>
               <label class="block font-mono text-[10px] uppercase tracking-[0.14em] text-gray-500 mb-1.5">Effort <span class="text-gray-600 normal-case tracking-normal">· reasoning depth</span></label>
               <div class="flex flex-wrap gap-1">
-                <For each={EFFORT_CATALOG}>
+                <For each={selectedClient() === 'claude-code' ? EFFORT_CATALOG : catalog().efforts}>
                   {(e) => (
                     <button
                       type="button"

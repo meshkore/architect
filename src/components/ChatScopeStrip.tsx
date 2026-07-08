@@ -20,6 +20,7 @@ import { daemonStore } from '~/state/daemon';
 import { teamStore } from '~/state/team';
 import { agentVisualInfo } from '~/lib/agent-types';
 import { MODEL_CATALOG, EFFORT_CATALOG } from '~/lib/models';
+import { clientsStore } from '~/state/clients';
 import type { ChatContextBlock, TeamMember } from '~/lib/daemon-client';
 import { debugDropCount } from '~/lib/debug-transport';
 import { log } from '~/lib/log';
@@ -250,29 +251,52 @@ export default function ChatScopeStrip(props: Props) {
         {(() => {
           const modelId = () => convState()?.model ?? props.meta?.model ?? 'auto';
           const effortId = () => convState()?.effort ?? props.meta?.effort ?? 'default';
+          // DM-CLI-08 (multi-cli-clients) — resolve which CLI this conv
+          // runs on so the pickers below show THAT client's real
+          // catalog, not always claude-code's. Read-only here (the
+          // client itself is set on the member, not per-turn from this
+          // strip) — same daemon-authoritative-then-local-override
+          // precedence as model/effort above.
+          const clientId = () => convState()?.client ?? props.meta?.client ?? 'claude-code';
+          const isClaudeCode = () => clientId() === 'claude-code';
+          const catalog = () => clientsStore.catalogFor(clientId());
           return (
             <div class="flex items-center gap-1 flex-shrink-0">
-              <select
-                value={modelId()}
-                onChange={(e) => chatStore.setConvModel(props.conv, e.currentTarget.value)}
-                title="Model — applies from the next turn (daemon launches claude-code --model)"
-                class="bg-purple-500/10 border border-purple-500/30 rounded px-1.5 py-0.5 text-[10px] font-mono text-purple-200 focus:outline-none focus:border-purple-400/60 max-w-[110px]"
+              <Show
+                when={isClaudeCode()}
+                fallback={
+                  <select
+                    value={modelId()}
+                    onChange={(e) => chatStore.setConvModel(props.conv, e.currentTarget.value)}
+                    title={`Model — applies from the next turn (${clientId()})`}
+                    class="bg-purple-500/10 border border-purple-500/30 rounded px-1.5 py-0.5 text-[10px] font-mono text-purple-200 focus:outline-none focus:border-purple-400/60 max-w-[110px]"
+                  >
+                    <For each={catalog().models}>{(m) => <option value={m.id}>{m.label}</option>}</For>
+                  </select>
+                }
               >
-                <For each={['Latest (alias)', 'Pinned version', 'Auto'] as const}>{(grp) => (
-                  <optgroup label={grp}>
-                    <For each={MODEL_CATALOG.filter((m) => m.group === grp)}>
-                      {(m) => <option value={m.id}>{m.label}</option>}
-                    </For>
-                  </optgroup>
-                )}</For>
-              </select>
+                <select
+                  value={modelId()}
+                  onChange={(e) => chatStore.setConvModel(props.conv, e.currentTarget.value)}
+                  title="Model — applies from the next turn (daemon launches claude-code --model)"
+                  class="bg-purple-500/10 border border-purple-500/30 rounded px-1.5 py-0.5 text-[10px] font-mono text-purple-200 focus:outline-none focus:border-purple-400/60 max-w-[110px]"
+                >
+                  <For each={['Latest (alias)', 'Pinned version', 'Auto'] as const}>{(grp) => (
+                    <optgroup label={grp}>
+                      <For each={MODEL_CATALOG.filter((m) => m.group === grp)}>
+                        {(m) => <option value={m.id}>{m.label}</option>}
+                      </For>
+                    </optgroup>
+                  )}</For>
+                </select>
+              </Show>
               <select
                 value={effortId()}
                 onChange={(e) => chatStore.setConvEffort(props.conv, e.currentTarget.value)}
-                title="Effort (reasoning depth) — applies from the next turn (claude-code --effort)"
+                title="Effort (reasoning depth) — applies from the next turn"
                 class="bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5 text-[10px] font-mono text-amber-200/90 focus:outline-none focus:border-amber-400/60"
               >
-                <For each={EFFORT_CATALOG}>
+                <For each={isClaudeCode() ? EFFORT_CATALOG : catalog().efforts}>
                   {(e) => <option value={e.id}>{e.label}</option>}
                 </For>
               </select>

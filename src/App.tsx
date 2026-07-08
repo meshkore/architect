@@ -32,6 +32,7 @@ import { viewStore } from '~/state/view';
 import { bindCluster as queueBindCluster } from '~/lib/queue';
 import { storyStore } from '~/state/story';
 import { teamStore } from '~/state/team';
+import { clientsStore } from '~/state/clients';
 import { log } from '~/lib/log';
 import { applyStoredLayout } from '~/components/Splitter';
 import { ModalHost } from '~/lib/modal';
@@ -118,6 +119,9 @@ export default function App() {
       // agent-team (ATM3) — reset the roster mirror on project switch;
       // hydrate() below repopulates it from the new cluster's /team.
       teamStore.bindCluster(health.cluster_id ?? null);
+      // DM-CLI-07 (multi-cli-clients) — same reset for the CLI-client
+      // catalog mirror; hydrated alongside the roster below.
+      clientsStore.bindCluster(health.cluster_id ?? null);
       // FC-2 — bind the execution queue to this project too (same cluster_id
       // path as the stores above) so staged items persist per-project across
       // refresh, instead of the queue racing daemonStore reads for its key.
@@ -181,6 +185,12 @@ export default function App() {
       void teamStore.hydrate(client).then(() => {
         if (!stillCurrent()) return;
         log.info('team roster hydrated', { members: teamStore.state.list.length });
+      });
+      // DM-CLI-07 — hydrate the CLI-client catalog so the team dialogs'
+      // Client picker has real, current options as soon as they open.
+      void clientsStore.hydrate(client).then(() => {
+        if (!stillCurrent()) return;
+        log.info('client catalog hydrated', { clients: clientsStore.state.list.length });
       });
       // V89 — fetch any active runs from the daemon so the UI paints
       // ground truth immediately (the WS handles updates from here on).

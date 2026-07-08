@@ -239,6 +239,18 @@ export default function AgentCard(props: AgentCardProps) {
               >
                 {modelShort(props.meta.model)}
               </span>
+              {/* DM-CLI-08 (multi-cli-clients) — client badge, shown
+                  ONLY for a non-default client so a claude-code-only
+                  roster (today's universal case) looks unchanged. */}
+              <Show when={props.meta.client && props.meta.client !== 'claude-code'}>
+                <span
+                  class="inline-flex items-center px-1.5 py-px rounded border flex-shrink-0"
+                  style={{ 'border-color': pillBorder, color: dimColor }}
+                  title={`Client: ${props.meta.client}`}
+                >
+                  {props.meta.client?.slice(0, 6)}
+                </span>
+              </Show>
               {/* Local / Remote — the coloured cue. */}
               <span
                 class="inline-flex items-center justify-center px-1.5 py-px rounded border flex-shrink-0"
