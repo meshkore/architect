@@ -126,8 +126,14 @@ export function CollapsibleText(props: {
   text: string;
   lockExpanded?: boolean;
   markdown?: boolean;
+  /** Collapsed-height cap in px. Defaults to COLLAPSED_MAX_PX (chat
+   *  bubbles). The roadmap RES/DES summary passes a small value so a
+   *  finished-task summary shows ~2 lines then a "show more" — the
+   *  operator asked for a 2-line teaser, not an 8-line wall, per row. */
+  collapsedMaxPx?: number;
   children?: JSX.Element;
 }) {
+  const cap = (): number => props.collapsedMaxPx ?? COLLAPSED_MAX_PX;
   // V107.36 — Always start collapsed. The V89.2 `initialExpanded`
   // auto-expand-on-fresh-final was removed: it un-clamped every fresh
   // assistant reply, so a 50-line wall landed fully expanded in the
@@ -174,7 +180,7 @@ export function CollapsibleText(props: {
     bodyEl.style.maxHeight = 'none';
     const full = bodyEl.scrollHeight;
     bodyEl.style.maxHeight = prevMax;
-    setOverflows(full > COLLAPSED_MAX_PX + 2);
+    setOverflows(full > cap() + 2);
   };
 
   onMount(measure);
@@ -213,7 +219,7 @@ export function CollapsibleText(props: {
   // "trimmed" instead of "chopped".
   const collapsedStyle = () => collapsedNow()
     ? {
-        'max-height': `${COLLAPSED_MAX_PX}px`,
+        'max-height': `${cap()}px`,
         '-webkit-mask-image': COLLAPSED_MASK,
         'mask-image': COLLAPSED_MASK,
       }

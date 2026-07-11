@@ -637,7 +637,9 @@ function TaskRow(props: { task: ServerTask; archived?: boolean }) {
             class={`rt-task-summary rt-task-summary-${view()}${resOutcomeClass()}`}
             onClick={(e) => e.stopPropagation()}
           >
-            <CollapsibleText text={summaryText()} markdown />
+            {/* ~2 lines of the 11px summary, then "show more" — a teaser
+             *  per row, not the full 8-line summary inline. */}
+            <CollapsibleText text={summaryText()} markdown collapsedMaxPx={40} />
           </div>
         </Show>
       </div>
@@ -666,7 +668,22 @@ function fmtStamp(iso: string): string {
 /** Pull the `## Resolution` section body out of a task .md (Standard v26). */
 function extractResolution(body: string): string {
   const m = /^##\s+Resolution[ \t]*$([\s\S]*?)(?=^##\s|\Z)/m.exec(body);
-  return m ? (m[1] ?? '').trim() : '';
+  return stripResolutionMetaPrefix(m ? (m[1] ?? '').trim() : '');
+}
+
+/**
+ * Drop the legacy "who/when" italic prefix line the daemon used to write
+ * at the top of every resolution — `_Resolved by A023 via `conv` at …._`
+ * / `_Failed (exit 1) — … via `conv` at …._`. It's pure noise: the
+ * operator doesn't care which ephemeral subagent ran, and who/when
+ * already render on their own line (`resolved_by` + `completed_at`). The
+ * daemon stopped emitting it (2026-07-11), but tasks resolved before that
+ * still carry it on disk, so we strip it defensively on read.
+ */
+function stripResolutionMetaPrefix(text: string): string {
+  return text
+    .replace(/^\s*_(?:Resolved by|Failed)\b[^\n]*_\s*(?:\n+|$)/, '')
+    .trim();
 }
 
 /** The task description = the body intro (after frontmatter + H1 title,
@@ -737,14 +754,14 @@ function TaskDetail(props: { task: ServerTask; archived?: boolean; body: string 
       {/* execution summary + files — only for archived (the registry) */}
       <Show when={props.archived && resolution()}>
         <div class="rt-arch-block">
-          <span class="rt-arch-label">resumen</span>
+          <span class="rt-arch-label">summary</span>
           <div class="rt-arch-body"><CollapsibleText text={resolution()} markdown /></div>
         </div>
       </Show>
 
       <Show when={props.archived && (files().length > 0 || commits().length > 0)}>
         <div class="rt-arch-block">
-          <span class="rt-arch-label">{files().length > 0 ? 'ficheros' : 'commits'}</span>
+          <span class="rt-arch-label">{files().length > 0 ? 'files' : 'commits'}</span>
           <div class="rt-arch-files">
             <For each={files().length > 0 ? files() : commits()}>
               {(f) => <code class="rt-arch-file">{f}</code>}

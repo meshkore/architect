@@ -1,23 +1,25 @@
 import type { ServerTask } from '~/state/server';
 
-const STATUS_ORDER: Record<string, number> = {
-  active: 0,
-  next: 1,
-  planned: 2,
-  backlog: 3,
-  blocked: 4,
-  done: 5,
-};
-
 export const PHASE_ORDER = ['foundation', 'setup', 'build', 'test', 'docs', 'ship'];
 
+/**
+ * Sort tasks by the operator's MANUAL order — the numeric task id
+ * sequence (`1`, `1.1`, `2`, …) — and NOTHING else.
+ *
+ * Pre-2026-07-11 this bucketed by status first (active → top, done →
+ * bottom). That silently rewrote the roadmap: as a queue ran, finished
+ * tasks sank to the bottom and pending ones floated up, so the list no
+ * longer matched the order the operator curated. Operator field report:
+ * "las desordenan — quiero que el orden manual sea el que mando". Now
+ * status is a per-row *tint* only (the glyph + colour on each row already
+ * distinguishes done/working/pending); the vertical order stays put, so a
+ * done task #1 renders at the top as done, the live task #3 sits third,
+ * and so on down the list exactly as authored.
+ */
 export function sortTasks(tasks: ServerTask[]): ServerTask[] {
-  return [...tasks].sort((a, b) => {
-    const sa = STATUS_ORDER[a.status] ?? 9;
-    const sb = STATUS_ORDER[b.status] ?? 9;
-    if (sa !== sb) return sa - sb;
-    return a.id.localeCompare(b.id, undefined, { numeric: true });
-  });
+  return [...tasks].sort((a, b) =>
+    a.id.localeCompare(b.id, undefined, { numeric: true }),
+  );
 }
 
 export function phaseOf(t: ServerTask): string {

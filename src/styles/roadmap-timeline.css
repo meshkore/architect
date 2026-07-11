@@ -764,6 +764,16 @@
   border-left-color: color-mix(in srgb, #fbbf24 75%, transparent);
   color: #fcd34d;
 }
+/* The RES text is rendered as markdown into a `.chat-md` subtree, which
+ * sets its OWN text colour — so the outcome colour above never reached the
+ * words (the whole reason the operator saw the result line in flat grey
+ * "no se ve bien"). Force the prose to inherit the outcome colour. Inline
+ * `code` (file paths / commit SHAs in backticks) is deliberately left
+ * alone so it keeps its contrasting chip tint. */
+.rt-task-summary-res .chat-md,
+.rt-task-summary-res .chat-md :is(p, li, em, strong, span, h1, h2, h3, ul, ol, a) {
+  color: inherit;
+}
 /* On narrow widths the indent gets in the way — drop it under 520px. */
 @media (max-width: 520px) {
   .rt-task-summary,
