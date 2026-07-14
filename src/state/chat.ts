@@ -1291,13 +1291,28 @@ function hydrateFromSnapshot(snap: ChatSnapshotResponse): void {
         agentId,
         model: 'auto',
         client: c.client ?? undefined,
+        member: c.member ?? undefined,
         type: inferredType,
         title: agentId || c.conv,
         location: { type: 'local' },
       });
-    } else if (c.agent_id && !state.convMeta[c.conv]?.agentId) {
-      // Heal a stale local entry with the daemon-side agent_id.
-      setState('convMeta', c.conv, 'agentId', c.agent_id);
+    } else {
+      // Heal a stale local entry against the daemon-side snapshot. Both
+      // checked independently — a conv can be missing one without the
+      // other. `member` healing matters most: without it, a pre-existing
+      // conv (e.g. the master's own `_onboarding_v1`, bound server-side
+      // long before this field was surfaced here) never gets `member` in
+      // its dispatch body, so `_member_dispatch_prep` never runs and the
+      // member's client/model/provider dial has NO EFFECT on it (operator
+      // field report 2026-07-13 — switching architect-master to Z.AI did
+      // nothing for its normal chat turns, only for the external-ask
+      // gateway, which always resolves the member fresh).
+      if (c.agent_id && !state.convMeta[c.conv]?.agentId) {
+        setState('convMeta', c.conv, 'agentId', c.agent_id);
+      }
+      if (c.member && !state.convMeta[c.conv]?.member) {
+        setState('convMeta', c.conv, 'member', c.member);
+      }
     }
   }
   // V107.24 — Prune ghosts. convMeta lives in localStorage and survives

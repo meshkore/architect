@@ -428,6 +428,12 @@ export interface ChatConvSummary {
   /** DM-CLI-02 (daemon, multi-cli-clients) — per-conv CLI-client
    *  preference. `null` → claude-code. */
   client?: string | null;
+  /** multi-provider-agents (MPV1) — the LLM backend the claude-code
+   *  client talks to. `null`/'anthropic' → native. */
+  provider?: string | null;
+  /** agent-team (ATM10) — the roster member this conv is bound to.
+   *  `null` for convs not created from/bound to a team profile. */
+  member?: string | null;
   archived: boolean;
   archived_at: string | null;
   archived_by: string | null;
