@@ -2,3 +2,13 @@ node_modules/
 dist/
 .wrangler/
 .DS_Store
+
+# Never publish secrets — private keys, TLS material, Python bytecode caches.
+# (2026-07-22: every "publish signed bundle to cockpit CDN" release commit
+# had been sweeping .meshkore/scripts/tls/ + __pycache__ into
+# public/reference/cluster/scripts/ along with the legitimate daemon.py +
+# daemon.py.sig, leaking daemon.meshkore.com's live TLS private key.)
+**/__pycache__/
+*.pyc
+*.pem
+*.key
