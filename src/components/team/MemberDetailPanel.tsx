@@ -17,11 +17,9 @@ import { For, Show, createEffect, createMemo, createResource, createSignal } fro
 import { daemonStore } from '~/state/daemon';
 import { teamStore } from '~/state/team';
 import { clientsStore } from '~/state/clients';
-import { MODEL_CATALOG, EFFORT_CATALOG } from '~/lib/models';
+import { EFFORT_CATALOG, DEFAULT_PROVIDER, providerCatalog } from '~/lib/models';
 import { ensureMarked } from '~/lib/cdn-loaders';
 import { log } from '~/lib/log';
-
-const MODEL_GROUPS = ['Latest (alias)', 'Pinned version', 'Auto'] as const;
 
 export default function MemberDetailPanel(props: { memberId: string; onClose: () => void; onDeleted?: () => void }) {
   const client = () => daemonStore.state.client;
@@ -44,12 +42,26 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
   // Named `selectedClient` (not `client`) to avoid shadowing the
   // daemon-client `client()` accessor already in scope above.
   const [selectedClient, setSelectedClient] = createSignal<string>('claude-code');
+  // MPV1 (multi-provider-agents) — which LLM provider (Anthropic/ZAI) the
+  // claude-code client runs against. Changing it repopulates the model list
+  // from that provider's catalog. Only shown for claude-code.
+  const [provider, setProvider] = createSignal<string>(DEFAULT_PROVIDER);
   const catalog = createMemo(() => clientsStore.catalogFor(selectedClient()));
+  const providerOptions = createMemo(() => clientsStore.providersFor('claude-code'));
+  // Grouped model catalog for the active provider (claude-code path).
+  const providerModels = createMemo(() => providerCatalog(provider()));
+  const modelGroups = createMemo(() => [...new Set(providerModels().map((m) => m.group))]);
   const onClientChange = (id: string) => {
     setSelectedClient(id);
     const cat = clientsStore.catalogFor(id);
     setModel(cat.models[0]?.id ?? '');
     setEffort(cat.efforts[0]?.id ?? 'default');
+  };
+  const onProviderChange = (id: string) => {
+    setProvider(id);
+    // Reset to the new provider's first model so a leftover Anthropic id is
+    // never submitted for a ZAI member (and vice versa).
+    setModel(providerCatalog(id)[0]?.id ?? '');
   };
   const [prompt, setPrompt] = createSignal<string>('');
   const [refs, setRefs] = createSignal<string[]>([]);
@@ -71,6 +83,7 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
     const m = member();
     if (m) {
       setSelectedClient(m.client || 'claude-code');
+      setProvider(m.provider || DEFAULT_PROVIDER);
       setModel(m.model || 'sonnet');
       setEffort(m.effort || 'default');
       setRefs(Array.isArray(m.refs) ? [...m.refs] : []);
@@ -104,6 +117,7 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
   const token = () => teamStore.state.details[props.memberId]?.token ?? null;
   const [extOpen, setExtOpen] = createSignal(false);
   const [tokenRevealed, setTokenRevealed] = createSignal(false);
+  const [snippetOpen, setSnippetOpen] = createSignal(false);
   const [copied, setCopied] = createSignal<'token' | 'snippet' | null>(null);
   // Open the section by default for already-external members (the
   // member may not be loaded yet on mount, so seed reactively once).
@@ -256,7 +270,7 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
               <h3 class="font-mono text-[10px] uppercase tracking-[0.14em] text-gray-500">Client, model &amp; effort</h3>
               <button
                 type="button"
-                onClick={() => void saveSection('model', { client: selectedClient(), model: model(), effort: effort() })}
+                onClick={() => void saveSection('model', { client: selectedClient(), provider: selectedClient() === 'claude-code' ? provider() : DEFAULT_PROVIDER, model: model(), effort: effort() })}
                 disabled={savingSection() === 'model'}
                 class="text-[11px] font-mono uppercase tracking-wider text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1 disabled:opacity-50"
               >{savingSection() === 'model' ? 'Saving…' : 'Save'}</button>
@@ -268,13 +282,36 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
             >
               <For each={clientsStore.options()}>
                 {(c) => (
-                  <option value={c.id} disabled={c.installed === false}>
+                  <option value={c.id} disabled={c.installed === false || c.authConfigured === false}>
                     {c.label}
-                    {c.installed === false ? ' (not installed on daemon host)' : ''}
+                    {c.installed === false
+                      ? ' (not installed on daemon host)'
+                      : c.authConfigured === false
+                        ? ' (no API key — set in ⚙ General settings)'
+                        : ''}
                   </option>
                 )}
               </For>
             </select>
+            {/* Provider (MPV1) — claude-code only. Unavailable providers
+                (no key set in Config) are shown but not selectable. */}
+            <Show when={selectedClient() === 'claude-code'}>
+              <label class="block font-mono text-[9px] uppercase tracking-[0.14em] text-gray-600">Provider</label>
+              <select
+                value={provider()}
+                onChange={(e) => onProviderChange(e.currentTarget.value)}
+                class="w-full bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[13px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
+              >
+                <For each={providerOptions()}>
+                  {(pr) => (
+                    <option value={pr.id} disabled={!pr.available && pr.id !== provider()}>
+                      {pr.label}
+                      {pr.requiresKey && !pr.available ? ' (needs API key — set in Config)' : ''}
+                    </option>
+                  )}
+                </For>
+              </select>
+            </Show>
             <Show
               when={selectedClient() === 'claude-code'}
               fallback={
@@ -292,9 +329,9 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
                 onChange={(e) => setModel(e.currentTarget.value)}
                 class="w-full bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[13px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
               >
-                <For each={MODEL_GROUPS}>{(grp) => (
+                <For each={modelGroups()}>{(grp) => (
                   <optgroup label={grp}>
-                    <For each={MODEL_CATALOG.filter((m) => m.group === grp)}>
+                    <For each={providerModels().filter((m) => m.group === grp)}>
                       {(m) => <option value={m.id}>{m.label}</option>}
                     </For>
                   </optgroup>
@@ -499,26 +536,36 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
                     </div>
                   </div>
 
-                  {/* Connection snippet */}
+                  {/* Connection snippet — collapsed by default; Show/Hide toggles it. */}
                   <Show when={token()}>
                     <div class="space-y-1.5">
                       <div class="flex items-center justify-between">
                         <span class="font-mono text-[10px] uppercase tracking-wider text-gray-500">Connection snippet</span>
-                        <button
-                          type="button"
-                          onClick={() => void copy('snippet', connectionSnippet(token()!))}
-                          class="text-[11px] font-mono uppercase tracking-wider text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1"
-                          title="Copy the ready-to-paste snippet (includes the real token)"
-                        >{copied() === 'snippet' ? 'Copied ✓' : 'Copy'}</button>
+                        <div class="flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setSnippetOpen((v) => !v)}
+                            class="text-[11px] font-mono uppercase tracking-wider text-gray-400 hover:text-gray-100 border border-gray-700/50 hover:border-gray-500/60 rounded px-2 py-1"
+                            aria-expanded={snippetOpen()}
+                          >{snippetOpen() ? 'Hide' : 'Show'}</button>
+                          <button
+                            type="button"
+                            onClick={() => void copy('snippet', connectionSnippet(token()!))}
+                            class="text-[11px] font-mono uppercase tracking-wider text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1"
+                            title="Copy the ready-to-paste snippet (includes the real token)"
+                          >{copied() === 'snippet' ? 'Copied ✓' : 'Copy'}</button>
+                        </div>
                       </div>
-                      <pre class="bg-[#020617] border border-gray-700/40 rounded px-2.5 py-2 text-[11px] font-mono leading-relaxed text-gray-200 overflow-x-auto whitespace-pre">
-                        {connectionSnippet(tokenRevealed() ? token()! : '<token — use Copy>')}
-                      </pre>
-                      <p class="text-[10px] text-gray-600 leading-snug">
-                        Hand this to the consuming project. The copied version
-                        always contains the real token; the endpoint is this
-                        machine's shared daemon (loopback only).
-                      </p>
+                      <Show when={snippetOpen()}>
+                        <pre class="bg-[#020617] border border-gray-700/40 rounded px-2.5 py-2 text-[11px] font-mono leading-relaxed text-gray-200 overflow-x-auto whitespace-pre">
+                          {connectionSnippet(tokenRevealed() ? token()! : '<token — use Copy>')}
+                        </pre>
+                        <p class="text-[10px] text-gray-600 leading-snug">
+                          Hand this to the consuming project. The copied version
+                          always contains the real token; the endpoint is this
+                          machine's shared daemon (loopback only).
+                        </p>
+                      </Show>
                     </div>
                   </Show>
                 </Show>

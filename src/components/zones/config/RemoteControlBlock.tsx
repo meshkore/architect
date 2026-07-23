@@ -19,30 +19,66 @@
  * GET does NOT re-mint after a delete → "Mint token" = rotate.
  */
 
-import { Show, createResource, createSignal } from 'solid-js';
+import { Show, createEffect, createSignal } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { mcConfirm } from '~/lib/modal';
+import { withAuthRetry } from '~/lib/retry';
 import { Block } from './atoms';
 
 const COMMS_DOC = '.meshkore/docs/conventions/master-copilot.md';
 
+interface RemoteTokenState {
+  minted: boolean;
+  token: string | null;
+  error: string | null;
+}
+
 export function RemoteControlBlock() {
   const client = () => daemonStore.state.client;
 
-  // Load the current token. 404 → not minted (deleted); any other non-2xx
-  // is surfaced as an error string.
-  const [state, { refetch }] = createResource(async () => {
+  // 2026-07-09 fix — this block now mounts at APP BOOT (GeneralConfigDrawer
+  // is always in the DOM so its close animation can play), well before the
+  // daemon client attaches. A one-shot `createResource(fn)` with no
+  // reactive `source` param captures that early `null` client FOREVER and
+  // never refetches once the daemon connects — the exact "Daemon offline /
+  // not minted" bug the operator hit, even though the daemon was live and
+  // the token was already auto-minted at boot (`daemon.py` calls
+  // `_ensure_remote_token()`). Fixed the same way `CredentialsBlock` (V107.16)
+  // already solved this: a plain signal refreshed from a `createEffect`
+  // keyed on `daemonStore.state.client`, so it reruns the moment the client
+  // attaches (or changes on a project switch) — not just once at mount.
+  const [state, setState] = createSignal<RemoteTokenState>({ minted: false, token: null, error: null });
+
+  const refetch = async (): Promise<void> => {
     const c = client();
-    if (!c) return { minted: false, token: null as string | null, error: 'Daemon offline.' };
-    const r = await c.remoteTokenGet();
-    if (r.ok) {
-      return { minted: r.data.minted !== false && !!r.data.token, token: r.data.token ?? null, error: null as string | null };
+    if (!c) {
+      setState({ minted: false, token: null, error: null });
+      return;
     }
-    if (r.status === 404) return { minted: false, token: null, error: null as string | null };
-    return { minted: false, token: null, error: `HTTP ${r.status}` };
+    // `withAuthRetry` absorbs a 401 that happens right after the daemon
+    // (re)connects (observed: fails on first load, succeeds a few seconds
+    // later on a manual retry) — the operator should never have to click a
+    // button for a request that "can't fail"; give it the same few seconds
+    // automatically before ever showing an error.
+    const r = await withAuthRetry(() => c.remoteTokenGet());
+    if (r.ok) {
+      setState({ minted: r.data.minted !== false && !!r.data.token, token: r.data.token ?? null, error: null });
+      return;
+    }
+    if (r.status === 404) {
+      setState({ minted: false, token: null, error: null });
+      return;
+    }
+    setState({ minted: false, token: null, error: `HTTP ${r.status}` });
+  };
+
+  createEffect(() => {
+    client(); // establishes the dependency — reruns on attach/project-switch
+    void refetch();
   });
 
   const [revealed, setRevealed] = createSignal(false);
+  const [snippetOpen, setSnippetOpen] = createSignal(false);
   const [copied, setCopied] = createSignal<'token' | 'snippet' | null>(null);
   const [busy, setBusy] = createSignal<'rotate' | 'delete' | 'mint' | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
@@ -170,7 +206,14 @@ export function RemoteControlBlock() {
       </div>
 
       <Show when={state()?.error}>
-        <div class="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-200 mb-2">{state()?.error}</div>
+        <div class="flex items-center justify-between gap-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-200 mb-2">
+          <span>{state()?.error}</span>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            class="flex-shrink-0 text-[11px] font-mono uppercase tracking-wider text-red-200 hover:text-white border border-red-500/40 hover:border-red-400/70 rounded px-2 py-1"
+          >Retry</button>
+        </div>
       </Show>
       <Show when={actionError()}>
         <div class="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-200 mb-2">{actionError()}</div>
@@ -237,27 +280,38 @@ export function RemoteControlBlock() {
             >{busy() === 'delete' ? 'Revoking…' : 'Revoke'}</button>
           </div>
 
-          {/* Connection snippet */}
+          {/* Connection snippet — collapsed by default (it's a wall of
+              text most operators only need once); Show/Hide toggles it. */}
           <div class="space-y-1.5">
             <div class="flex items-center justify-between">
               <span class="font-mono text-[10px] uppercase tracking-wider text-gray-500">Connection snippet</span>
-              <button
-                type="button"
-                onClick={() => void copy('snippet', connectionSnippet(token()!))}
-                class="text-[11px] font-mono uppercase tracking-wider text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1"
-                title="Copy the ready-to-paste snippet (includes the real token)"
-              >{copied() === 'snippet' ? 'Copied ✓' : 'Copy'}</button>
+              <div class="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSnippetOpen((v) => !v)}
+                  class="text-[11px] font-mono uppercase tracking-wider text-gray-400 hover:text-gray-100 border border-gray-700/50 hover:border-gray-500/60 rounded px-2 py-1"
+                  aria-expanded={snippetOpen()}
+                >{snippetOpen() ? 'Hide' : 'Show'}</button>
+                <button
+                  type="button"
+                  onClick={() => void copy('snippet', connectionSnippet(token()!))}
+                  class="text-[11px] font-mono uppercase tracking-wider text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1"
+                  title="Copy the ready-to-paste snippet (includes the real token)"
+                >{copied() === 'snippet' ? 'Copied ✓' : 'Copy'}</button>
+              </div>
             </div>
-            <pre class="bg-[#020617] border border-gray-700/40 rounded px-2.5 py-2 text-[11px] font-mono leading-relaxed text-gray-200 overflow-x-auto whitespace-pre">
-              {connectionSnippet(revealed() ? token()! : '<token — use Copy>')}
-            </pre>
-            <p class="text-[10px] text-gray-600 leading-snug">
-              Hand this to your personal agent. The copied version always
-              contains the real token. Set <code class="font-mono">X-MeshKore-Project</code>{' '}
-              per call to pick the target project; the endpoint is this
-              machine's shared daemon (loopback only). Full playbook:{' '}
-              <code class="font-mono">{COMMS_DOC}</code>.
-            </p>
+            <Show when={snippetOpen()}>
+              <pre class="bg-[#020617] border border-gray-700/40 rounded px-2.5 py-2 text-[11px] font-mono leading-relaxed text-gray-200 overflow-x-auto whitespace-pre">
+                {connectionSnippet(revealed() ? token()! : '<token — use Copy>')}
+              </pre>
+              <p class="text-[10px] text-gray-600 leading-snug">
+                Hand this to your personal agent. The copied version always
+                contains the real token. Set <code class="font-mono">X-MeshKore-Project</code>{' '}
+                per call to pick the target project; the endpoint is this
+                machine's shared daemon (loopback only). Full playbook:{' '}
+                <code class="font-mono">{COMMS_DOC}</code>.
+              </p>
+            </Show>
           </div>
         </div>
       </Show>

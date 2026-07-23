@@ -5,6 +5,7 @@ import { log } from '~/lib/log';
 import { installChunkGuard } from '~/lib/chunk-guard';
 import { startCockpitVersionPoll, COCKPIT_COMMIT, COCKPIT_VERSION } from '~/lib/cockpit-version';
 import { installDebugTransport } from '~/lib/debug-transport';
+import { installGlobalErrorCapture } from '~/lib/global-errors';
 import { auditLocalStorage } from '~/lib/storage-audit';
 import './index.css';
 
@@ -19,6 +20,11 @@ auditLocalStorage();
 // so the boot line below is captured. Feature-gated server-side; no-op
 // if the daemon doesn't advertise `debug.stream.v1`.
 installDebugTransport();
+
+// 2026-07-09 — Route uncaught errors + unhandled rejections into the same sink
+// so a crash (e.g. a reactive stack overflow) shows up in the daemon debug
+// stream, not just the dead browser tab. Installed right after the sink.
+installGlobalErrorCapture();
 
 log.info('script loaded', { version: COCKPIT_VERSION, commit: COCKPIT_COMMIT });
 

@@ -17,10 +17,8 @@ import { Modal } from '~/components/Modal';
 import { daemonStore } from '~/state/daemon';
 import { teamStore } from '~/state/team';
 import { clientsStore } from '~/state/clients';
-import { MODEL_CATALOG, EFFORT_CATALOG } from '~/lib/models';
+import { EFFORT_CATALOG, DEFAULT_PROVIDER, providerCatalog } from '~/lib/models';
 import type { TeamCreateBody } from '~/lib/daemon-client';
-
-const MODEL_GROUPS = ['Latest (alias)', 'Pinned version', 'Auto'] as const;
 
 type Step = 'input' | 'loading' | 'review';
 
@@ -41,7 +39,12 @@ export default function NewMemberDialog(props: { onClose: () => void; onCreated?
   // Default claude-code; changing it re-populates model/effort below
   // from that client's own catalog (clientsStore.catalogFor).
   const [selectedClient, setSelectedClient] = createSignal('claude-code');
+  // MPV1 (multi-provider-agents) — provider for the claude-code client.
+  const [provider, setProvider] = createSignal(DEFAULT_PROVIDER);
   const catalog = createMemo(() => clientsStore.catalogFor(selectedClient()));
+  const providerOptions = createMemo(() => clientsStore.providersFor('claude-code'));
+  const providerModels = createMemo(() => providerCatalog(provider()));
+  const modelGroups = createMemo(() => [...new Set(providerModels().map((m) => m.group))]);
   const onClientChange = (id: string) => {
     setSelectedClient(id);
     const cat = clientsStore.catalogFor(id);
@@ -50,6 +53,10 @@ export default function NewMemberDialog(props: { onClose: () => void; onCreated?
     // client's member.
     setModel(cat.models[0]?.id ?? '');
     setEffort(cat.efforts[0]?.id ?? 'default');
+  };
+  const onProviderChange = (id: string) => {
+    setProvider(id);
+    setModel(providerCatalog(id)[0]?.id ?? '');
   };
   const [refs, setRefs] = createSignal<string[]>([]);
   const [prompt, setPrompt] = createSignal('');
@@ -99,6 +106,7 @@ export default function NewMemberDialog(props: { onClose: () => void; onCreated?
       name: name().trim(),
       emoji: emoji().trim() || '🤖',
       client: selectedClient(),
+      provider: selectedClient() === 'claude-code' ? provider() : DEFAULT_PROVIDER,
       model: model(),
       effort: effort(),
       kind: 'profile',
@@ -249,14 +257,39 @@ export default function NewMemberDialog(props: { onClose: () => void; onCreated?
               >
                 <For each={clientsStore.options()}>
                   {(c) => (
-                    <option value={c.id} disabled={c.installed === false}>
+                    <option value={c.id} disabled={c.installed === false || c.authConfigured === false}>
                       {c.label}
-                      {c.installed === false ? ' (not installed on daemon host)' : ''}
+                      {c.installed === false
+                        ? ' (not installed on daemon host)'
+                        : c.authConfigured === false
+                          ? ' (no API key — set in ⚙ General settings)'
+                          : ''}
                     </option>
                   )}
                 </For>
               </select>
             </div>
+
+            {/* Provider — MPV1, claude-code only. Repopulates Model below. */}
+            <Show when={selectedClient() === 'claude-code'}>
+              <div>
+                <label class="block font-mono text-[10px] uppercase tracking-[0.14em] text-gray-500 mb-1.5">Provider</label>
+                <select
+                  value={provider()}
+                  onChange={(e) => onProviderChange(e.currentTarget.value)}
+                  class="w-full bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[13px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
+                >
+                  <For each={providerOptions()}>
+                    {(pr) => (
+                      <option value={pr.id} disabled={!pr.available && pr.id !== provider()}>
+                        {pr.label}
+                        {pr.requiresKey && !pr.available ? ' (needs API key — set in Config)' : ''}
+                      </option>
+                    )}
+                  </For>
+                </select>
+              </div>
+            </Show>
 
             {/* Model — required picker */}
             <div>
@@ -278,9 +311,9 @@ export default function NewMemberDialog(props: { onClose: () => void; onCreated?
                   onChange={(e) => setModel(e.currentTarget.value)}
                   class="w-full bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[13px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
                 >
-                  <For each={MODEL_GROUPS}>{(grp) => (
+                  <For each={modelGroups()}>{(grp) => (
                     <optgroup label={grp}>
-                      <For each={MODEL_CATALOG.filter((m) => m.group === grp)}>
+                      <For each={providerModels().filter((m) => m.group === grp)}>
                         {(m) => <option value={m.id}>{m.label}</option>}
                       </For>
                     </optgroup>

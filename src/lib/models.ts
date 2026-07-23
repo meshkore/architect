@@ -25,8 +25,9 @@ export interface ModelMeta {
   short: string;
   /** One-line hint shown under the picker option. */
   hint: string;
-  /** Grouping for the picker's <optgroup>. */
-  group: 'Latest (alias)' | 'Pinned version' | 'Auto';
+  /** Grouping for the picker's <optgroup>. Provider-relative — Anthropic
+   *  uses alias/pinned/auto; ZAI uses 'GLM'. */
+  group: string;
 }
 
 // Aliases track the newest model of each family automatically — the
@@ -52,6 +53,46 @@ export const MODEL_CATALOG: readonly ModelMeta[] = [
   { id: 'auto', label: 'Auto', short: 'auto', hint: 'Let the CLI / account decide (≈ latest Sonnet)', group: 'Auto' },
 ];
 
+// ── multi-provider-agents (MPV1) ─────────────────────────────────────
+//
+// A `claude-code` team member can run against a PROVIDER (LLM backend):
+// Anthropic native (default) or ZAI's GLM models via its Anthropic-
+// compatible endpoint. Provider is orthogonal to `client`/`effort`;
+// selecting it repopulates the model dropdown from that provider's
+// catalog. Catalogs are static here (mirrors daemon providers.py; upstream
+// lists aren't fetched live) and the daemon reports per-provider
+// availability via GET /clients. Adding a provider = one entry.
+
+/** ZAI's GLM catalog — the model dropdown when Provider = ZAI. */
+export const GLM_CATALOG: readonly ModelMeta[] = [
+  { id: 'glm-4.6',     label: 'GLM-4.6',      short: 'glm4.6', hint: 'ZAI · GLM-4.6 · strongest GLM', group: 'GLM' },
+  { id: 'glm-4.5-air', label: 'GLM-4.5 Air',  short: 'glmair', hint: 'ZAI · GLM-4.5 Air · light/fast (also the small-model default)', group: 'GLM' },
+];
+
+export interface ProviderMeta {
+  id: string;
+  label: string;
+  /** true when the provider needs an API key set in Config → Clients &
+   *  providers before it can be selected (ZAI); false for Anthropic
+   *  (native login/config). */
+  requiresKey: boolean;
+}
+
+/** Provider metadata for the member-editor dropdown. Availability
+ *  (key present + enabled) is layered on top from the daemon's
+ *  GET /clients `providers` list — see state/clients.ts `providersFor`. */
+export const PROVIDERS: readonly ProviderMeta[] = [
+  { id: 'anthropic', label: 'Anthropic',  requiresKey: false },
+  { id: 'zai',       label: 'ZAI (GLM)',  requiresKey: true },
+];
+
+export const DEFAULT_PROVIDER = 'anthropic';
+
+/** The model catalog for a provider id. Unknown → Anthropic (safe). */
+export function providerCatalog(providerId: string | null | undefined): readonly ModelMeta[] {
+  return (providerId || DEFAULT_PROVIDER).toLowerCase() === 'zai' ? GLM_CATALOG : MODEL_CATALOG;
+}
+
 export interface EffortMeta {
   id: string;
   label: string;
@@ -76,7 +117,7 @@ export const EFFORT_CATALOG: readonly EffortMeta[] = [
 export const DEFAULT_MODEL = 'opus';
 export const DEFAULT_EFFORT = 'default';
 
-const MODEL_BY_ID = new Map(MODEL_CATALOG.map((m) => [m.id, m]));
+const MODEL_BY_ID = new Map([...MODEL_CATALOG, ...GLM_CATALOG].map((m) => [m.id, m]));
 
 /** Short badge text for a model id. Known ids use their catalog
  *  `short`; unknown explicit ids fall back to the family word. */
@@ -87,6 +128,11 @@ export function modelShort(id: string | null | undefined): string {
   // Family fallback for unlisted variants (e.g. a [1m]-suffixed or newer id).
   // Fable/Mythos version as "5" (single-number line); opus/sonnet/haiku as
   // "<letter><major>.<minor>" from a "4-8"-style id.
+  const glm = id.match(/glm/i);
+  if (glm) {
+    const v = id.match(/glm-?(\d+(?:\.\d+)?)/i);
+    return v ? `glm${v[1]}` : 'glm';
+  }
   const fm = id.match(/fable|mythos/i);
   if (fm) {
     const v = id.match(/-(\d+)(?![\d-])/);

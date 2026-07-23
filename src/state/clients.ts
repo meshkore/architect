@@ -18,7 +18,7 @@
 
 import { createStore } from 'solid-js/store';
 import { log } from '~/lib/log';
-import type { ClientInfo, DaemonClient } from '~/lib/daemon-client';
+import type { ClientInfo, DaemonClient, ProviderInfo } from '~/lib/daemon-client';
 import { EFFORT_CATALOG, MODEL_CATALOG } from '~/lib/models';
 
 interface ClientsStoreState {
@@ -102,12 +102,27 @@ function options(): ClientInfo[] {
   return [fallbackClaude, ...state.list];
 }
 
+/** MPV1 (multi-provider-agents) — the provider list for a client's
+ *  Provider dropdown. Only `claude-code` has providers; other clients
+ *  return []. Sourced from the daemon's GET /clients `providers` field;
+ *  falls back to Anthropic-only (available) when the daemon is older than
+ *  MPV1 or hasn't answered yet — so the dropdown is never empty and ZAI is
+ *  simply hidden until a capable daemon reports it. */
+function providersFor(clientId: string | null | undefined): ProviderInfo[] {
+  const id = (clientId || 'claude-code').toLowerCase();
+  if (id !== 'claude-code') return [];
+  const hit = state.list.find((c) => c.id === 'claude-code');
+  if (hit?.providers && hit.providers.length) return hit.providers;
+  return [{ id: 'anthropic', label: 'Anthropic', requiresKey: false, available: true }];
+}
+
 export const clientsStore = {
   state,
   bindCluster,
   hydrate,
   catalogFor,
   options,
+  providersFor,
 };
 
 log.debug('state/clients loaded');

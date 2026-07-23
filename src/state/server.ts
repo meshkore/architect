@@ -20,7 +20,7 @@
  */
 
 import { createStore } from 'solid-js/store';
-import { createMemo, createEffect, createRoot, createSignal } from 'solid-js';
+import { createMemo, createEffect, createRoot, createSignal, untrack } from 'solid-js';
 import type { DaemonClient, ChatConvSummary, LiveTaskEntry } from '~/lib/daemon-client';
 import { chatStore } from '~/state/chat';
 import { log } from '~/lib/log';
@@ -478,10 +478,37 @@ export const activeAgentByTask = createMemo<Record<string, string>>(() => {
 const [taskConvMap, setTaskConvMap] = createStore<Record<string, string>>({});
 createRoot(() => {
   createEffect(() => {
-    for (const c of allConvs()) {
+    // `allConvs()` is the ONLY reactive dependency of this effect.
+    const convs = allConvs();
+    // CRITICAL — a task routinely has MORE THAN ONE conv (retries, multiple
+    // work sessions: e.g. ikamiro's OPS10 → 3 convs, API45 → 4). The old code
+    // wrote `setTaskConvMap(task, conv)` for EACH conv while ALSO reading
+    // `taskConvMap[task]` in the same effect, so the store subscription
+    // re-fired the effect and the value ping-ponged between the rival convs
+    // forever → an unbounded reactive flush → "Maximum call stack size
+    // exceeded" on boot of any project with retries (field 2026-07-09).
+    //
+    // Fix: pick ONE conv per task DETERMINISTICALLY (prefer a live conv; break
+    // ties by the greatest conv id — a pure function of the data, independent
+    // of iteration order AND of the current map), then write only diffs with
+    // the current map read UNTRACKED so our own writes can't re-trigger us.
+    const desired = new Map<string, { conv: string; live: boolean }>();
+    for (const c of convs) {
       if (!c.task_id || !c.conv) continue;
-      if (taskConvMap[c.task_id] !== c.conv) setTaskConvMap(c.task_id, c.conv);
+      const cur = desired.get(c.task_id);
+      if (
+        !cur ||
+        (c.live && !cur.live) ||
+        (!!c.live === cur.live && c.conv > cur.conv)
+      ) {
+        desired.set(c.task_id, { conv: c.conv, live: !!c.live });
+      }
     }
+    untrack(() => {
+      for (const [taskId, { conv }] of desired) {
+        if (taskConvMap[taskId] !== conv) setTaskConvMap(taskId, conv);
+      }
+    });
   });
 });
 /** Reset the accumulated task→conv links (called on cluster switch). */

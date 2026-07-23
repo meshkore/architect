@@ -1,12 +1,13 @@
 /** Header — V64 layout: logo + project plate · zone buttons + Config tab · daemon/cluster pills. */
 
-import { Show } from 'solid-js';
+import { Show, createSignal } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { activeProject } from '~/state/projects';
 import { uiStore, type Zone } from '~/state/ui';
 import { mcModal } from '~/lib/modal';
 import { useTlsDaemon, LOOPBACK_HOSTNAME } from '~/lib/transport';
 import ThemePicker from '~/components/ThemePicker';
+import GeneralConfigDrawer from '~/components/GeneralConfigDrawer';
 
 const BUILD_VERSION = (import.meta.env.VITE_BUILD_VERSION as string | undefined) ?? 'dev';
 const BUILD_COMMIT  = (import.meta.env.VITE_BUILD_COMMIT  as string | undefined) ?? '';
@@ -104,6 +105,10 @@ function ZoneIcon(props: { id: Zone }) {
 }
 
 export default function Header() {
+  // Machine-level "General settings" right slide-over (daemon · remote
+  // control · clients & providers). Distinct from the per-project Config
+  // zone tab — see GeneralConfigDrawer.
+  const [genOpen, setGenOpen] = createSignal(false);
   return (
     <header class="sticky top-0 z-40 bg-gray-950/95 backdrop-blur-xl border-b border-gray-800/60 shadow-sm">
       <div class="h-12 flex items-center gap-2 px-3">
@@ -125,8 +130,10 @@ export default function Header() {
           <ProjectPlate />
         </div>
 
-        {/* CENTER — zone buttons + Config text tab. Hidden on small viewports. */}
-        <div class="hidden md:flex items-center gap-0 flex-shrink-0 ml-1">
+        {/* CENTER — zone buttons + Config text tab. Hidden on small viewports.
+            Separation comes from the row `gap`, NOT from inner side-padding,
+            so the selected pill hugs its label with even padding. */}
+        <div class="hidden md:flex items-center gap-1 flex-shrink-0 ml-1">
           {ZONES.map((z) => (
             <ZoneButton zone={z} />
           ))}
@@ -134,14 +141,30 @@ export default function Header() {
 
         <div class="flex-1" />
 
-        {/* RIGHT — daemon pill (carries version) + theme picker.
-            The cluster name is already shown on the left ProjectPlate;
-            we no longer repeat it on the right. */}
+        {/* RIGHT — daemon pill + general-settings gear + theme picker.
+            The gear opens the MACHINE-LEVEL settings (daemon · remote
+            control · providers) as a right slide-over — deliberately NOT
+            in the per-project Config zone tab. Sits beside the theme
+            picker because both are cross-project, browser/machine-scoped. */}
         <div class="flex items-center gap-1.5 flex-shrink-0">
           <DaemonPill />
+          <button
+            type="button"
+            onClick={() => setGenOpen(true)}
+            title="General settings — daemon, remote control, providers (machine-level)"
+            aria-label="Open general settings"
+            aria-expanded={genOpen()}
+            class="inline-flex items-center justify-center w-7 h-7 rounded border border-transparent text-gray-400 hover:text-gray-100 hover:border-gray-700 transition-colors"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+            </svg>
+          </button>
           <ThemePicker />
         </div>
       </div>
+      <GeneralConfigDrawer open={genOpen()} onClose={() => setGenOpen(false)} />
     </header>
   );
 }
@@ -152,9 +175,9 @@ function ZoneButton(props: { zone: typeof ZONES[number] }) {
     <button
       type="button"
       onClick={() => uiStore.setActiveZone(props.zone.id)}
-      class={`px-2 py-1.5 text-[12px] transition flex items-center gap-1.5 rounded border ${
+      class={`px-2 py-1 text-[12px] leading-none transition flex items-center gap-1.5 rounded-md border ${
         active()
-          ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10'
+          ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
           : 'text-gray-500 hover:text-gray-200 border-transparent hover:border-gray-800/60'
       }`}
       title={props.zone.title}

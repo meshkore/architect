@@ -2,6 +2,7 @@ import { Show, createSignal } from 'solid-js';
 import { Modal, type ModalButton } from '~/components/Modal';
 import * as kp from '~/lib/known-projects';
 import { projectsStore } from '~/state/projects';
+import { daemonStore } from '~/state/daemon';
 import StepSwitch, { type Step } from './add-project/StepSwitch';
 import { basename, type AddProjectAnswers } from './add-project/genPrompt';
 
@@ -43,13 +44,19 @@ function AddProjectWizard(props: { onClose: () => void }) {
     return kp.list().filter((k) => !livePorts.has(k.port));
   };
 
+  // When a central daemon is already attached, the final step registers the
+  // project directly (POST /projects) — the DEVICES/DATA answers only feed the
+  // legacy paste-a-prompt fallback, so skip them and go straight to PROMPT.
+  const daemonLive = () => !!daemonStore.state.client;
+  const afterTarget = (): Step => (daemonLive() ? 'PROMPT' : 'DEVICES');
+
   const advanceFromPath = () => {
     const a = answers();
     if (a.startKind === 'existing') {
       if (a.path && !a.projectName) patch({ projectName: basename(a.path) });
       go('NAME');
     } else {
-      go('DEVICES');
+      go(afterTarget());
     }
   };
 
@@ -58,7 +65,7 @@ function AddProjectWizard(props: { onClose: () => void }) {
     const a = answers();
     if (step() === 'NAME') {
       if (!a.projectName.trim()) return;
-      go(a.startKind === 'existing' ? 'DEVICES' : 'PATH');
+      go(a.startKind === 'existing' ? afterTarget() : 'PATH');
     } else if (step() === 'PATH') {
       advanceFromPath();
     }
@@ -75,7 +82,7 @@ function AddProjectWizard(props: { onClose: () => void }) {
       { id: 'skip', label: 'Skip — let the agent ask' },
       { id: 'continue', label: 'Continue →', primary: true },
     ];
-    if (s === 'PROMPT') return [{ id: 'close', label: 'Close — keep scanning' }];
+    if (s === 'PROMPT') return [{ id: 'close', label: daemonLive() ? 'Close' : 'Close — keep scanning' }];
     return [];
   };
 

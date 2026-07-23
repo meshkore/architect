@@ -55,6 +55,16 @@ export interface StorageUsageResponse {
   cache_ttl_secs: number;
 }
 
+/** DC-5 (daemon-centralized) — POST /projects 201 body. `id` is the cluster
+ *  id (stable, portable); `scaffolded` true when the daemon created a fresh
+ *  `.meshkore/` for a folder that had none. */
+export interface ProjectRegisterResponse {
+  id: string;
+  name: string;
+  path: string;
+  scaffolded: boolean;
+}
+
 export interface HealthResponse {
   ok: boolean;
   identity: string;
@@ -570,6 +580,27 @@ export interface ClientInfo {
   authConfigured: boolean | null;
   models: { id: string; label: string }[];
   efforts: { id: string; label: string }[];
+  /** MPV1 (multi-provider-agents) — present only on the `claude-code`
+   *  entry: which LLM providers this client can run against and whether
+   *  each is usable right now (key present + enabled). Absent on a daemon
+   *  older than MPV1 → the member UI falls back to Anthropic-only. Carries
+   *  NO key material. */
+  providers?: ProviderInfo[];
+  /** Follow-up (same initiative) — present only on Codex/Gemini: whether a
+   *  daemon-managed API key is stored for this client (Config → General
+   *  settings). Absent for claude-code (its providers carry their own). */
+  keyPresent?: boolean;
+}
+
+/** MPV1 — one provider's availability for the member-editor dropdown.
+ *  `available` = enabled AND (no key required OR a key is set). */
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  requiresKey: boolean;
+  available: boolean;
+  defaultModel?: string | null;
+  models?: { id: string; label: string }[];
 }
 
 /** TEG-3 — who can reach this member. `internal` (default): cockpit
@@ -590,6 +621,9 @@ export interface TeamMember {
    *  turns. Absent (every member from before this field existed) means
    *  `claude-code`. */
   client?: string;
+  /** MPV1 — which LLM provider (backend) instances run against, for the
+   *  claude-code client. Absent means `anthropic` (the default). */
+  provider?: string;
   /** Default model for instances of this member (required by the schema). */
   model: string;
   effort?: string;
@@ -621,6 +655,8 @@ export interface TeamCreateBody {
   emoji: string;
   /** DM-CLI-02 — omit for claude-code (the default). */
   client?: string;
+  /** MPV1 — omit for anthropic (the default provider). */
+  provider?: string;
   model: string;
   effort?: string;
   kind?: 'profile';
@@ -639,6 +675,8 @@ export interface TeamPatchBody {
   color?: string;
   /** DM-CLI-02 — switch which CLI dispatches this member's turns. */
   client?: string;
+  /** MPV1 — switch which LLM provider (backend) this member runs against. */
+  provider?: string;
   model?: string;
   effort?: string;
   refs?: string[];
@@ -678,6 +716,53 @@ export interface RemoteTokenResponse {
   rotated_at?: string;
   /** e.g. "remote_token_absent" in the 404 body. */
   error?: string;
+}
+
+// ─── multi-provider-agents (MPV1 + follow-up) — machine-global AI-provider
+// credential config ─────────────────────────────────────────────────────
+//
+// GET/POST /config/providers (portal-gated). Machine-level (one per
+// daemon) — shown in the General settings drawer, not per-project. ONE
+// unified list covers every daemon-managed AI credential: claude-code's
+// own providers (Anthropic — no key; ZAI — key + swappable endpoint) PLUS
+// the other CLIENTS that authenticate via a single stored key (Codex,
+// Gemini — `hasEndpoint: false`, no base-url/small-model). API key VALUES
+// are NEVER in these payloads — only a `keyPresent` boolean; the key is
+// written via the POST `key` field and stored server-side (chmod 0600).
+export interface ProviderConfigInfo {
+  id: string;
+  label: string;
+  requiresKey: boolean;
+  /** true only for claude-code providers that swap an Anthropic-compatible
+   *  endpoint (today: ZAI) — gates whether the cockpit shows the base-url /
+   *  small-model inputs. Codex/Gemini are false: they only ever talk to
+   *  their own vendor's API. */
+  hasEndpoint: boolean;
+  enabled: boolean;
+  baseUrl: string;
+  smallFastModel: string;
+  keyPresent: boolean;
+  available: boolean;
+  models: { id: string; label: string }[];
+}
+export interface ProvidersConfigResponse {
+  providers: ProviderConfigInfo[];
+}
+/** Partial patch for POST /config/providers. `key` sets/replaces the API
+ *  key; `clear_key: true` deletes it. `base_url`/`small_fast_model` are
+ *  accepted but ignored for entries where `hasEndpoint` is false. Unknown
+ *  ids are ignored server-side. */
+export interface ProvidersConfigPatch {
+  providers?: Record<
+    string,
+    {
+      enabled?: boolean;
+      base_url?: string;
+      small_fast_model?: string;
+      key?: string;
+      clear_key?: boolean;
+    }
+  >;
 }
 
 // ─── Client ─────────────────────────────────────────────────────────
@@ -856,6 +941,18 @@ export class DaemonClient {
    *  "fall back to the claude-code-only default", not a hard error. */
   async clients(signal?: AbortSignal): Promise<Result<ClientInfo[]>> {
     return this.request<ClientInfo[]>('GET', '/clients', undefined, signal);
+  }
+
+  /** DC-5 (daemon-centralized) — POST /projects. Register/adopt an existing
+   *  folder (`{ path }`) or create-from-scratch under an allowlisted parent
+   *  (`{ parent, name }`); the daemon scaffolds `.meshkore/` if absent and
+   *  returns the new `{ id, name, path, scaffolded }`. GLOBAL endpoint (no
+   *  project header); portal-token gated. */
+  async projectRegister(
+    body: { path: string; name?: string } | { parent: string; name: string },
+    signal?: AbortSignal,
+  ): Promise<Result<ProjectRegisterResponse>> {
+    return this.request<ProjectRegisterResponse>('POST', '/projects', body, signal);
   }
 
   async cronList(signal?: AbortSignal): Promise<Result<CronListResponse>> {
@@ -1258,6 +1355,28 @@ export class DaemonClient {
    *  new one is minted via rotate. */
   async remoteTokenDelete(signal?: AbortSignal): Promise<Result<{ deleted: boolean }>> {
     return this.request<{ deleted: boolean }>('DELETE', '/remote/token', undefined, signal);
+  }
+
+  // ── multi-provider-agents (MPV1) — machine-global clients/providers cfg ──
+  //
+  // Portal-gated, machine-level (no project header needed). GET returns the
+  // full config incl. per-provider `keyPresent` (never the key value); POST
+  // applies a partial patch and returns the fresh config. A daemon older
+  // than MPV1 404s on both — the Config-General block treats that as
+  // "feature unavailable", not an error.
+
+  /** GET /config/providers — enabled clients + per-provider config. */
+  async providerConfigGet(signal?: AbortSignal): Promise<Result<ProvidersConfigResponse>> {
+    return this.request<ProvidersConfigResponse>('GET', '/config/providers', undefined, signal);
+  }
+
+  /** POST /config/providers — set client/provider enable flags, provider
+   *  base-url/small-model, and set/clear API keys. Returns the fresh config. */
+  async providerConfigSet(
+    body: ProvidersConfigPatch,
+    signal?: AbortSignal,
+  ): Promise<Result<ProvidersConfigResponse>> {
+    return this.request<ProvidersConfigResponse>('POST', '/config/providers', body, signal);
   }
 
   async taskTransition(id: string, status: string, signal?: AbortSignal): Promise<Result<unknown>> {

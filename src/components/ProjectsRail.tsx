@@ -24,7 +24,7 @@
  * Styling lives entirely in src/styles/projects-rail.css.
  */
 
-import { For, Show, createMemo, createEffect, onCleanup, onMount } from 'solid-js';
+import { For, Show, createMemo, createEffect, onCleanup, onMount, untrack } from 'solid-js';
 import { uiStore } from '~/state/ui';
 import ProjectsRailRow from '~/components/ProjectsRailRow';
 import { PORT_LO, PORT_HI, discoverProjects, scanning, setScanning } from '~/components/projects-rail/discovery';
@@ -89,15 +89,26 @@ export default function ProjectsRail() {
   createEffect(() => {
     if (!scanning()) return;
     let stopped = false;
+    let inFlight = false;
     const startedAt = Date.now();
     const MAX_MS = 3 * 60_000; // safety cap — generous enough to paste + launch
+    // CRITICAL: `discoverProjects` READS reactive state (kp.list()) and later
+    // MUTATES it (kp.forget prunes ghosts) + writes livePorts/liveClusters/the
+    // projects store. If it runs inside this effect's tracking scope, those
+    // writes re-schedule THIS effect → it ticks again → writes again → an
+    // unbounded reactive flush that overflows the stack ("Maximum call stack
+    // size exceeded", field 2026-07-09). `untrack` severs the dependency so the
+    // effect depends ONLY on `scanning()`. `inFlight` also coalesces overlapping
+    // ticks (the 3.5s interval must never stack a second full sweep on a slow one).
     const tick = async (): Promise<void> => {
-      if (stopped) return;
+      if (stopped || inFlight) return;
+      inFlight = true;
       try { await discoverProjects({ fullScan: true }); } catch { /* probe errors are normal */ }
+      finally { inFlight = false; }
       if (!stopped && Date.now() - startedAt > MAX_MS) setScanning(false);
     };
-    void tick(); // probe immediately, then on an interval
-    const id = setInterval(() => void tick(), 3500);
+    void untrack(() => tick()); // probe immediately, then on an interval
+    const id = setInterval(() => void untrack(() => tick()), 3500);
     onCleanup(() => { stopped = true; clearInterval(id); });
   });
 
