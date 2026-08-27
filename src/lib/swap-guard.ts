@@ -14,9 +14,11 @@
  * So the guard is an epoch, not an id. `bumpClusterEpoch()` is called
  * on every active-cluster change; a token captured before the bump
  * never validates again.
+ *
+ * Deliberately dependency-free (not even the logger): stores call this
+ * on every hydrate, and keeping it a pure leaf is what makes the epoch
+ * rule directly testable.
  */
-
-import { log } from '~/lib/log';
 
 let epoch = 0;
 let activeKey: string | null = null;
@@ -58,14 +60,10 @@ export function isCurrentEpoch(token: ClusterEpoch): boolean {
 export async function withClusterGuard<T>(
   fn: () => Promise<T>,
   apply: (value: T) => void,
-  label?: string,
 ): Promise<T | undefined> {
   const token = captureClusterEpoch();
   const value = await fn();
-  if (!isCurrentEpoch(token)) {
-    log.debug('[swap-guard] dropped stale result', { label, capturedKey: token.key, nowKey: activeKey });
-    return undefined;
-  }
+  if (!isCurrentEpoch(token)) return undefined;
   apply(value);
   return value;
 }
