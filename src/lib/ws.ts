@@ -153,7 +153,7 @@ export class DaemonWS {
       return;
     }
 
-    console.log('[WS] dial', { url: url.toString(), attempt: this.retryStep });
+    log.debug('[WS] dial', { url: url.toString(), attempt: this.retryStep });
     log.debug('ws dial', url.toString());
     let socket: WebSocket;
     try {

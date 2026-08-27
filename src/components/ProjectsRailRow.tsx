@@ -118,7 +118,7 @@ export async function switchProject(
   // between sibling projects (clicking B while A's switch was in flight no-oped
   // forever). Keying by the row key lets each project switch independently.
   if (switchProjectInFlight.has(key)) {
-    console.log('[RAIL] switchProject coalesced — switch to this project already in flight', { port, key });
+    log.debug('[RAIL] switchProject coalesced — switch to this project already in flight', { port, key });
     return false;
   }
   switchProjectInFlight.add(key);
@@ -134,7 +134,7 @@ async function switchProjectImpl(
   key: string,
   fallback?: { display: string; cluster_id: string | null; cluster_name: string | null },
 ): Promise<boolean> {
-  console.log('[RAIL] switchProject called', { port, key });
+  log.debug('[RAIL] switchProject called', { port, key });
   projectsStore.clearNewBadge(key);
 
   // V86l — reconcile against live discovery BEFORE probing. If the
@@ -158,7 +158,7 @@ async function switchProjectImpl(
   // FC-2 — pass the selected project's id so the daemon routes to it (one
   // daemon may serve many projects; the instance is keyed by projectId).
   let outcome = await daemonStore.switchToPortDetailed(effectivePort, fallback?.cluster_id ?? undefined);
-  console.log('[RAIL] switchProject result', { port: effectivePort, key, outcome });
+  log.debug('[RAIL] switchProject result', { port: effectivePort, key, outcome });
 
   // V86l — second-chance reconciliation. If the probe failed AND we
   // know which cluster_id we're after, do a one-shot scan of the
@@ -210,7 +210,7 @@ function forgetProjectImmediate(target: { cluster_id?: string | null; port: numb
   const clusterKey = target.cluster_id && target.cluster_id.trim().length > 0
     ? target.cluster_id
     : `port:${target.port}`;
-  console.log('[RAIL] forget — full eviction', { clusterKey });
+  log.debug('[RAIL] forget — full eviction', { clusterKey });
   daemonStore.disconnectInstance(clusterKey);
   serverStore.clearForCluster(clusterKey);
   chatStore.clearClusterChat(clusterKey);
@@ -373,7 +373,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
                 title={`Stop all running agents (${runningCount()} in flight)`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  console.log('[RAIL] STOP-ALL click', { port: r().port, running: runningCount() });
+                  log.debug('[RAIL] STOP-ALL click', { port: r().port, running: runningCount() });
                   railUiStore.beginConfirmStop(r().key);
                 }}
               >
@@ -388,7 +388,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
               title="Rename"
               onClick={(e) => {
                 e.stopPropagation();
-                console.log('[RAIL] EDIT click', { port: r().port });
+                log.debug('[RAIL] EDIT click', { port: r().port });
                 railUiStore.beginEdit(r().key, r().display);
               }}
             >
@@ -428,7 +428,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
               title="Forget project"
               onClick={(e) => {
                 e.stopPropagation();
-                console.log('[RAIL] DELETE click', { port: r().port });
+                log.debug('[RAIL] DELETE click', { port: r().port });
                 railUiStore.beginConfirmDelete(r().key);
               }}
             >

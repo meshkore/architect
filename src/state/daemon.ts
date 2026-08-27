@@ -93,7 +93,7 @@ function notifyActiveChanged(): void {
     // only ever opened for the one being switched to; opening does not fire
     // this, so this never clears a freshly-opened prompt).
     clearTokenPrompt();
-    console.log('[RAIL] notifyActiveChanged → listeners count:', activeChangeListeners.size, 'activeId:', id);
+    log.debug('[RAIL] notifyActiveChanged → listeners count:', activeChangeListeners.size, 'activeId:', id);
     for (const fn of activeChangeListeners) {
       try { fn(id); } catch (e) {
         log.warn('active-change listener threw', e instanceof Error ? e.message : String(e));
@@ -503,7 +503,7 @@ async function switchToPort(port: number): Promise<boolean> {
 }
 
 async function switchToPortDetailed(port: number, projectId?: string): Promise<SwitchOutcome> {
-  console.log('[RAIL] switchToPort entry', { port, projectId, current: state.health?.port ?? null, instances: Object.keys(state.instances) });
+  log.debug('[RAIL] switchToPort entry', { port, projectId, current: state.health?.port ?? null, instances: Object.keys(state.instances) });
   log.info('switchToPort requested', { port, projectId, current: state.health?.port ?? null });
 
   // FC-2 (daemon-centralized) — ONE daemon serves MANY projects, so an instance
@@ -515,7 +515,7 @@ async function switchToPortDetailed(port: number, projectId?: string): Promise<S
   );
   if (existing) {
     const [key, inst] = existing;
-    console.log('[RAIL] switchToPort reusing existing instance', { key, port });
+    log.debug('[RAIL] switchToPort reusing existing instance', { key, port });
     if (state.activeId !== key) {
       batch(() => {
         setState({ activeId: key, offlineSelection: null, phase: 'connected', errorMessage: '' });
@@ -544,7 +544,7 @@ async function switchToPortDetailed(port: number, projectId?: string): Promise<S
   const probeUrl = `${daemonHttpBase(port)}/health`;
   let health: HealthResponse;
   try {
-    console.log('[RAIL] switchToPort probing', probeUrl);
+    log.debug('[RAIL] switchToPort probing', probeUrl);
     // V108 — bounded probe. Without a timeout a hung /health (TLS stall,
     // saturated connection pool) left switchToPortDetailed pending
     // forever, so the switchProject in-flight guard never cleared and
@@ -563,7 +563,7 @@ async function switchToPortDetailed(port: number, projectId?: string): Promise<S
       return { ok: false, reason: 'no-daemon', detail: `HTTP ${r.status}` };
     }
     health = (await r.json()) as HealthResponse;
-    console.log('[RAIL] switchToPort probe OK', { port, cluster_id: health.cluster_id });
+    log.debug('[RAIL] switchToPort probe OK', { port, cluster_id: health.cluster_id });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn('[RAIL] switchToPort fetch threw', { port, error: msg });
@@ -582,7 +582,7 @@ async function switchToPortDetailed(port: number, projectId?: string): Promise<S
   // attacker-impersonated endpoint (DNS poisoned + valid TLS cert);
   // we refuse to attach and surface a clear error.
   const verify = await verifyDaemonIdentity(daemonHttpBase(port), token, health.features ?? []);
-  console.log('[RAIL] switchToPort identity', { port, outcome: verify.kind });
+  log.debug('[RAIL] switchToPort identity', { port, outcome: verify.kind });
 
   if (verify.kind === 'no-token') {
     // LOCAL auto-unlock (py-1.27.6) — a token for your OWN local daemon is
@@ -652,7 +652,7 @@ async function switchToPortDetailed(port: number, projectId?: string): Promise<S
     localTransport(port, token, projectId ?? health.cluster_id ?? undefined),
   );
   attachClient(client, health);
-  console.log('[RAIL] switchToPort attached new instance', { port, cluster_id: health.cluster_id ?? null });
+  log.debug('[RAIL] switchToPort attached new instance', { port, cluster_id: health.cluster_id ?? null });
   log.info('switchToPort attached', { port, cluster_id: health.cluster_id ?? null, identity: verify.kind });
   return { ok: true };
 }
@@ -665,7 +665,7 @@ async function switchToPortDetailed(port: number, projectId?: string): Promise<S
  * UI updates immediately (same path as a real switch).
  */
 function selectOffline(target: OfflineSelection): void {
-  console.log('[RAIL] selectOffline', target);
+  log.debug('[RAIL] selectOffline', target);
   batch(() => {
     setState({
       activeId: null,

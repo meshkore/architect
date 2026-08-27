@@ -77,4 +77,23 @@ export default tseslint.config(
     files: ['src/lib/log.ts'],
     rules: { 'no-console': 'off' },
   },
+  {
+    // Build scripts run under Node, not the browser: they get Node's
+    // globals and are free to write to stdout.
+    files: ['scripts/**/*.{js,mjs,cjs}'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+        Buffer: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+        URL: 'readonly',
+        fetch: 'readonly',
+      },
+    },
+    rules: { 'no-console': 'off' },
+  },
 );

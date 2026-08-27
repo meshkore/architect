@@ -81,7 +81,7 @@ export default function App() {
   // onMount or async boot path runs daemonStore.attachClient.
   // Fired DIRECTLY from daemonStore on every active-id change.
   const detachActive = daemonStore.onActiveChanged((activeId) => {
-    console.log('[RAIL] side-effect bus firing', { activeId });
+    log.debug('[RAIL] side-effect bus firing', { activeId });
     if (!activeId) return;
     const inst = daemonStore.state.instances[activeId];
     if (!inst) {

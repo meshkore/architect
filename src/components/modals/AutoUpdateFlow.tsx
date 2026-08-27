@@ -28,12 +28,11 @@ let cancelled = false;
 let runToken = 0;
 
 // py-1.11.1-cockpit — outcome ledger so the DaemonOutdatedPanel can:
-//   • hide its ChoiceView while the flow is `running` (replace by a
+//   • hide its choice buttons while the flow is `running` (replace by a
 //     "Updating now…" loader so the operator doesn't see both the
 //     full-step modal AND the choice buttons at the same time);
-//   • remove the `auto` option from ChoiceView after a `failed`
-//     attempt so the operator doesn't loop on a path that just
-//     refused them.
+//   • remove the `auto` option after a `failed` attempt so the
+//     operator doesn't loop on a path that just refused them.
 // Cleared back to `idle` when the operator manually re-triggers from
 // any of the three buttons (auto / agent / manual). A successful run
 // flips state.outdated=false and the whole panel unmounts, so we
@@ -63,8 +62,8 @@ const dismiss = (): void => {
   if (outcome() === 'running') setOutcome('failed');
   setIsOpen(false);
 };
-// "Use a different path" → modal closes, panel surfaces ChoiceView
-// without the auto option (we just failed at it).
+// "Use a different path" → modal closes, panel surfaces its choice
+// buttons without the auto option (we just failed at it).
 const fallback = (): void => {
   if (outcome() === 'running') setOutcome('failed');
   setIsOpen(false);

@@ -47,7 +47,6 @@ function reloadOnce(message: string): void {
     if (sessionStorage.getItem(RELOAD_SENTINEL)) {
       // Already reloaded once this session — don't loop. The chunk
       // load is failing for a reason other than "stale bundle".
-      // eslint-disable-next-line no-console
       console.error('[chunk-guard] suppressed second reload — chunk still missing after refresh', message);
       return;
     }
@@ -55,7 +54,6 @@ function reloadOnce(message: string): void {
   } catch {
     /* private mode / sessionStorage disabled — proceed anyway */
   }
-  // eslint-disable-next-line no-console
   console.warn('[chunk-guard] chunk-load failure detected — reloading once to pick up the new bundle', message);
   // Force a network revalidation; bypass any aggressive HTTP cache.
   try {

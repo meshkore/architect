@@ -39,8 +39,7 @@ import LinksPanel from '~/components/zones/LinksPanel';
 import ProtocolsPanel from '~/components/zones/ProtocolsPanel';
 import DiaryPanel from '~/components/zones/DiaryPanel';
 // V106 — StoryBanner removed. Story-run progress is now visible
-// in: (a) the agent's live state in ChatRail, (b) the
-// StoryProgressPill on the initiative card, (c) the expanded
+// in: (a) the agent's live state in ChatRail, (b) the expanded
 // card's Activity tab. A floating sticky banner duplicates that
 // signal and steals attention.
 import Splitter, { setLayoutWidth } from '~/components/Splitter';
