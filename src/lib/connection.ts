@@ -26,6 +26,7 @@ import {
   saveTokenForCluster,
 } from './tokens';
 import { LAST_PROJECT_KEY } from './known-projects';
+import { primeDiscoveryProbe } from '~/components/projects-rail/discovery';
 
 export type ConnectionStatus =
   | { kind: 'probing'; message: string }
@@ -178,16 +179,32 @@ export async function connect(setStatus: (s: ConnectionStatus) => void): Promise
   if ((probe.health as { server_home?: boolean }).server_home) {
     const real = await pickRealProject(probe.port, userToken);
     if (real) {
-      projectId = real;
+      projectId = real.id;
       // Re-probe /health WITH the project header so the connected health carries
       // the REAL project's cluster_id/name (DC-4 makes /health honour it).
+      //
+      // AX7 (UX-F5) — deliberately KEPT while the /state probe went. It is not
+      // redundant: `/projects` reports the registry NAME (`meshkore-main`),
+      // `/health` reports the cluster.yaml display name (`MeshKore Core`), and
+      // the header renders the latter. Synthesising it from /projects put the
+      // wrong project name on screen until the 60s health poll corrected it.
+      // On loopback this costs single-digit milliseconds.
       try {
         const r = await fetch(`${daemonHttpBase(probe.port)}/health`, {
-          headers: { 'X-MeshKore-Project': real },
+          headers: { 'X-MeshKore-Project': real.id },
           signal: AbortSignal.timeout(4000),
         });
         if (r.ok) health = (await r.json()) as HealthResponse;
-      } catch { /* fall back to the home health below; bus still routes by projectId */ }
+      } catch {
+        // Fall back to the home health with the resolved identity patched in —
+        // the bus still routes by projectId, and the poll heals the rest.
+        health = {
+          ...probe.health,
+          cluster_id: real.id,
+          cluster_name: real.name ?? real.id,
+          server_home: false,
+        } as HealthResponse;
+      }
     }
     // No real project yet (fresh machine) → stay on the home so the cockpit can
     // show "add a project" rather than a dead end.
@@ -198,17 +215,30 @@ export async function connect(setStatus: (s: ConnectionStatus) => void): Promise
   const transport = localTransport(probe.port, userToken, projectId);
   const client = new DaemonClient(transport);
 
-  // Authenticated probe — /state requires a Bearer. If 401 we ask the
-  // user for the token in the UI. M1.1: DaemonClient returns Result<T>
-  // instead of throwing on non-2xx, so branch on `.ok`.
-  const stateRes = await client.state(AbortSignal.timeout(4000));
+  // The ONE authenticated pre-attach call. It has to exist: `/health` is
+  // unauthenticated, so nothing before this can tell "connected" from
+  // "needs a token", and the `unauthorized` status below is what carries
+  // `clusterKey` for AX9's token paste.
+  //
+  // AX7 (UX-F5) — it used to be `/state`, which is the WRONG probe twice
+  // over. It is the heaviest endpoint the daemon serves (it walks the
+  // whole `.meshkore/` tree) and the bind path refetched it moments
+  // later, so every boot paid for the cluster tree twice before the
+  // first pixel. And since py-1.34.0 `/state` is a PUBLIC route — it
+  // cannot answer 401 at all, so as an auth probe it was already inert.
+  // `/chat/snapshot` IS gated, and is small. `/state` now happens once,
+  // after attach, in parallel with everything else in the bind fan-out.
+  const authProbe = await client.chatSnapshot(AbortSignal.timeout(4000));
   const clusterKey = clusterTokenKey({ cluster_id: health.cluster_id, port: probe.port });
-  if (stateRes.ok) {
+  if (authProbe.ok || (authProbe.status > 0 && authProbe.status !== 401)) {
+    // Any answer that isn't 401 means we are talking to this daemon. A
+    // 404 here is a daemon too old for `chat.snapshot.v1` — that is the
+    // outdated panel's job, and it needs the connection to say so.
     setStatus({ kind: 'connected', client, health });
-  } else if (stateRes.status === 401) {
+  } else if (authProbe.status === 401) {
     setStatus({ kind: 'unauthorized', transport, clusterKey });
   } else {
-    setStatus({ kind: 'error', message: stateRes.error ?? stateRes.body.slice(0, 200) });
+    setStatus({ kind: 'error', message: authProbe.error ?? authProbe.body.slice(0, 200) });
   }
 }
 
@@ -221,22 +251,35 @@ export function rememberLastProject(projectId: string): void {
 
 /** Resolve which REAL project to land on when the boot daemon is the home:
  *  the last-viewed project if it still exists, else the daemon's default, else
- *  the first listed. Returns null when the daemon serves no real project yet. */
-async function pickRealProject(port: number, token: string): Promise<string | null> {
+ *  the first listed. Returns null when the daemon serves no real project yet.
+ *
+ *  AX7 (UX-F5) — the `/projects` answer is also handed to the rail's
+ *  discovery cache. Mounting `ProjectsRail` fired an identical probe of
+ *  the same port a few hundred ms later; priming it means the rail
+ *  renders its rows from THIS response instead of a second round-trip. */
+async function pickRealProject(
+  port: number,
+  token: string,
+): Promise<{ id: string; name?: string } | null> {
   try {
     const r = await fetch(`${daemonHttpBase(port)}/projects`, {
       headers: token ? { authorization: `Bearer ${token}` } : {},
       signal: AbortSignal.timeout(4000),
     });
     if (!r.ok) return null;
-    const data = (await r.json()) as { projects?: { id: string }[]; default?: string | null };
-    const ids = (data.projects ?? []).map((p) => p.id).filter(Boolean);
-    if (ids.length === 0) return null;
+    const data = (await r.json()) as {
+      projects?: { id: string; name?: string }[];
+      default?: string | null;
+    };
+    const projects = (data.projects ?? []).filter((p) => !!p.id);
+    if (projects.length === 0) return null;
+    primeDiscoveryProbe(port, daemonHttpBase(port), projects);
+    const byId = new Map(projects.map((p) => [p.id, p]));
     let last: string | null = null;
     try { last = localStorage.getItem(LAST_PROJECT_KEY); } catch { /* ignore */ }
-    if (last && ids.includes(last)) return last;
-    if (data.default && ids.includes(data.default)) return data.default;
-    return ids[0] ?? null;
+    if (last && byId.has(last)) return byId.get(last) ?? null;
+    if (data.default && byId.has(data.default)) return byId.get(data.default) ?? null;
+    return projects[0] ?? null;
   } catch {
     return null;
   }

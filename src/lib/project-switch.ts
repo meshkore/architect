@@ -23,6 +23,7 @@ import { railUiStore } from '~/state/rail-ui';
 import { findClusterPort, liveClusters } from '~/components/projects-rail/discovery';
 import { log } from '~/lib/log';
 import * as kp from '~/lib/known-projects';
+import { clearCachedSnapshot } from '~/lib/snapshot-cache';
 import type { DaemonClient } from '~/lib/daemon-client';
 
 export interface SwitchFallback {
@@ -261,6 +262,7 @@ export async function forgetProject(
   daemonStore.disconnectInstance(clusterKey);
   serverStore.clearForCluster(clusterKey);
   chatStore.clearClusterChat(clusterKey);
+  clearCachedSnapshot(clusterKey);
   kp.forget({ cluster_id: target.cluster_id ?? undefined, port: target.port });
   // Drop any offline selection that pointed at the same row so the
   // cockpit doesn't keep rendering OfflinePanel for a project that no

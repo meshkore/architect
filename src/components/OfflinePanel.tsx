@@ -25,7 +25,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX 
 import { daemonStore, type OfflineSelection } from '~/state/daemon';
 import { switchProject } from '~/lib/project-switch';
 import { liveClusters } from '~/components/projects-rail/discovery';
-import { daemonHttpBase } from '~/lib/transport';
+import { watchDaemonHealth } from '~/lib/health-watch';
 import { log } from '~/lib/log';
 import * as kp from '~/lib/known-projects';
 import CommandBlock from '~/components/CommandBlock';
@@ -69,10 +69,10 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }): J
   //    answers. Also diagnoses the "TLS missing" case (HTTP works but
   //    HTTPS doesn't). Always running — the manual options are layered
   //    ON TOP for cases where the operator wants to act directly.
+  //    AX7 — the loop itself is `lib/health-watch`, shared with the boot
+  //    gate's no-daemon state (which had no watcher at all).
   createEffect(() => {
     const port = props.sel.port;
-    let cancelled = false;
-    let probeTimer: ReturnType<typeof setTimeout> | null = null;
     const startedAt = Date.now();
     setElapsedSec(0);
     setStuck(false);
@@ -81,46 +81,29 @@ function PanelBody(props: { sel: OfflineSelection; repoPath: string | null }): J
     }, 1000);
     const stuckTimer = setTimeout(() => setStuck(true), STUCK_AFTER_MS);
 
-    const probe = async (): Promise<void> => {
-      if (cancelled) return;
-      try {
-        const r = await fetch(`${daemonHttpBase(port)}/health`, {
-          signal: AbortSignal.timeout(WATCH_TIMEOUT_MS),
+    const stop = watchDaemonHealth({
+      ports: () => [port],
+      intervalMs: WATCH_INTERVAL_MS,
+      timeoutMs: WATCH_TIMEOUT_MS,
+      onUp: (p) => {
+        log.info('[OfflinePanel] daemon answered — switching', { port: p });
+        void switchProject(p, props.sel.key, {
+          display: props.sel.display,
+          cluster_id: props.sel.cluster_id,
+          cluster_name: props.sel.cluster_name,
         });
-        // A-OFFLINE-RACE-01 (V110) — re-check AFTER the await: the port
-        // may have changed (sel update / reconcile effect) while the
-        // fetch was in flight, and `cancelled` is only checked before
-        // the loop. Without this the stale in-flight probe could fire a
-        // switch to a now-wrong port.
-        if (cancelled) return;
-        if (r.ok) {
-          log.info('[OfflinePanel] daemon answered — switching', { port });
-          void switchProject(port, props.sel.key, {
-            display: props.sel.display,
-            cluster_id: props.sel.cluster_id,
-            cluster_name: props.sel.cluster_name,
-          });
-          return;
-        }
-      } catch { /* not up yet */ }
-      if (diagnose() === 'unknown' && !cancelled) {
-        try {
-          const r2 = await fetch(`http://localhost:${port}/health`, {
-            signal: AbortSignal.timeout(WATCH_TIMEOUT_MS),
-          });
-          if (r2.ok) {
-            log.warn('[OfflinePanel] HTTP-only — TLS bundle missing', { port });
-            setDiagnose('tls-missing');
-          }
-        } catch { /* nothing bound */ }
-      }
-      if (!cancelled) probeTimer = setTimeout(() => { void probe(); }, WATCH_INTERVAL_MS);
-    };
-    void probe();
+      },
+      httpOnlyCheck: {
+        while: () => diagnose() === 'unknown',
+        onDetected: (p) => {
+          log.warn('[OfflinePanel] HTTP-only — TLS bundle missing', { port: p });
+          setDiagnose('tls-missing');
+        },
+      },
+    });
 
     onCleanup(() => {
-      cancelled = true;
-      if (probeTimer !== null) clearTimeout(probeTimer);
+      stop();
       clearInterval(elapsedTimer);
       clearTimeout(stuckTimer);
     });

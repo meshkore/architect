@@ -149,7 +149,21 @@ function rehydrateQueue(c: SnapshotConv): boolean {
   return true;
 }
 
-export function hydrateFromSnapshot(snap: ChatSnapshotResponse): void {
+export interface HydrateSnapshotOpts {
+  /**
+   * AX7 — this payload came from the persistent boot cache
+   * (`lib/snapshot-cache`), not the daemon. It paints, but it reuses
+   * AX3's `convsStale` flag so the boot gate keeps the "refreshing…"
+   * marker up and the real snapshot overwrites it on arrival.
+   */
+  stale?: boolean;
+}
+
+export function hydrateFromSnapshot(
+  snap: ChatSnapshotResponse,
+  opts: HydrateSnapshotOpts = {},
+): void {
+  const stale = !!opts.stale;
   const nextConvs: Record<string, ChatConvSummary> = {};
   const nextArchived: Record<string, true> = {};
   const seen = new Set<string>();
@@ -159,23 +173,31 @@ export function hydrateFromSnapshot(snap: ChatSnapshotResponse): void {
     if (c.archived) nextArchived[c.conv] = true;
     seedOrHealMeta(c);
   }
-  const pruned = pruneGhosts(seen);
+  // Pruning is a DELETION keyed on "the daemon doesn't know this conv",
+  // which a cached list cannot establish — a conv created after the last
+  // write is simply absent from it. Only the daemon's own view prunes.
+  const pruned = stale ? { meta: 0, archived: 0 } : pruneGhosts(seen);
 
   setState('convs', nextConvs);
   setState('archivedConvs', nextArchived);
   setState('convsHydratedAt', snap.generated_at ?? new Date().toISOString());
   // AX3 — fresh daemon data has landed; the cached copy is no longer
   // what the workspace is painting from.
-  setState('convsStale', false);
-  saveConvMeta();
-
-  seedWorkingConvs(snap.convs);
+  setState('convsStale', stale);
+  if (!stale) saveConvMeta();
 
   let rehydratedTurns = 0;
   let rehydratedQueues = 0;
-  for (const c of snap.convs as SnapshotConv[]) {
-    if (rehydrateTurn(c)) rehydratedTurns += 1;
-    if (rehydrateQueue(c)) rehydratedQueues += 1;
+  // A cached payload describes a PREVIOUS session: a turn it calls live
+  // has no daemon feeding it, so seeding the working set or a streaming
+  // bubble from it would strand a spinner. (The trim drops `current_turn`
+  // and `queue` anyway; this is the rule, not just the consequence.)
+  if (!stale) {
+    seedWorkingConvs(snap.convs);
+    for (const c of snap.convs as SnapshotConv[]) {
+      if (rehydrateTurn(c)) rehydratedTurns += 1;
+      if (rehydrateQueue(c)) rehydratedQueues += 1;
+    }
   }
 
   log.debug('chat.snapshot.v1 hydrated', {
@@ -186,5 +208,6 @@ export function hydrateFromSnapshot(snap: ChatSnapshotResponse): void {
     pruned_archived: pruned.archived,
     rehydrated_turns: rehydratedTurns,
     rehydrated_queues: rehydratedQueues,
+    stale,
   });
 }

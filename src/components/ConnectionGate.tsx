@@ -7,12 +7,14 @@
  * below; the gate itself just dispatches on `status.kind`.
  */
 
-import { For, Match, Show, Switch, createMemo, createSignal } from 'solid-js';
+import { For, Match, Show, Switch, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import type { ConnectionStatus } from '~/lib/connection';
 import * as kp from '~/lib/known-projects';
 import type { KnownProject } from '~/lib/known-projects';
 import CommandBlock from '~/components/CommandBlock';
 import { agentPrompt, startCommandLine } from '~/lib/start-command';
+import { watchDaemonHealth } from '~/lib/health-watch';
+import { log } from '~/lib/log';
 
 export default function ConnectionGate(props: {
   status: ConnectionStatus;
@@ -100,6 +102,25 @@ function NoDaemon(props: { ports: number[]; onRetry: () => void }) {
   // the shared copyable start command (and a Claude Code prompt). Fall
   // back to the generic `npx meshcore start` only when there are none.
   const known = createMemo<KnownProject[]>(() => kp.list());
+
+  // AX7 (UX-F6) — auto-connect once a daemon appears. `connect()` is
+  // one-shot from App.onMount, so before this the operator could start
+  // their daemon and watch nothing happen until they clicked Retry.
+  // `repeatAfterUp` because onUp only ATTEMPTS the connection: if it
+  // comes back no-daemon again this panel stays mounted and must keep
+  // looking. Stops on unmount, i.e. as soon as the cockpit connects.
+  onMount(() => {
+    const stop = watchDaemonHealth({
+      ports: () => props.ports,
+      onUp: (port) => {
+        log.info('[ConnectionGate] daemon appeared — reconnecting', { port });
+        props.onRetry();
+      },
+      repeatAfterUp: true,
+    });
+    onCleanup(stop);
+  });
+
   const probedRange = (): string => {
     const lo = props.ports[0];
     const hi = props.ports[props.ports.length - 1];

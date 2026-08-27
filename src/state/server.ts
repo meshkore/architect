@@ -251,6 +251,20 @@ function setDisconnectHandler(fn: DisconnectHandler | null): void {
 const consecutiveStateFail = new Map<string, number>();
 const STATE_FAIL_THRESHOLD = 2; // ~2 retry-cycles (~a few seconds) before reconnect UI
 
+/**
+ * AX7 (UX-F4) — paint from the persistent boot cache.
+ *
+ * Refuses to write over a slice that already holds anything: a cached
+ * payload is by definition older than whatever the daemon has already
+ * answered, and stale must never overwrite fresh. `lastRefresh` stays
+ * null so nothing reads this as a completed refresh.
+ */
+function hydrateFromCache(key: string, snapshot: ServerSnapshot): boolean {
+  if (state.byCluster[key]?.snapshot) return false;
+  writeSlice(key, { snapshot, lastRefresh: null, error: null });
+  return true;
+}
+
 /** Debounced per-cluster refresh. Two back-to-back calls on the same
  *  cluster coalesce; different clusters don't interfere. */
 function refresh(client: DaemonClient, key: string): Promise<void> {
@@ -369,6 +383,7 @@ export const serverStore = {
   state,
   refresh,
   refreshNow,
+  hydrateFromCache,
   clear,
   clearForCluster,
   clearAll,

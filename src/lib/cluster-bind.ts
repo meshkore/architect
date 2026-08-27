@@ -28,6 +28,13 @@ import { clientsStore } from '~/state/clients';
 import { bindCluster as queueBindCluster } from '~/lib/queue';
 import { rememberLastProject } from '~/lib/connection';
 import { captureClusterEpoch, isCurrentEpoch } from '~/lib/swap-guard';
+import {
+  readCachedSnapshot,
+  stageChatSnapshot,
+  stageServerSnapshot,
+} from '~/lib/snapshot-cache';
+import type { ChatSnapshotResponse } from '~/lib/daemon-client';
+import type { ServerSnapshot } from '~/state/server';
 import { log } from '~/lib/log';
 
 /**
@@ -85,7 +92,41 @@ export function bindActiveCluster(activeId: string | null): void {
     storyStore.resetForClusterSwap();
   });
 
+  // AX7 — BEFORE the fetches: on a cold boot both stores are empty and
+  // the persistent cache is the only thing that can paint this frame.
+  hydrateFromPersistentCache(activeId, health.cluster_id ?? null);
   rehydrateActiveCluster(activeId);
+}
+
+/**
+ * AX7 (UX-F4) — replay the last session's snapshots for this cluster,
+ * marked stale.
+ *
+ * Runs synchronously inside the bind so the workspace has data before
+ * the first fetch is even dispatched. Both writes are refused when the
+ * store already holds something: AX3's in-memory slice (a switch-back
+ * within the session) is newer than anything on disk, and a landed
+ * daemon response is newer still. Stale never overwrites fresh.
+ */
+function hydrateFromPersistentCache(activeId: string, clusterId: string | null): void {
+  const cached = readCachedSnapshot(clusterId);
+  if (!cached) return;
+  let painted = '';
+  if (cached.server && serverStore.hydrateFromCache(activeId, cached.server as ServerSnapshot)) {
+    painted += 'roadmap ';
+  }
+  if (cached.chat && chatStore.state.convsHydratedAt === null) {
+    chatStore.hydrateFromSnapshot(cached.chat as unknown as ChatSnapshotResponse, { stale: true });
+    painted += 'chat';
+  }
+  if (painted) {
+    log.info('[snapshot-cache] painted from disk while revalidating', {
+      cluster: clusterId,
+      painted: painted.trim(),
+      age_ms: Date.now() - cached.saved_at,
+      stage: cached.stage,
+    });
+  }
 }
 
 /**
@@ -102,8 +143,18 @@ export function rehydrateActiveCluster(activeId: string): void {
   if (!inst) return;
   const { client } = inst;
   const epoch = captureClusterEpoch();
+  // AX7 — the cache is keyed by cluster_id (like every other per-cluster
+  // localStorage key); a daemon too old to report one simply gets none.
+  // Staged HERE and not inside `serverStore.doRefresh`: the WS fires
+  // `state.rebuilt` on every file the operator's agents touch, and
+  // re-serializing the whole roadmap at that cadence would cost more
+  // than the boot it accelerates.
+  const cacheKey = inst.health.cluster_id ?? null;
 
-  void serverStore.refreshNow(client, activeId);
+  void serverStore.refreshNow(client, activeId).then(() => {
+    if (!isCurrentEpoch(epoch)) return;
+    stageServerSnapshot(cacheKey, serverStore.state.snapshot);
+  });
 
   // FC-2 — SHORT per-attempt timeout + one retry, same rationale as
   // server.doRefresh: a stale keep-alive socket (right after a daemon
@@ -121,6 +172,7 @@ export function rehydrateActiveCluster(activeId: string): void {
     }
     if (res.ok) {
       chatStore.hydrateFromSnapshot(res.data);
+      stageChatSnapshot(cacheKey, res.data);
       log.info('chat.snapshot.v1 hydrated', {
         convs: res.data.convs.length,
         live: res.data.convs.filter((c) => c.live).length,

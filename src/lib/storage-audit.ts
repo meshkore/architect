@@ -63,6 +63,10 @@ const ALLOWED_PREFIXES = [
   'mc-conv-meta-v1::',   // convMeta cache (daemon snapshot is source of truth;
                           // chatStore.hydrateFromSnapshot prunes stale entries
                           // every boot — kept for fast first-paint only)
+  'mc-snap-v1::',        // AX7 — size-capped /state + /chat/snapshot copy per
+                          // cluster (lib/snapshot-cache.ts), replayed STALE at
+                          // bind time so a reload paints before the network
+                          // lands. Daemon data always overwrites it.
   'mc-exec-queue::',      // execution queue per cluster (lib/queue.ts). It is a
                           // deliberate per-browser list (NOT daemon-owned), so it
                           // MUST survive the boot audit — otherwise staged items

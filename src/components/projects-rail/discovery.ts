@@ -25,7 +25,49 @@ export const [livePorts, setLivePorts] = createSignal<Set<number>>(new Set());
 export const [liveClusters, setLiveClusters] = createSignal<Map<string, LiveProbe>>(new Map());
 export const [scanning, setScanning] = createSignal(false);
 
+/**
+ * AX7 (UX-F5) — boot-probe reuse.
+ *
+ * `connect()` already asks the daemon for `/health` + `/projects`, and
+ * `ProjectsRail`'s mount fired the identical pair at the same port a
+ * few hundred ms later. The boot result is deposited here and the next
+ * probe of that port consumes it, so the rail's first render costs zero
+ * round-trips. Deliberately SHORT-lived and single-use: discovery is
+ * also how the rail notices a project appearing or dying, and a cached
+ * answer must never be what it reports on a later pass.
+ */
+const PRIME_TTL_MS = 4000;
+const primed = new Map<number, { at: number; probes: LiveProbe[] }>();
+
+export function primeDiscoveryProbe(
+  port: number,
+  base: string,
+  projects: ReadonlyArray<{ id: string; name?: string }>,
+): void {
+  if (projects.length === 0) return;
+  primed.set(port, {
+    at: Date.now(),
+    probes: projects.map((p) => ({
+      port,
+      base,
+      cluster_id: p.id,
+      cluster_name: p.name ?? p.id,
+      authoritative: true,
+    })),
+  });
+}
+
+function takePrimed(port: number): LiveProbe[] | null {
+  const hit = primed.get(port);
+  if (!hit) return null;
+  primed.delete(port);
+  if (Date.now() - hit.at > PRIME_TTL_MS) return null;
+  return hit.probes;
+}
+
 async function probe(port: number): Promise<LiveProbe[]> {
+  const fresh = takePrimed(port);
+  if (fresh) return fresh;
   const base = daemonHttpBase(port);
   try {
     const r = await fetch(`${base}/health`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
