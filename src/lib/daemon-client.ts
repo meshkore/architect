@@ -955,6 +955,54 @@ export class DaemonClient {
     return this.request<ProjectRegisterResponse>('POST', '/projects', body, signal);
   }
 
+  /** AX8 (cockpit-excellence) — DELETE /projects/<id>. Drops the project
+   *  from the daemon's registry so a forgotten row stays forgotten; without
+   *  it the cockpit's local scrub is undone by the next discovery pass.
+   *  GLOBAL endpoint (no project header), portal-token gated. */
+  async projectDelete(id: string, signal?: AbortSignal): Promise<Result<{ ok: boolean; id: string; deleted: boolean }>> {
+    return this.request<{ ok: boolean; id: string; deleted: boolean }>(
+      'DELETE', `/projects/${encodeURIComponent(id)}`, undefined, signal,
+    );
+  }
+
+  /** AX11 — quota unpause. The rate-limit banner used to raw-fetch this,
+   *  which skipped the 401 self-heal and the version fan-out. `path` is the
+   *  daemon-supplied unpause path from the quota block. */
+  async quotaUnpause(path: string, signal?: AbortSignal): Promise<Result<unknown>> {
+    return this.request<unknown>('POST', path, {}, signal);
+  }
+
+  /** AX11 — per-type agent memory (`.meshkore/agents/_types/<t>/memory.md`).
+   *  404 means "no memory yet", which is not an error for the viewer. */
+  async roleMemory(type: string, signal?: AbortSignal): Promise<Result<{ content?: string }>> {
+    return this.request<{ content?: string }>(
+      'GET', `/agents/types/${encodeURIComponent(type)}/memory`, undefined, signal,
+    );
+  }
+
+  /** AX11 — admission queue (public-clusters). 501 means the daemon predates
+   *  the admission flow; callers surface that as a stub, not a failure. */
+  async admissionList(signal?: AbortSignal): Promise<Result<{ pending?: unknown[] }>> {
+    return this.request<{ pending?: unknown[] }>('GET', '/admission/list', undefined, signal);
+  }
+
+  async admissionDecide(
+    action: 'approve' | 'reject',
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<Result<unknown>> {
+    return this.request<unknown>(
+      'POST', `/admission/${action}/${encodeURIComponent(id)}`, {}, signal,
+    );
+  }
+
+  /** AX11 — start a platform OAuth/device flow for a runner credential. */
+  async authStart(platform: string, signal?: AbortSignal): Promise<Result<unknown>> {
+    return this.request<unknown>(
+      'POST', `/auth/${encodeURIComponent(platform)}/start`, {}, signal,
+    );
+  }
+
   async cronList(signal?: AbortSignal): Promise<Result<CronListResponse>> {
     return this.request<CronListResponse>('GET', '/cron/list', undefined, signal);
   }
