@@ -13,11 +13,14 @@
  * input row (Stop button, scope strip) is the parent's concern.
  */
 
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal } from 'solid-js';
 import { chatStore, ONBOARDING_CONV_ID } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
 import { isProjectEmpty } from '~/state/server';
 import { onboardingBootstrapBrief } from '~/lib/onboarding-brief';
+import { isConvWorking as convIsWorking } from '~/state/live-selectors';
+import { editQueuedItem, deleteQueuedItem, moveQueuedItem } from '~/lib/queue-actions';
+import { useComposerDraft } from '~/components/chat/use-composer-draft';
 import { isValidationRed } from '~/components/architect/ValidationBlock';
 import { debugEmit } from '~/lib/debug-transport';
 import { log } from '~/lib/log';
@@ -25,24 +28,6 @@ import type { ChatQueueItem } from '~/lib/daemon-client';
 
 const ACCEPT = 'image/*,.md,.txt,.pdf,.json,.yaml,.yml,.csv,.log';
 const MAX_IMAGES = 6;
-
-type PendingImg = { dataURL: string; mediaType: string };
-type PendingDoc = { filename: string; content: string };
-
-// V107.31 — Per-conv composer drafts. The ChatComposer is mounted once
-// inside ChatPanel and re-used across conv switches (Solid doesn't
-// remount on prop-only changes), so a single in-place draft signal
-// would leak between chats. This module-level map snapshots draft +
-// attachments by conv slug; the createEffect below saves the outgoing
-// conv's state on switch and restores (or empty-inits) the incoming
-// one. Session-only on purpose — text drafts of "next message" are
-// short-lived; persisting across page reload would risk stale prompts
-// landing in unrelated conversations.
-interface ComposerSnap { draft: string; imgs: PendingImg[]; docs: PendingDoc[] }
-const composerByConv = new Map<string, ComposerSnap>();
-function readSnap(conv: string): ComposerSnap {
-  return composerByConv.get(conv) ?? { draft: '', imgs: [], docs: [] };
-}
 
 // V83 — drop the `client` prop. Read the current DaemonClient reactively
 // from daemonStore so dispatching follows project hot-swaps without the
@@ -58,21 +43,9 @@ export default function ChatComposer(props: {
   onTokenRejected?: (draft: string) => void;
   onDaemonOutdated?: () => void;
 }) {
-  // V107.31 — Seed from this conv's snapshot on first mount so a
-  // returning operator sees their draft immediately, not a flash of
-  // empty before the effect below restores it.
-  const initial = readSnap(props.conv);
-  const [draft, setDraft] = createSignal(initial.draft);
   const [sending, setSending] = createSignal(false);
-  const [imgs, setImgs] = createSignal<PendingImg[]>(initial.imgs);
-  const [docs, setDocs] = createSignal<PendingDoc[]>(initial.docs);
   let fileEl: HTMLInputElement | undefined;
   let taEl: HTMLTextAreaElement | undefined;
-  // Track which conv the signals currently represent so the createEffect
-  // can stash the OUTGOING conv's state under the OLD key before
-  // loading the new one (props.conv has already advanced when the
-  // effect fires).
-  let currentConv = props.conv;
 
   const grow = () => {
     if (!taEl) return;
@@ -84,36 +57,7 @@ export default function ChatComposer(props: {
     taEl.style.height = Math.min(taEl.scrollHeight, 300) + 'px';
   };
 
-  // V107.31 — On conv switch: snapshot outgoing → restore incoming.
-  // `currentConv` is the slug whose draft is in the signals right now;
-  // props.conv is the new slug we're moving to.
-  createEffect(() => {
-    const next = props.conv;
-    if (next === currentConv) return;
-    // Stash outgoing — only persist if non-empty so the map stays small.
-    const out: ComposerSnap = { draft: draft(), imgs: imgs(), docs: docs() };
-    if (out.draft || out.imgs.length || out.docs.length) {
-      composerByConv.set(currentConv, out);
-    } else {
-      composerByConv.delete(currentConv);
-    }
-    // Load incoming — empty defaults if no snapshot.
-    const snap = readSnap(next);
-    setDraft(snap.draft);
-    setImgs(snap.imgs);
-    setDocs(snap.docs);
-    currentConv = next;
-    // Resize textarea after the value swap lands.
-    queueMicrotask(grow);
-  });
-
-  // Save in-flight draft when the panel unmounts (e.g. cluster swap).
-  onCleanup(() => {
-    const out: ComposerSnap = { draft: draft(), imgs: imgs(), docs: docs() };
-    if (out.draft || out.imgs.length || out.docs.length) {
-      composerByConv.set(currentConv, out);
-    }
-  });
+  const { draft, setDraft, imgs, setImgs, docs, setDocs } = useComposerDraft(() => props.conv, grow);
 
   // V107.41 — Hydrate queue on first focus per conv (lazy fetch).
   createEffect(() => {
@@ -129,10 +73,11 @@ export default function ChatComposer(props: {
   const queueItems = createMemo<ChatQueueItem[]>(
     () => chatStore.state.queues[props.conv] ?? [],
   );
-  const isConvWorking = createMemo<boolean>(() => {
-    const s = chatStore.state.convs[props.conv];
-    return !!(s && (s.live || s.coordinating));
-  });
+  // Shared with the roadmap queue bar and the scope strip. The local
+  // copy this replaced checked only the daemon's live/coordinating
+  // flags, so between a send and the first snapshot the queue button
+  // vanished while the chat already showed the turn running.
+  const isConvWorking = createMemo<boolean>(() => convIsWorking(props.conv));
   // The queue-button appears only when the conv is busy — otherwise
   // the operator can just send normally with play (per the operator's
   // brief: "el reloj sólo aparece cuando ya tenemos el chat en marcha").
@@ -167,24 +112,9 @@ export default function ChatComposer(props: {
       // Daemon broadcasts queue.item.added; ingestQueueEvent lands it.
     }
   };
-  const editQueued = async (id: string, text: string): Promise<void> => {
-    const c = daemonStore.state.client;
-    if (!c || !text.trim()) return;
-    const res = await c.queueEdit(props.conv, id, text);
-    if (!res.ok) log.warn('queue edit failed', { id, status: res.status });
-  };
-  const deleteQueued = async (id: string): Promise<void> => {
-    const c = daemonStore.state.client;
-    if (!c) return;
-    const res = await c.queueDelete(props.conv, id);
-    if (!res.ok) log.warn('queue delete failed', { id, status: res.status });
-  };
-  const moveQueued = async (id: string, position: number): Promise<void> => {
-    const c = daemonStore.state.client;
-    if (!c) return;
-    const res = await c.queueMove(props.conv, id, position);
-    if (!res.ok) log.warn('queue move failed', { id, status: res.status });
-  };
+  const editQueued = (id: string, text: string) => editQueuedItem(props.conv, id, text);
+  const deleteQueued = (id: string) => deleteQueuedItem(props.conv, id);
+  const moveQueued = (id: string, position: number) => moveQueuedItem(props.conv, id, position);
 
   const addFile = (file: File) => {
     if ((file.type || '').startsWith('image/')) {
