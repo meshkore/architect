@@ -5,7 +5,7 @@
 # Source: 9b7980f
 from __future__ import annotations
 
-DAEMON_VERSION = "py-1.33.0"  # early bundle marker for the version-watcher 8 KB range-fetch; canonical def inlined below.
+DAEMON_VERSION = "py-1.34.0"  # early bundle marker for the version-watcher 8 KB range-fetch; canonical def inlined below.
 
 
 
@@ -60,7 +60,7 @@ FS_POLL_SEC = 1.5
 # ~20% of the 8 KB window those two Range readers get — one more paragraph
 # and a remote version check would silently start returning None. Release
 # notes belong in CHANGELOG.md; this line stays one short line forever.
-DAEMON_VERSION = "py-1.33.0"  # DAH1 audit pass — see CHANGELOG.md
+DAEMON_VERSION = "py-1.34.0"  # DAH2 — GET is fail-closed; see CHANGELOG.md
 
 
 # ── inlined from daemon/contextpolicy.py (DM3+ bundle) ─────────────────────────
@@ -14690,6 +14690,19 @@ class QueryMixin:
             # daemon that HAS the endpoint from one that doesn't, rather than
             # reading a 404 as "this file needs no snapshot".
             "snapshots.v1",
+            # py-1.34.0 DAH2 — the GET surface is FAIL-CLOSED. `route_get` now
+            # has a single global auth gate driven by the declarative
+            # PUBLIC_GET_EXACT / PUBLIC_GET_PREFIXES tables, mirroring the one
+            # POST always had; a new GET is private unless deliberately
+            # published. DAH2(b) rides on it: /chat/snapshot, /chat/convs and
+            # everything under /chat/conv/ now REQUIRE the portal token —
+            # `/chat/conv/<id>/messages` returns message bodies, i.e. the
+            # operator's transcripts with the agents, and was anonymous.
+            # A cockpit older than architect@bdc8dd4 fetched those with the
+            # Authorization header suppressed by construction and will get 401s
+            # against this daemon; it must reload to pick up the bundle that
+            # sends the token. That is what this flag is for.
+            "chat.reads.authed.v1",
             # py-1.6.0 → py-1.6.1 — session_resume opt-in only.
             # Set env MESHKORE_CLAUDE_SESSION_ID=1 to enable. Default
             # off after a production bug where claude-code exited
@@ -19860,15 +19873,89 @@ import re
 import urllib.parse
 
 
+# ── DAH2(a) — the GET auth policy, declared in ONE place ────────────────
+#
+# GET used to be FAIL-OPEN: there was no global gate, so every route declared
+# its own `if self._need_auth(): return` and forgetting that line published the
+# endpoint silently. POST has had a single global gate since forever, so the two
+# halves of the same wire surface ran opposite default policies.
+#
+# Now GET is fail-CLOSED like POST: the gate below rejects anything that is not
+# named here. Adding a route makes it private by default; publishing one is a
+# deliberate edit to this table, in review, with a reason.
+#
+# Everything listed is public because it carries NO project content: boot
+# discovery, the roadmap board the cockpit paints before a token is pasted,
+# repo files that ship with the repo anyway, or a URL that IS the capability.
+#
+# Two entries authenticate INSIDE their handler and must not be portal-gated
+# here or they would 401 before reaching it:
+#   /auth/local-token   — gated on exact cockpit origins (stricter than a token)
+#   /team/requests/     — gated on the MEMBER token, or the CPL-2 remote token
+PUBLIC_GET_EXACT = frozenset(
+    {
+        # boot discovery + wire-version handshake
+        "/health",
+        "/info",
+        "/auth/challenge",
+        "/auth/local-token",  # origin-gated in the handler
+        # project state + roadmap — painted before the operator has a token
+        "/state",
+        "/roadmap/live",
+        "/agents",
+        "/clients",
+        "/projects",
+        "/storage/usage",
+        # registries: deployment links + workflow runbooks, committed content
+        "/links",
+        "/workflows",
+        "/protocols",
+        # team roster frontmatter; member tokens are added to the payload ONLY
+        # for a caller that already presented the portal token (TEG-1)
+        "/team",
+        # archive flags: conv ids + booleans, no message bodies
+        "/chat/archives",
+        # confined to .meshkore/.runtime/verify/ and needs the exact ?path=
+        "/verify/shot",
+    }
+)
+
+PUBLIC_GET_PREFIXES = (
+    "/state/",  # subset reads of the same public /state
+    "/links/",
+    "/workflows/",
+    "/protocols/",
+    "/team/",  # roster + the A2A card; /team/requests/ authenticates itself
+    "/chat/uploads/",  # random-suffixed filename; the URL is the capability
+)
+
+
+def _get_is_public(path: str) -> bool:
+    """True when `path` may be served WITHOUT the portal token.
+
+    DAH2(b) note on what is deliberately NOT here: `/chat/snapshot`,
+    `/chat/convs` and everything under `/chat/conv/` used to be public. The
+    in-code justification was that "conv ids are not secrets" — true of the
+    ids, and not of `/chat/conv/<id>/messages`, which returns message BODIES:
+    the operator's full transcripts with the agents. They are gated as of
+    py-1.34.0, after the cockpit shipped the half that starts sending its
+    token (architect@bdc8dd4) — that order is mandatory, since the cockpit
+    previously suppressed the header on those calls by construction."""
+    return path in PUBLIC_GET_EXACT or path.startswith(PUBLIC_GET_PREFIXES)
+
 
 def route_get(self, daemon):  # noqa: N802
     p, q = self._path()
-    # WebSocket upgrade?
+    # WebSocket upgrade? Handled (and authenticated) by _handle_ws itself, so
+    # it is resolved before the HTTP auth gate below.
     if (
         p in ("/events", "/ws")
         and self.headers.get("Upgrade", "").lower() == "websocket"
     ):
         return self._handle_ws()
+    # THE gate. Mirrors route_post's single global gate — see PUBLIC_GET_* above.
+    if not _get_is_public(p) and self._need_auth():
+        return
     if p == "/health":
         return self._json(200, daemon.health())
     # D-TLS-02 — challenge-response auth. Cockpit posts a
@@ -19970,8 +20057,6 @@ def route_get(self, daemon):  # noqa: N802
     # (which is just a snapshot). Auth-required because probe
     # history exposes conv ids.
     if p == "/quota":
-        if self._need_auth():
-            return
         return self._json(
             200,
             {
@@ -19983,8 +20068,6 @@ def route_get(self, daemon):  # noqa: N802
     # stream contains conv ids, agent ids, and prompt previews
     # that aren't meant for the public internet.
     if p == "/debug/tail":
-        if self._need_auth():
-            return
         if not debug_enabled():
             return self._json(200, {"events": [], "retained_secs": 0})
         try:
@@ -20022,8 +20105,6 @@ def route_get(self, daemon):  # noqa: N802
             return self._json(200, state[sub])
         return self._json(404, {"error": "unknown subset", "subset": sub})
     if p == "/reload":
-        if self._need_auth():
-            return
         daemon.state_manager.rebuild(broadcast=True)
         return self._json(200, {"ok": True, "generated_at": _iso_now()})
     if p == "/agents":
@@ -20039,8 +20120,6 @@ def route_get(self, daemon):  # noqa: N802
     # keyPresent booleans; the key VALUES are never returned). Machine-level,
     # so the X-MeshKore-Project header is ignored.
     if p == "/config/providers":
-        if self._need_auth():
-            return
         return self._json(*daemon.provider_config_get_http())
     # Initiative `agent-team` (ATM9) — team roster. Read-only, no auth
     # (like /agents /state); frontmatter carries no secrets. Mutations
@@ -20098,30 +20177,20 @@ def route_get(self, daemon):  # noqa: N802
     # match Node's contract — but it serves from
     # .meshkore/roadmap/, which is where tasks live).
     if p.startswith("/docs/"):
-        if self._need_auth():
-            return
         return self._serve_meshkore_file(daemon.paths.docs_dir, p[len("/docs/") :])
     if p.startswith("/modules/"):
-        if self._need_auth():
-            return
         return self._serve_meshkore_file(
             daemon.paths.modules_dir, p[len("/modules/") :]
         )
     if p.startswith("/tasks/"):
-        if self._need_auth():
-            return
         return self._serve_meshkore_file(daemon.paths.roadmap_dir, p[len("/tasks/") :])
     # py-1.9.0 — daily narrative logs. `/log` lists every
     # `.meshkore/log/YYYY-MM-DD.md` file (descending by date),
     # `/log/<filename>` serves a single file. Both gated by
     # auth so a curious browser session can't scrape narrative.
     if p == "/log":
-        if self._need_auth():
-            return
         return self._json(200, {"entries": daemon.log_listing()})
     if p.startswith("/log/"):
-        if self._need_auth():
-            return
         return self._serve_meshkore_file(daemon.paths.log_dir, p[len("/log/") :])
     # py-1.14.1 — Standard v14 §3.5 project context. `GET
     # /context` returns the `.meshkore/context/` folder/file
@@ -20134,12 +20203,8 @@ def route_get(self, daemon):  # noqa: N802
     # NB: the exact-match `/context` MUST precede the
     # `/context/` prefix so the tree endpoint isn't shadowed.
     if p == "/context":
-        if self._need_auth():
-            return
         return self._json(200, daemon.context_tree())
     if p.startswith("/context/"):
-        if self._need_auth():
-            return
         return self._serve_meshkore_file(
             daemon.paths.context_dir, p[len("/context/") :]
         )
@@ -20150,12 +20215,8 @@ def route_get(self, daemon):  # noqa: N802
     # returns a single node's processed body (lazy-fetched by the
     # cockpit + by agents on demand). Exact-match before the prefix.
     if p == "/knowledge":
-        if self._need_auth():
-            return
         return self._json(200, daemon.knowledge_tree())
     if p.startswith("/knowledge/"):
-        if self._need_auth():
-            return
         node_id = urllib.parse.unquote(p[len("/knowledge/") :]).strip("/")
         return self._json(200, daemon.knowledge_node(node_id))
     # py-1.9.3 — Per-initiative git activity. Runs git log on
@@ -20167,24 +20228,16 @@ def route_get(self, daemon):  # noqa: N802
     # py-1.20.0 — roadmap wall ordering. The cockpit reads the four
     # walls (active/next/backlog/archived) ordered by `wall_order`.
     if p == "/initiative/walls":
-        if self._need_auth():
-            return
         return self._json(200, daemon.initiative_walls())
     if p.startswith("/initiative/") and p.endswith("/activity"):
-        if self._need_auth():
-            return
         iid = p[len("/initiative/") : -len("/activity")]
         return self._json(200, daemon.initiative_activity(iid))
     # py-1.10.0 — Story-run coordinator reads.
     if p == "/runs":
-        if self._need_auth():
-            return
         active_only = (q.get("active") or "0").lower() in ("1", "true", "yes")
         code, body = daemon.runs_list(active_only=active_only)
         return self._json(code, body)
     if p.startswith("/runs/"):
-        if self._need_auth():
-            return
         run_id = p[len("/runs/") :]
         # Single-segment id only — control endpoints (/cancel,
         # /advance, …) live on POST and are matched there.
@@ -20196,20 +20249,14 @@ def route_get(self, daemon):  # noqa: N802
     # remote token itself); machine-level, so the X-MeshKore-Project header is
     # ignored. 404 when no token is minted.
     if p == "/remote/token":
-        if self._need_auth():
-            return
         return self._json(*daemon.remote_token_get_http())
     # U-DAEMON-02: credentials listing — names only, never
     # contents. Matches Node's response shape.
     if p == "/credentials":
-        if self._need_auth():
-            return
         return self._json(200, daemon.credentials_listing())
     # py-1.11.3 — Single-credential read. Cockpit only fetches
     # the value when the operator clicks "reveal". Auth required.
     if p.startswith("/credentials/"):
-        if self._need_auth():
-            return
         name = p[len("/credentials/") :]
         code, body = daemon.credential_read(name)
         return self._json(code, body)
@@ -20359,12 +20406,8 @@ def route_get(self, daemon):  # noqa: N802
     # scope_exclusions are explicit that snapshots are never exposed to
     # unauthenticated peers (they are verbatim source copies).
     if p == "/snapshots":
-        if self._need_auth():
-            return
         return self._json(*daemon.snapshot_list(q.get("limit") or 0))
     if p.startswith("/snapshots/"):
-        if self._need_auth():
-            return
         rest = p[len("/snapshots/") :]
         if "/files/" in rest:
             bucket, _, rel = rest.partition("/files/")
@@ -20392,8 +20435,6 @@ def route_get(self, daemon):  # noqa: N802
         )
     # D-CRON-02..05: scheduler introspection.
     if p == "/cron/list":
-        if self._need_auth():
-            return
         return self._json(
             200,
             {
