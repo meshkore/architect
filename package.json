@@ -12,7 +12,8 @@
     "preview": "vite preview --port 4174",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "check": "npm run typecheck && npm run lint",
+    "test": "node --test 'src/**/*.test.ts'",
+    "check": "npm run typecheck && npm run lint && npm test",
     "deploy:preview": "npm run build && npx wrangler pages deploy dist --project-name meshkore-portal --branch preview-solid --commit-dirty=true",
     "deploy:prod": "npm run build && npx wrangler pages deploy dist --project-name meshkore-portal --branch main --commit-dirty=true",
     "gen:accent": "python3 scripts/gen_accent_remap.py"

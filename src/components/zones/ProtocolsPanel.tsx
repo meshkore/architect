@@ -18,15 +18,15 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
 import { createStore } from 'solid-js/store';
 import { daemonStore } from '~/state/daemon';
-import { ensureMarked } from '~/lib/cdn-loaders';
 import { uiStore } from '~/state/ui';
-import { log } from '~/lib/log';
+import { Markdown } from '~/components/ui/Markdown';
+import { Pill, type PillTone } from '~/components/ui/Pill';
+import { TabButton } from '~/components/ui/TabButton';
 import type { ProtocolSummary, ProtocolListResponse } from '~/lib/daemon-client';
 
 interface BodyState {
   loading: boolean;
   body: string | null;
-  html: string | null;
   error: string | null;
   frontmatter: Record<string, unknown> | null;
 }
@@ -77,10 +77,10 @@ export default function ProtocolsPanel() {
   const loadBody = async (id: string): Promise<void> => {
     if (bodies[id]?.body) return;
     if (bodies[id]?.loading) return;
-    setBodies(id, { loading: true, body: null, html: null, error: null, frontmatter: null });
+    setBodies(id, { loading: true, body: null, error: null, frontmatter: null });
     const client = daemonStore.state.client;
     if (!client) {
-      setBodies(id, { loading: false, body: null, html: null, error: 'no daemon', frontmatter: null });
+      setBodies(id, { loading: false, body: null, error: 'no daemon', frontmatter: null });
       return;
     }
     const r = await client.protocolDetail(id);
@@ -88,23 +88,14 @@ export default function ProtocolsPanel() {
       setBodies(id, {
         loading: false,
         body: null,
-        html: null,
         error: r.error ?? `HTTP ${r.status}`,
         frontmatter: null,
       });
       return;
     }
-    let html: string | null = null;
-    try {
-      const marked = await ensureMarked();
-      html = marked.parse(r.data.body, { gfm: true });
-    } catch (e) {
-      log.warn('protocols marked render failed', e instanceof Error ? e.message : String(e));
-    }
     setBodies(id, {
       loading: false,
       body: r.data.body,
-      html,
       error: null,
       frontmatter: r.data.frontmatter ?? null,
     });
@@ -159,9 +150,17 @@ export default function ProtocolsPanel() {
               class="bg-gray-900/60 border border-gray-800 rounded-md px-3 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500/50 flex-1 max-w-xs"
             />
             <div class="flex items-center gap-1">
-              <ScopePill label="all" active={scopeFilter() === 'all'} onClick={() => setScopeFilter('all')} />
-              <ScopePill label="cluster" active={scopeFilter() === 'cluster'} onClick={() => setScopeFilter('cluster')} />
-              <ScopePill label="project" active={scopeFilter() === 'project'} onClick={() => setScopeFilter('project')} />
+              <For each={['all', 'cluster', 'project'] as const}>
+                {(s) => (
+                  <TabButton
+                    tone="violet"
+                    active={scopeFilter() === s}
+                    onClick={() => setScopeFilter(s)}
+                  >
+                    {s}
+                  </TabButton>
+                )}
+              </For>
             </div>
           </div>
 
@@ -184,7 +183,7 @@ export default function ProtocolsPanel() {
                 <ProtocolCard
                   proto={p}
                   expanded={expanded() === p.id}
-                  state={bodies[p.id] ?? { loading: false, body: null, html: null, error: null, frontmatter: null }}
+                  state={bodies[p.id] ?? { loading: false, body: null, error: null, frontmatter: null }}
                   onToggle={() => toggle(p.id)}
                 />
               )}
@@ -193,22 +192,6 @@ export default function ProtocolsPanel() {
         </div>
       </div>
     </div>
-  );
-}
-
-function ScopePill(props: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      class={`px-2.5 py-1 rounded-md text-[10px] font-mono uppercase tracking-wider transition-colors ${
-        props.active
-          ? 'bg-violet-500/15 text-violet-300 border border-violet-500/40'
-          : 'text-gray-500 hover:text-gray-300 border border-transparent'
-      }`}
-    >
-      {props.label}
-    </button>
   );
 }
 
@@ -275,11 +258,11 @@ function ProtocolCard(props: {
           <Show when={props.state.error}>
             <p class="text-xs text-red-400 font-mono">load failed — {props.state.error}</p>
           </Show>
-          <Show when={props.state.html}>
-            <div class="md prose prose-invert max-w-none text-[13px] leading-relaxed" innerHTML={props.state.html ?? ''} />
-          </Show>
-          <Show when={!props.state.html && props.state.body && !props.state.loading}>
-            <pre class="whitespace-pre-wrap text-[12px] text-gray-300 font-mono leading-relaxed">{props.state.body ?? ''}</pre>
+          <Show when={props.state.body}>
+            <Markdown
+              text={props.state.body ?? ''}
+              fallbackClass="whitespace-pre-wrap text-[12px] text-gray-300 font-mono leading-relaxed"
+            />
           </Show>
         </div>
       </Show>
@@ -287,18 +270,19 @@ function ProtocolCard(props: {
   );
 }
 
+/** A runbook's lifecycle: stable is safe to follow, draft is not yet,
+ *  deprecated is kept only for history — so the three read differently. */
 function StatusBadge(props: { status: string }) {
-  const cls = () => {
+  const tone = (): PillTone => {
     switch (props.status) {
-      case 'stable': return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
-      case 'draft': return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
-      case 'deprecated': return 'bg-gray-700/40 text-gray-500 border-gray-700';
-      default: return 'bg-gray-800/60 text-gray-400 border-gray-700';
+      case 'stable': return 'accent';
+      case 'draft': return 'warn';
+      default: return 'neutral';
     }
   };
   return (
-    <span class={`px-1.5 py-0.5 rounded border text-[9px] font-mono uppercase tracking-wider ${cls()}`}>
+    <Pill tone={tone()} muted={props.status === 'deprecated'} class="!px-1.5 !py-0.5 !text-[9px]">
       {props.status}
-    </span>
+    </Pill>
   );
 }

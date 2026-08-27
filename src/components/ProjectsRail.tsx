@@ -26,6 +26,7 @@
 
 import { For, Show, createMemo, createEffect, onCleanup, onMount, untrack } from 'solid-js';
 import { uiStore } from '~/state/ui';
+import { daemonStore } from '~/state/daemon';
 import ProjectsRailRow from '~/components/ProjectsRailRow';
 import { PORT_LO, PORT_HI, discoverProjects, scanning, setScanning } from '~/components/projects-rail/discovery';
 import { rows } from '~/components/projects-rail/rows';
@@ -73,6 +74,20 @@ export default function ProjectsRail() {
   // list (not an N-port sweep). V86e removed boot discovery for the old
   // per-port model; re-added here for the central model.
   onMount(() => { void discoverProjects(); });
+
+  // AX6 — keep the liveness of rows we have NO instance for honest. The
+  // per-row dot reads the instance's real wsState when there is one, but
+  // a background project the operator never opened has only its last
+  // discovery probe — and V86e removed the periodic scan, so that probe
+  // was from page load. Piggyback on the daemon store's existing 60s
+  // health poll (one cheap /health + /projects per known port) rather
+  // than adding a second timer.
+  onMount(() => {
+    const detach = daemonStore.onHealthPoll(() => {
+      void untrack(() => discoverProjects());
+    });
+    onCleanup(detach);
+  });
 
   // Onboarding "Watching for your daemon" loop (re-added 2026-06-24).
   // NewPromptScreen flips `scanning()` ON when the operator is about to

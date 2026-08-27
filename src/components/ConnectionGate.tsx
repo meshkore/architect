@@ -180,7 +180,9 @@ function Unauthorized(props: { token: string; onTokenInput: (v: string) => void;
     <div>
       <h2 class="text-lg font-bold mb-2">Daemon found — needs a token</h2>
       <p class="text-gray-400 text-sm leading-relaxed mb-3">
-        Paste the contents of <span class="font-mono text-emerald-300">.meshkore/credentials/architect-token</span> below. Stored only in this browser.
+        {/* AX9 (OB-F11) — the file is `portal-token`. `architect-token`
+            never existed; operators pasted nothing and retried forever. */}
+        Paste the contents of <span class="font-mono text-emerald-300">.meshkore/credentials/portal-token</span> below. Stored only in this browser.
       </p>
       <input
         type="password"

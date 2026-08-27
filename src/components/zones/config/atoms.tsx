@@ -1,6 +1,6 @@
-import { Show } from 'solid-js';
+import { Show, type JSX } from 'solid-js';
 
-export function Block(props: { title: string; subtitle?: string; children: any }) {
+export function Block(props: { title: string; subtitle?: string; children: JSX.Element }) {
   return (
     <div class="bg-gray-900/40 border border-gray-800/60 rounded-lg p-4 mb-4">
       <h3 class="text-xs font-mono uppercase tracking-wider text-gray-500 mb-1">{props.title}</h3>
@@ -19,7 +19,7 @@ export function KV(props: { k: string; v: string }) {
   );
 }
 
-export function BtnRow(props: { children: any }) {
+export function BtnRow(props: { children: JSX.Element }) {
   return <div class="flex flex-wrap gap-2 mt-3">{props.children}</div>;
 }
 
@@ -47,7 +47,7 @@ export function Toggle(props: { checked: boolean; onChange: (v: boolean) => void
   );
 }
 
-export function Btn(props: { onClick: () => void; disabled?: boolean; danger?: boolean; children: any }) {
+export function Btn(props: { onClick: () => void; disabled?: boolean; danger?: boolean; children: JSX.Element }) {
   const klass = props.danger
     ? 'border-red-500/30 hover:border-red-500/60 text-red-300 hover:text-red-200'
     : 'border-gray-800 hover:border-emerald-500/30 text-gray-300 hover:text-emerald-300';

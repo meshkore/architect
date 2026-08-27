@@ -227,17 +227,25 @@ async function doRefresh(client: DaemonClient, key: string): Promise<void> {
   // the project to the centre-zone reconnect flow (OfflinePanel: auto re-probe
   // /health → re-attach the moment it answers, else manual-restart guidance).
   // This auto-recovers BOTH a real daemon outage AND a wedged tab (the re-probe
-  // re-establishes the connection). Dynamic import keeps server.ts free of the
-  // daemonStore cycle. Only the active cluster — the rail and other clusters
-  // are untouched.
+  // re-establishes the connection). Only the active cluster — the rail and
+  // other clusters are untouched.
   const n = (consecutiveStateFail.get(key) ?? 0) + 1;
   consecutiveStateFail.set(key, n);
   if (key === activeClusterKey && n >= STATE_FAIL_THRESHOLD) {
     consecutiveStateFail.set(key, 0);
-    void import('~/state/daemon')
-      .then(({ daemonStore }) => daemonStore.markActiveDisconnected(key, 'lost'))
-      .catch(() => undefined);
+    // AX15 — was `await import('~/state/daemon')`, a dynamic import used
+    // purely to dodge the import cycle. The app wires the real handler at
+    // boot (lib/cluster-bind) so this store stays a leaf.
+    disconnectHandler?.(key);
   }
+}
+
+/** AX15 — "this cluster is unreachable" sink, registered by the app so
+ *  server.ts never imports the daemon store. */
+type DisconnectHandler = (key: string) => void;
+let disconnectHandler: DisconnectHandler | null = null;
+function setDisconnectHandler(fn: DisconnectHandler | null): void {
+  disconnectHandler = fn;
 }
 
 const consecutiveStateFail = new Map<string, number>();
@@ -314,6 +322,49 @@ function clear(): void {
   if (activeClusterKey) clearForCluster(activeClusterKey);
 }
 
+// ── live-task overlay poll (AX15 / ST-9) ─────────────────────────────
+// py-1.28.3 — poll the active project's live-task overlay so the roadmap
+// shows a loader on each task a subagent is working on RIGHT NOW, reliably,
+// even if a conv.* WS event was missed (reconnect / project switch). Cheap
+// endpoint (~<1KB). Cleared immediately on project switch to avoid a flash of
+// the previous project's live set.
+//
+// Lived as a bare setInterval in App.tsx's body; moved here with explicit
+// start/stop. The daemon store is passed in as a source function so this
+// store stays a leaf (same reason as `setDisconnectHandler`).
+const LIVE_TASK_POLL_MS = 2500;
+export type LiveTaskSource = () => { client: DaemonClient | null; activeId: string | null };
+let liveTaskTimer: ReturnType<typeof setInterval> | null = null;
+
+function startLiveTaskPoll(source: LiveTaskSource): void {
+  if (liveTaskTimer !== null) return;
+  let lastProject: string | null = null;
+  liveTaskTimer = setInterval(() => {
+    const { client, activeId } = source();
+    if (!client || !activeId) {
+      setActiveLiveTasks([]);
+      lastProject = null;
+      return;
+    }
+    if (activeId !== lastProject) {
+      setActiveLiveTasks([]); // switch — drop the old project's set at once
+      lastProject = activeId;
+    }
+    void client.liveTasks().then((r) => {
+      // Guard against a result landing after a switch.
+      if (source().activeId !== activeId) return;
+      if (r.ok) setActiveLiveTasks(r.data.tasks ?? []);
+    });
+  }, LIVE_TASK_POLL_MS);
+}
+
+function stopLiveTaskPoll(): void {
+  if (liveTaskTimer !== null) {
+    clearInterval(liveTaskTimer);
+    liveTaskTimer = null;
+  }
+}
+
 export const serverStore = {
   state,
   refresh,
@@ -323,6 +374,9 @@ export const serverStore = {
   clearAll,
   setActiveCluster,
   setActiveLiveTasks,
+  setDisconnectHandler,
+  startLiveTaskPoll,
+  stopLiveTaskPoll,
 };
 
 // ── Derived selectors (read from the facade = active cluster) ────────

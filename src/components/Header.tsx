@@ -2,6 +2,7 @@
 
 import { Show, createSignal } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
+import { activeLinkStatus, type LinkStatus } from '~/lib/connection-status';
 import { activeProject } from '~/state/projects';
 import { uiStore, type Zone } from '~/state/ui';
 import { mcModal } from '~/lib/modal';
@@ -164,8 +165,51 @@ export default function Header() {
           <ThemePicker />
         </div>
       </div>
+      <ConnectionBanner />
       <GeneralConfigDrawer open={genOpen()} onClose={() => setGenOpen(false)} />
     </header>
+  );
+}
+
+/**
+ * AX1 — the disconnection strip.
+ *
+ * Sits inside the sticky header, directly above the rail + workspace,
+ * so it reads as a workspace-level notice without blanking anything.
+ * The whole point: the data on screen STAYS visible and is explicitly
+ * marked stale. Before this, `wsState` rendered nowhere but the debug
+ * modal — the operator got a green pill over a frozen cockpit and no
+ * signal at all until they reloaded.
+ */
+function ConnectionBanner() {
+  const status = () => activeLinkStatus();
+  return (
+    <Show when={status() === 'reconnecting' || status() === 'paused'}>
+      <div
+        role="status"
+        aria-live="polite"
+        class={`flex items-center gap-2 px-3 py-1 border-t text-[11px] leading-none ${
+          status() === 'reconnecting'
+            ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+            : 'bg-red-500/10 border-red-500/30 text-red-200'
+        }`}
+      >
+        <span
+          class={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+            status() === 'reconnecting' ? 'bg-amber-400 animate-pulse-soft' : 'bg-red-400'
+          }`}
+          aria-hidden="true"
+        />
+        <span class="font-medium">
+          {status() === 'reconnecting' ? 'Reconnecting…' : 'Live updates paused — retrying'}
+        </span>
+        <span class="opacity-70">
+          {status() === 'reconnecting'
+            ? 'What you see may be a few seconds behind.'
+            : "What you see is the last state we received. It refreshes the moment the daemon answers."}
+        </span>
+      </div>
+    </Show>
   );
 }
 
@@ -188,37 +232,75 @@ function ZoneButton(props: { zone: typeof ZONES[number] }) {
   );
 }
 
+// AX1 — one palette for every connection surface (plate dot, pill, dot
+// inside the pill). Derived from `lib/connection-status`, so the three
+// can never disagree the way `phase`-only and hardcoded-emerald did.
+const LINK_DOT: Record<LinkStatus, string> = {
+  connected: 'bg-emerald-400',
+  reconnecting: 'bg-amber-400 animate-pulse-soft',
+  paused: 'bg-red-400',
+  offline: 'bg-gray-500',
+};
+
+const LINK_PILL: Record<LinkStatus, string> = {
+  connected: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300',
+  reconnecting: 'bg-amber-500/15 border-amber-500/40 text-amber-300',
+  paused: 'bg-red-500/15 border-red-500/40 text-red-300',
+  offline: 'bg-red-500/15 border-red-500/40 text-red-300',
+};
+
+const LINK_TITLE: Record<LinkStatus, string> = {
+  connected: 'Daemon connected — live updates flowing',
+  reconnecting: 'Reconnecting to the daemon…',
+  paused: 'Live updates paused — the socket gave up and is being retried',
+  offline: 'No daemon connection',
+};
+
 function ProjectPlate() {
   const p = activeProject;
   const fallbackName = () => daemonStore.state.health?.cluster_name ?? daemonStore.state.health?.identity ?? '—';
+  // Was hardcoded emerald: it stayed green through `reconnecting` AND
+  // `fatal`, which is the single most misleading pixel in the cockpit.
+  const status = () => activeLinkStatus();
   return (
     <>
-      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+      <span
+        class={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${LINK_DOT[status()]}`}
+        title={LINK_TITLE[status()]}
+      />
       <span class="text-[12px] font-semibold text-gray-100 truncate">{p()?.cluster_name ?? fallbackName()}</span>
     </>
   );
 }
 
 function DaemonPill() {
+  const status = () => activeLinkStatus();
   const phase = () => daemonStore.state.phase;
   const version = () => daemonStore.state.health?.version;
-  const cls = () => phase() === 'connected'
-    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-    : phase() === 'connecting' || phase() === 'probing'
-      ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-      : 'bg-red-500/15 border-red-500/40 text-red-300';
-  // When connected: show "daemon · <version>" so the operator can spot
-  // auto-update bumps at a glance. Fall back to phase label when not
-  // connected, or to plain "daemon" if the health snapshot hasn't
-  // landed yet (rare race on first connect).
+  // When healthy: show "daemon · <version>" so the operator can spot
+  // auto-update bumps at a glance. Degraded states say what is wrong —
+  // reading only `phase` (which stays `connected` through reconnecting
+  // and fatal) is what made the pill lie.
   const label = () => {
-    if (phase() !== 'connected') return phase();
-    const v = version();
-    return v ? `daemon · ${v}` : 'daemon';
+    switch (status()) {
+      case 'connected': {
+        const v = version();
+        return v ? `daemon · ${v}` : 'daemon';
+      }
+      case 'reconnecting':
+        return phase() === 'connected' ? 'reconnecting' : phase();
+      case 'paused':
+        return 'paused';
+      default:
+        return phase();
+    }
   };
   return (
-    <span class={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full border text-[10px] font-mono uppercase tracking-wider ${cls()}`} title="local daemon">
-      <span class={`w-1.5 h-1.5 rounded-full ${phase() === 'connected' ? 'bg-emerald-400' : phase() === 'probing' || phase() === 'connecting' ? 'bg-amber-400' : 'bg-red-400'}`} />
+    <span
+      class={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full border text-[10px] font-mono uppercase tracking-wider ${LINK_PILL[status()]}`}
+      title={LINK_TITLE[status()]}
+    >
+      <span class={`w-1.5 h-1.5 rounded-full ${LINK_DOT[status()]}`} />
       {label()}
     </span>
   );

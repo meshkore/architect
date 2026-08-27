@@ -25,6 +25,7 @@ import { daemonStore } from '~/state/daemon';
 import type { AgentType } from '~/state/chat';
 import { agentTypeInfo } from '~/lib/agent-types';
 import { log } from '~/lib/log';
+import { CopyButton } from '~/components/ui/CopyButton';
 
 interface Props {
   isOpen: boolean;
@@ -61,33 +62,19 @@ export default function RoleMemoryViewer(props: Props) {
       if (!t) return { available: false, content: '', entries: [] as MemoryEntry[] };
       const client = daemonStore.state.client;
       if (!client) return { available: false, content: '', entries: [] };
-      const url = `${client.transport.httpBase}/agents/types/${encodeURIComponent(t)}/memory`;
-      try {
-        const r = await fetch(url, {
-          headers: client.transport.token ? { authorization: `Bearer ${client.transport.token}` } : {},
-        });
-        if (r.status === 404) return { available: true, content: '', entries: [] };
-        if (!r.ok) {
-          log.debug('role memory endpoint missing', r.status);
-          return { available: false, content: '', entries: [] };
-        }
-        const body = (await r.json()) as { content?: string };
-        const content = body.content ?? '';
+      const r = await client.roleMemory(t);
+      // 404 = the endpoint exists and there is simply no memory file yet;
+      // anything else non-2xx = this daemon predates py-1.7.x, which is
+      // the "unavailable" state the empty view explains.
+      if (r.ok) {
+        const content = r.data.content ?? '';
         return { available: true, content, entries: parseMemory(content) };
-      } catch (e) {
-        log.debug('role memory fetch failed', e);
-        return { available: false, content: '', entries: [] };
       }
+      if (r.status === 404) return { available: true, content: '', entries: [] };
+      log.debug('role memory endpoint missing', r.status);
+      return { available: false, content: '', entries: [] };
     },
   );
-
-  const copyPath = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(absPath());
-    } catch (e) {
-      log.warn('clipboard write failed', e);
-    }
-  };
 
   return (
     <Modal isOpen={props.isOpen} onClose={() => props.onClose()} title={`Role memory · ${info().label}`}>
@@ -136,13 +123,13 @@ export default function RoleMemoryViewer(props: Props) {
           <code class="font-mono text-[10px] text-gray-500 truncate flex-1" title={absPath()}>
             {absPath()}
           </code>
-          <button
-            type="button"
-            onClick={() => void copyPath()}
+          <CopyButton
+            text={absPath}
+            label="copy path"
+            copiedLabel="copied ✓"
+            title="Copy the absolute path so you can open it in your editor"
             class="px-2.5 py-1 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] font-mono transition-colors"
-          >
-            copy path
-          </button>
+          />
         </div>
       </div>
     </Modal>

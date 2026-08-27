@@ -20,6 +20,7 @@ import { Show, createSignal, type JSX } from 'solid-js';
 import { DaemonClient } from '~/lib/daemon-client';
 import { localTransport } from '~/lib/transport';
 import { clusterTokenKey, saveTokenForCluster, type ClusterIdentity } from '~/lib/tokens';
+import { daemonStore } from '~/state/daemon';
 import { log } from '~/lib/log';
 
 export interface TokenUnlockOpts {
@@ -29,8 +30,14 @@ export interface TokenUnlockOpts {
   reason?: string;
   /** Fired once the operator pasted a token that /credentials accepted. */
   onUnlocked: (token: string) => void;
-  /** Fired if the operator dismissed without unlocking. */
+  /** Fired when the operator DISMISSED the prompt (× / Cancel). The
+   *  switch flow reads this as "show it read-only". */
   onCancel?: () => void;
+  /** Fired when the prompt was dropped without an operator decision —
+   *  they switched to another project. Distinct from `onCancel` on
+   *  purpose: the pending switch must settle, but attaching the project
+   *  they just walked away from would yank the cockpit back to it. */
+  onDismissed?: () => void;
 }
 
 const [opts, setOpts] = createSignal<TokenUnlockOpts | null>(null);
@@ -50,10 +57,20 @@ export function tokenPromptOpts(): TokenUnlockOpts | null {
   return opts();
 }
 
-/** Drop any pending token prompt — called on cluster switch so a stale
- *  prompt for project A doesn't linger over project B. */
+/**
+ * Drop any pending token prompt — called on cluster switch so a stale
+ * prompt for project A doesn't linger over project B.
+ *
+ * AX9 (OB-F3): this used to drop the prompt WITHOUT settling anything.
+ * The switch flow's no-token branch returns a promise that only
+ * `onUnlocked` / `onCancel` resolve, so the project's in-flight guard
+ * (`lib/project-switch`) held its key forever and the row became
+ * un-clickable until a page reload.
+ */
 export function clearTokenPrompt(): void {
+  const cur = opts();
   setOpts(null);
+  cur?.onDismissed?.();
 }
 
 function dismiss(): void {
@@ -61,6 +78,26 @@ function dismiss(): void {
   setOpts(null);
   cur?.onCancel?.();
 }
+
+// AX15 — the daemon store used to import this module directly (the only
+// store → component edge in the cockpit). Inverted: the UI registers
+// itself, mirroring `setReauthHandler`. Registration happens at MODULE
+// load, not component mount, because the panel only mounts once a
+// prompt exists — far too late to be the thing that opens it.
+daemonStore.setTokenPromptHandler({
+  open: (req) => openTokenUnlockModal({
+    project: {
+      port: req.project.port,
+      cluster_id: req.project.cluster_id,
+      cluster_name: req.project.cluster_name,
+    },
+    reason: req.reason,
+    onUnlocked: req.onUnlocked,
+    onCancel: req.onCancel,
+    onDismissed: req.onDismissed,
+  }),
+  clear: clearTokenPrompt,
+});
 
 async function validate(token: string, port: number): Promise<{ ok: true } | { ok: false; message: string }> {
   try {

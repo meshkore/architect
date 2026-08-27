@@ -46,6 +46,11 @@ const ALIAS_KEY = 'mc-project-aliases-v1';
 // fix only filtered when a live server_home signal was present, so the home
 // reappeared whenever the daemon was down.
 const HOME_IDS_KEY = 'mc-server-home-ids-v1';
+/** Sticky-boot pointer: the last REAL project the operator viewed.
+ *  Written by the cluster-bind bus, read by `lib/connection` at boot,
+ *  scrubbed by `forget()` — it lives here because this module owns the
+ *  per-project localStorage surface. */
+export const LAST_PROJECT_KEY = 'mc-last-project-id-v1';
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export interface KnownProject {
@@ -316,7 +321,17 @@ export function forget(target: { cluster_id?: string; port?: number }): boolean 
     }
   } catch { /* ignore */ }
 
-  // 5. Scrub from the operator-saved rail order so the next session
+  // 5. AX8 (OB-F10) — drop the sticky-boot pointer when it names the
+  //    project being forgotten. `connection.ts` reads this on every boot
+  //    to land directly on the last-viewed project, so leaving it behind
+  //    put the operator right back inside the row they just deleted.
+  try {
+    if (target.cluster_id && localStorage.getItem(LAST_PROJECT_KEY) === target.cluster_id) {
+      localStorage.removeItem(LAST_PROJECT_KEY);
+    }
+  } catch { /* ignore */ }
+
+  // 6. Scrub from the operator-saved rail order so the next session
   //    doesn't carry a phantom slot.
   try {
     const ORDER_KEY = 'mc-projects-order-v1';

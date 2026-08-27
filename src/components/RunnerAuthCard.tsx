@@ -11,7 +11,6 @@
 import { createSignal, Show, onCleanup } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { log } from '~/lib/log';
-import type { DaemonEvent } from '~/lib/daemon-client';
 
 const PLATFORM_LABELS: Record<string, { name: string; hint: string }> = {
   cursor: {
@@ -56,8 +55,8 @@ export default function RunnerAuthCard(props: {
     hint: 'A browser window will open to authenticate this runner.',
   };
 
-  // Listen for auth WS events from the daemon
-  const ws = () => (daemonStore.state as any).ws as { on: (t: string, cb: (e: DaemonEvent) => void) => () => void } | undefined;
+  // Listen for auth WS events from the daemon.
+  const ws = () => daemonStore.state.ws;
 
   let ticker: ReturnType<typeof setInterval> | undefined;
   let offPolling: (() => void) | undefined;
@@ -104,25 +103,13 @@ export default function RunnerAuthCard(props: {
     const client = daemonStore.state.client;
     if (!client) { setAuthState('error'); setErrMsg('No daemon client available.'); return; }
 
-    const res = await (client as any).request?.('POST', `/auth/${props.platform}/start`, {}, undefined)
-      ?? await fetch(
-          `${(client as any).transport?.httpBase ?? ''}/auth/${props.platform}/start`,
-          {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              ...(((client as any).transport?.token) ? { authorization: `Bearer ${(client as any).transport.token}` } : {}),
-            },
-            body: '{}',
-          },
-        ).then((r) => r.json()).catch(() => ({ ok: false }));
-
-    if (!res || res.ok === false) {
+    const res = await client.authStart(props.platform);
+    if (!res.ok) {
       setAuthState('error');
-      setErrMsg(res?.body ?? res?.msg ?? 'Failed to launch login');
+      setErrMsg(res.error ?? res.body ?? 'Failed to launch login');
       stopListening();
     }
-    log.info('runner-auth start', { platform: props.platform, res });
+    log.info('runner-auth start', { platform: props.platform, ok: res.ok, status: res.status });
   };
 
   const btnLabel = () => {

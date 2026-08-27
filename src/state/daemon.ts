@@ -18,6 +18,12 @@
  * Individual instances are removed by `forget(clusterKey)` (from the
  * rail's Forget action) or replaced when an operator re-adds a
  * project at a new port.
+ *
+ * AX15 — this file owns STATE. The switch flow lives in
+ * `state/daemon/switch-flow.ts`, the WS-fatal recovery in
+ * `state/daemon/recovery.ts`, and the token-prompt UI registers itself
+ * through `setTokenPromptHandler` (there is no store → component
+ * import anywhere in the cockpit).
  */
 
 import { batch } from 'solid-js';
@@ -34,10 +40,19 @@ import { log } from '~/lib/log';
 // old main bundle, breaking the switch silently. Static imports put
 // everything in the main chunk, so a stale tab either Just Works
 // (everything already loaded) or the chunk-load guard reloads it.
-import { daemonHttpBase, localTransport } from '~/lib/transport';
-import { clusterTokenKey, tokenForCluster, saveTokenForCluster } from '~/lib/tokens';
-import { verifyDaemonIdentity } from '~/lib/auth';
-import { openTokenUnlockModal, clearTokenPrompt } from '~/components/modals/TokenUnlockModal';
+import { daemonHttpBase } from '~/lib/transport';
+import { clusterTokenKey, saveTokenForCluster } from '~/lib/tokens';
+import { bumpClusterEpoch } from '~/lib/swap-guard';
+import { createWsFatalRecovery } from '~/state/daemon/recovery';
+import {
+  runSwitchToPort,
+  type SwitchDeps,
+  type SwitchOutcome,
+  type TokenPromptPort,
+  type TokenPromptRequest,
+} from '~/state/daemon/switch-flow';
+
+export type { SwitchOutcome, TokenPromptRequest, TokenPromptPort };
 
 export type ConnectionPhase =
   | 'idle'
@@ -81,7 +96,30 @@ const busDetachers = new Map<string, () => void>();
 type ActiveChangeListener = (activeId: string | null) => void;
 const activeChangeListeners = new Set<ActiveChangeListener>();
 
+// AX15 — the token-prompt UI registers itself here (mirrors
+// setReauthHandler). Before this, the store imported the modal
+// component directly — the only store → component edge in the codebase.
+let tokenPromptHandler: TokenPromptPort | null = null;
+function setTokenPromptHandler(h: TokenPromptPort | null): void {
+  tokenPromptHandler = h;
+}
+const tokenPrompt: TokenPromptPort = {
+  open: (req: TokenPromptRequest) => {
+    if (!tokenPromptHandler) {
+      log.warn('token prompt requested but no handler is registered', { cluster: req.project.cluster_id });
+      return;
+    }
+    tokenPromptHandler.open(req);
+  },
+  clear: () => tokenPromptHandler?.clear(),
+};
+
 function notifyActiveChanged(): void {
+  // AX5 — advance the swap epoch SYNCHRONOUSLY, before anything can
+  // await. Every in-flight hydrate captured an older epoch and will now
+  // drop its result instead of writing another project's data into this
+  // one (`lib/swap-guard.ts`).
+  bumpClusterEpoch(state.activeId);
   // Defer so we never run the cross-store side-effect bus synchronously
   // inside a Solid effect (status → attachClient → notifyActiveChanged).
   // Nested flush waves during mount caused runUpdates/completeUpdates to
@@ -92,8 +130,7 @@ function notifyActiveChanged(): void {
     // doesn't linger over a different project (the prompt is per-cluster and
     // only ever opened for the one being switched to; opening does not fire
     // this, so this never clears a freshly-opened prompt).
-    clearTokenPrompt();
-    log.debug('[RAIL] notifyActiveChanged → listeners count:', activeChangeListeners.size, 'activeId:', id);
+    tokenPrompt.clear();
     for (const fn of activeChangeListeners) {
       try { fn(id); } catch (e) {
         log.warn('active-change listener threw', e instanceof Error ? e.message : String(e));
@@ -306,12 +343,9 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
   // V86e mistake: the previous version of this guard ALSO bumped
   // `activeId` back to `key` and cleared `offlineSelection` when they
   // didn't match. That clobbered the operator's "I want to see this
-  // offline row" pick — clicks on a dead-port row briefly flipped to
-  // OfflinePanel, then a stray attachClient call re-asserted the live
-  // row, and the cockpit jumped back. Now the guard is fully
-  // idempotent: if we already have a working instance for this key,
-  // we do NOTHING and return. Selection (activeId / offlineSelection)
-  // is owned exclusively by `switchToPortDetailed`, `selectOffline`,
+  // offline row" pick. Now the guard is fully idempotent: if we already
+  // have a working instance for this key, we do NOTHING and return.
+  // Selection is owned exclusively by the switch flow, `selectOffline`
   // and `clearActiveSelection`.
   const prior = state.instances[key];
   if (prior && prior.client.transport.token === client.transport.token && prior.wsState !== 'fatal') {
@@ -326,46 +360,28 @@ function attachClient(client: DaemonClient, health: HealthResponse): void {
   }
 
   const ws = new DaemonWS(client.transport);
-  // Wire wsState updates so the rail and header can render per-instance.
-  // 2026-06-12 — Auto-recover when the cluster's daemon moved ports.
-  // Symptom (operator field report): MeshKore Core daemon auto-updated,
-  // restarted on a different port, the cockpit's cached entry still
-  // pointed at the old port → WS dial loops to `fatal` → the booting
-  // overlay stays stuck on "Historial de conversaciones ⟳" forever.
-  // Recovery: when WS state flips to `fatal`, if we know this cluster's
-  // `cluster_id`, scan the local range for a daemon serving that id at
-  // a NEW port. If found, hot-swap the active client via switchToPort.
-  let recovering = false;
+  // 2026-06-12 — Auto-recover when the cluster's daemon moved ports, and
+  // (AX1) redial when it is still on the same one. Policy lives in
+  // state/daemon/recovery.ts; this closure only mirrors wsState.
+  const onFatal = createWsFatalRecovery(key, {
+    instanceInfo: (k) => {
+      const i = state.instances[k];
+      return i ? { port: i.port, clusterId: i.health?.cluster_id ?? null } : null;
+    },
+    redial: (k) => { try { state.instances[k]?.ws.connect(); } catch { /* next tick retries */ } },
+    findClusterPort: async (cid) => {
+      const { findClusterPort } = await import('~/components/projects-rail/discovery');
+      return findClusterPort(cid);
+    },
+    switchToPort: (p) => switchToPortDetailed(p),
+    markDisconnected: (k) => markActiveDisconnected(k),
+  });
   ws.onState((s) => {
     if (state.instances[key]) {
       setState('instances', key, 'wsState', s);
       if (state.activeId === key) setState('wsState', s);
     }
-    if (s !== 'fatal' || recovering) return;
-    const cid = state.instances[key]?.health?.cluster_id;
-    if (!cid) return;
-    recovering = true;
-    void (async () => {
-      try {
-        const { findClusterPort } = await import('~/components/projects-rail/discovery');
-        const found = await findClusterPort(cid);
-        if (found && found.port !== state.instances[key]?.port) {
-          log.info('ws-fatal: cluster moved ports, hot-swapping', {
-            cluster_id: cid, stale: state.instances[key]?.port, live: found.port,
-          });
-          try { localStorage.setItem('meshcore-last-port', String(found.port)); } catch { /* quota */ }
-          await daemonStore.switchToPortDetailed(found.port);
-        } else if (!found) {
-          // Daemon is gone (not just a port move) → self-healing reconnect UI
-          // in the centre zone (auto-retry + manual-restart guidance). Rail
-          // untouched. If found on the SAME port it's a WS glitch — let the
-          // socket retry on its own, don't tear the project down.
-          markActiveDisconnected(key);
-        }
-      } finally {
-        recovering = false;
-      }
-    })();
+    onFatal(s);
   });
 
   const inst: DaemonInstance = {
@@ -486,175 +502,43 @@ function setAutoUpdate(flag: boolean): void {
   setState('autoUpdateEnabled', flag);
 }
 
-/**
- * Switch the cockpit to another project, OPENING a parallel WS if
- * we haven't seen it before, or just flipping the pointer if we
- * already have an instance for it.
- *
- * Returns true on success. Never closes other projects' WS.
- */
-export type SwitchOutcome =
-  | { ok: true }
-  | { ok: false; reason: 'no-daemon' | 'tls' | 'unknown'; detail?: string };
+// ── Project switching ───────────────────────────────────────────────
+// Flow lives in state/daemon/switch-flow.ts; this is the state half it
+// drives. FC-2: one daemon serves many projects on one port, so an
+// instance is identified by its projectId, not its port.
+
+const switchDeps: SwitchDeps = {
+  findExisting: (port, projectId) => {
+    const hit = Object.entries(state.instances).find(([, i]) =>
+      projectId ? i.client.transport.projectId === projectId : i.port === port,
+    );
+    return hit ? { key: hit[0] } : null;
+  },
+  activate: (key) => {
+    if (state.activeId === key) return;
+    const inst = state.instances[key];
+    batch(() => {
+      setState({ activeId: key, offlineSelection: null, phase: 'connected', errorMessage: '' });
+      syncFacade();
+    });
+    if (inst && (inst.wsState === 'fatal' || inst.wsState === 'closed')) {
+      try { inst.ws.connect(); } catch { /* ignore */ }
+    }
+    notifyActiveChanged();
+  },
+  currentToken: () => state.client?.transport.token ?? '',
+  attach: attachClient,
+  fetchLocalToken,
+  tokenPrompt,
+};
+
+async function switchToPortDetailed(port: number, projectId?: string): Promise<SwitchOutcome> {
+  return runSwitchToPort(switchDeps, port, projectId);
+}
 
 async function switchToPort(port: number): Promise<boolean> {
   const r = await switchToPortDetailed(port);
   return r.ok;
-}
-
-async function switchToPortDetailed(port: number, projectId?: string): Promise<SwitchOutcome> {
-  log.debug('[RAIL] switchToPort entry', { port, projectId, current: state.health?.port ?? null, instances: Object.keys(state.instances) });
-  log.info('switchToPort requested', { port, projectId, current: state.health?.port ?? null });
-
-  // FC-2 (daemon-centralized) — ONE daemon serves MANY projects, so an instance
-  // is identified by its projectId, not its port. Match by projectId when given
-  // (multiple instances share a port); fall back to port for single-project /
-  // legacy daemons that send no project id.
-  const existing = Object.entries(state.instances).find(([, i]) =>
-    projectId ? i.client.transport.projectId === projectId : i.port === port,
-  );
-  if (existing) {
-    const [key, inst] = existing;
-    log.debug('[RAIL] switchToPort reusing existing instance', { key, port });
-    if (state.activeId !== key) {
-      batch(() => {
-        setState({ activeId: key, offlineSelection: null, phase: 'connected', errorMessage: '' });
-        syncFacade();
-      });
-      if (inst.wsState === 'fatal' || inst.wsState === 'closed') {
-        try { inst.ws.connect(); } catch { /* ignore */ }
-      }
-      notifyActiveChanged();
-    }
-    return { ok: true };
-  }
-
-  // V93 — All deps that used to be `await import(...)` are now static
-  // imports at the top of this file. The old dynamic imports were
-  // landmines on every deploy: a stale tab loaded the old main bundle
-  // referencing chunk hashes that the new CDN deploy no longer
-  // served. `~/lib/auth` was particularly exposed because it had no
-  // other static importers — Vite emitted it as its own `auth-<hash>.js`
-  // chunk, which 404'd for the operator's old tab. Static-importing
-  // them puts every dep in the main bundle, so the next time the
-  // operator clicks switchProject on a stale tab, it either works
-  // (everything already loaded) or the global chunk-error handler
-  // (see lib/dynamic-import-guard) reloads the page.
-  const oldToken = state.client?.transport.token ?? '';
-  const probeUrl = `${daemonHttpBase(port)}/health`;
-  let health: HealthResponse;
-  try {
-    log.debug('[RAIL] switchToPort probing', probeUrl);
-    // V108 — bounded probe. Without a timeout a hung /health (TLS stall,
-    // saturated connection pool) left switchToPortDetailed pending
-    // forever, so the switchProject in-flight guard never cleared and
-    // the project was stuck un-switchable. 5s is well above a healthy
-    // localhost /health (<100ms) yet bounds the worst case.
-    // FC-2 — probe the SELECTED project's /health (DC-4 makes /health honour
-    // the header), so health.cluster_id == projectId and the instance keys
-    // correctly even when many projects share this daemon/port.
-    const r = await fetch(probeUrl, {
-      headers: projectId ? { 'X-MeshKore-Project': projectId } : {},
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!r.ok) {
-      console.warn('[RAIL] switchToPort probe non-OK', { port, status: r.status });
-      log.warn('switchToPort probe failed', port, r.status);
-      return { ok: false, reason: 'no-daemon', detail: `HTTP ${r.status}` };
-    }
-    health = (await r.json()) as HealthResponse;
-    log.debug('[RAIL] switchToPort probe OK', { port, cluster_id: health.cluster_id });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn('[RAIL] switchToPort fetch threw', { port, error: msg });
-    log.warn('switchToPort fetch threw', port, e);
-    // ERR_SSL_PROTOCOL_ERROR / ERR_CERT_* surface as plain TypeError in
-    // fetch — distinguish from a closed port by sniffing the message.
-    const isTls = /ssl|tls|cert/i.test(msg);
-    return { ok: false, reason: isTls ? 'tls' : 'no-daemon', detail: msg };
-  }
-  const tokenKey = clusterTokenKey({ cluster_id: health.cluster_id ?? null, port });
-  const token = tokenForCluster(tokenKey) || oldToken;
-
-  // D-TLS-02 — challenge-response identity check before we attach.
-  // When the daemon supports it AND we have a token for this cluster,
-  // require a passing HMAC handshake. A mismatch suggests an
-  // attacker-impersonated endpoint (DNS poisoned + valid TLS cert);
-  // we refuse to attach and surface a clear error.
-  const verify = await verifyDaemonIdentity(daemonHttpBase(port), token, health.features ?? []);
-  log.debug('[RAIL] switchToPort identity', { port, outcome: verify.kind });
-
-  if (verify.kind === 'no-token') {
-    // LOCAL auto-unlock (py-1.27.6) — a token for your OWN local daemon is
-    // pointless friction. The daemon hands its bearer token to the
-    // same-origin cockpit over loopback (GET /auth/local-token, origin-gated),
-    // so a local project connects with NO prompt. Only if that fails (the
-    // future CLOUD daemon, a different origin, or an opt-out) do we fall back
-    // to asking for the token.
-    const localTok = await fetchLocalToken(port);
-    if (localTok) {
-      saveTokenForCluster(tokenKey, localTok);
-      log.info('switchToPort — auto-unlocked local cluster', { port, cluster: health.cluster_id });
-      return switchToPortDetailed(port, projectId); // re-attach now that the token is stored
-    }
-    // Daemon is reachable but we have no token and couldn't auto-acquire one.
-    log.info('switchToPort — no token for cluster, opening unlock dialog', { port, cluster: health.cluster_id });
-    return new Promise<SwitchOutcome>((resolve) => {
-      openTokenUnlockModal({
-        project: { port, cluster_id: health.cluster_id ?? null, cluster_name: health.cluster_name ?? null },
-        onUnlocked: (_tok) => {
-          // Token is now saved in the per-cluster map; re-attach.
-          void switchToPortDetailed(port, projectId).then(resolve);
-        },
-        onCancel: () => {
-          // Operator dismissed — attach anyway with empty token so the project
-          // becomes visible (read-only); they can unlock later from the rail.
-          const c = new DaemonClient(localTransport(port, ''));
-          attachClient(c, health);
-          resolve({ ok: true });
-        },
-      });
-    });
-  }
-
-  if (verify.kind === 'mismatch') {
-    // FC-2 (daemon-centralized) — a mismatch on a LOCAL daemon is almost always
-    // a STALE token (the daemon re-minted, or a different daemon used this port
-    // before — common now that ONE central daemon replaces the per-port ones),
-    // NOT a real MITM. If the daemon offers local auto-unlock, re-fetch its
-    // current token and retry ONCE. Only refuse if the fresh token is the same
-    // (genuinely wrong) or unavailable (remote daemon / opt-out).
-    const freshTok = await fetchLocalToken(port);
-    if (freshTok && freshTok !== token) {
-      saveTokenForCluster(tokenKey, freshTok);
-      log.info('switchToPort — stale token replaced via local auto-unlock; retrying', { port, cluster: health.cluster_id });
-      return switchToPortDetailed(port, projectId);
-    }
-    log.error('switchToPort REFUSED — auth challenge failed (possible MITM)', { port, cluster: health.cluster_id });
-    openTokenUnlockModal({
-      project: { port, cluster_id: health.cluster_id ?? null, cluster_name: health.cluster_name ?? null },
-      reason:
-        'Auth challenge failed — the daemon at ' +
-        `https://daemon.meshkore.com:${port} couldn't prove ownership of the stored ` +
-        'token. Likely causes: stale local token, or someone impersonating the daemon on ' +
-        'this network. Paste a fresh token from .meshkore/credentials/portal-token, ' +
-        'or move to a trusted network.',
-      onUnlocked: () => { void switchToPortDetailed(port, projectId); },
-    });
-    return { ok: false, reason: 'unknown', detail: 'auth mismatch' };
-  }
-
-  // FC-1/FC-2 — carry the project id so the daemon routes this client's
-  // requests to the right ProjectContext. Today each per-port daemon's default
-  // project IS this cluster, so the header matches; once one daemon serves many
-  // projects (OC-1) this is what disambiguates them.
-  const client = new DaemonClient(
-    localTransport(port, token, projectId ?? health.cluster_id ?? undefined),
-  );
-  attachClient(client, health);
-  log.debug('[RAIL] switchToPort attached new instance', { port, cluster_id: health.cluster_id ?? null });
-  log.info('switchToPort attached', { port, cluster_id: health.cluster_id ?? null, identity: verify.kind });
-  return { ok: true };
 }
 
 /**
@@ -665,7 +549,6 @@ async function switchToPortDetailed(port: number, projectId?: string): Promise<S
  * UI updates immediately (same path as a real switch).
  */
 function selectOffline(target: OfflineSelection): void {
-  log.debug('[RAIL] selectOffline', target);
   batch(() => {
     setState({
       activeId: null,
@@ -750,12 +633,12 @@ function clearActiveSelection(): void {
 async function recheckHealth(): Promise<boolean> {
   const id = state.activeId;
   const inst = id ? state.instances[id] : null;
-  if (!inst) return false;
+  if (!inst || !id) return false;
   const r = await inst.client.health();
   if (!r.ok) return false;
   const v = parseDaemonVersion(r.data.version);
   const supportsSelfUpdate = (r.data.features ?? []).includes('self_update');
-  setState('instances', id!, {
+  setState('instances', id, {
     health: r.data,
     version: v,
     // V107.14 — recheck after operator-triggered update also accounts for
@@ -781,6 +664,15 @@ function setRunnerAuth(req: RunnerAuthRequest | null): void {
 // fleet grows. Refreshes every connected instance (not just the
 // active one) so per-project version state stays current too.
 const HEALTH_POLL_MS = 60_000;
+
+/** AX6 — subscribers that want to piggyback on the health-poll cadence
+ *  (the rail refreshes the liveness of rows it has NO instance for). */
+const healthPollListeners = new Set<() => void>();
+function onHealthPoll(fn: () => void): () => void {
+  healthPollListeners.add(fn);
+  return () => { healthPollListeners.delete(fn); };
+}
+
 async function refreshAllInstanceHealth(): Promise<void> {
   const ids = Object.keys(state.instances);
   for (const id of ids) {
@@ -815,7 +707,33 @@ async function refreshAllInstanceHealth(): Promise<void> {
     }
   }
   syncFacade();
+  for (const fn of healthPollListeners) {
+    try { fn(); } catch (e) { log.warn('health-poll listener threw', e instanceof Error ? e.message : String(e)); }
+  }
 }
+
+/**
+ * AX2 — redial every socket that has given up, without waiting for the
+ * 60s poll. Called by the wake/online handler: after a laptop sleep the
+ * retry budget is already spent, so nothing reconnects on its own.
+ * Returns how many sockets were revived.
+ */
+function reviveDeadSockets(): number {
+  let revived = 0;
+  for (const id of Object.keys(state.instances)) {
+    const inst = state.instances[id];
+    if (!inst?.ws.isDead()) continue;
+    try {
+      inst.ws.connect();
+      revived += 1;
+    } catch {
+      /* next tick retries */
+    }
+  }
+  if (revived > 0) log.info('wake — redialing dead sockets', { revived });
+  return revived;
+}
+
 // A-HEALTH-01 (V109) — idempotent start so HMR / repeated imports don't
 // stack duplicate intervals (the old bare module-level setInterval leaked
 // a timer + fetch loop per reload). Exposed stop for app teardown.
@@ -845,6 +763,9 @@ export const daemonStore = {
   setAutoUpdate,
   recheckHealth,
   stopHealthPoll,
+  refreshAllInstanceHealth,
+  reviveDeadSockets,
+  onHealthPoll,
   switchToPort,
   switchToPortDetailed,
   selectOffline,
@@ -852,6 +773,7 @@ export const daemonStore = {
   clearActiveSelection,
   onActiveChanged,
   setRunnerAuth,
+  setTokenPromptHandler,
 };
 
 /**

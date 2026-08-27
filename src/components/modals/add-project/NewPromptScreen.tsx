@@ -22,13 +22,14 @@
  * brand-new daemon on ANY port is found automatically, no refresh.
  */
 import { createSignal, createMemo, createEffect, onMount, Show } from 'solid-js';
-import { genPrompt, type AddProjectAnswers } from './genPrompt';
+import { basename, genPrompt, slugify, type AddProjectAnswers } from './genPrompt';
 import { projectsRailScan } from '~/components/ProjectsRail';
-import { liveClusters, type LiveProbe } from '~/components/projects-rail/discovery';
-import { switchProject } from '~/components/ProjectsRailRow';
+import { discoverProjects, liveClusters, type LiveProbe } from '~/components/projects-rail/discovery';
+import { switchProject } from '~/lib/project-switch';
 import { closeAddProjectWizard } from '~/components/modals/AddProjectWizard';
-import { clusterTokenKey, tokenForCluster } from '~/lib/tokens';
 import { daemonStore } from '~/state/daemon';
+import { projectsStore } from '~/state/projects';
+import * as kp from '~/lib/known-projects';
 import { log } from '~/lib/log';
 import WizardStep from './WizardStep';
 
@@ -37,6 +38,21 @@ type RegisterState =
   | { kind: 'registering' }
   | { kind: 'done'; id: string; name: string; scaffolded: boolean }
   | { kind: 'error'; message: string };
+
+/** AX10 — the daemon has 15s to scaffold + register. Past that it is
+ *  hung (or unreachable) and the operator gets an error they can act on
+ *  instead of a spinner that never resolves. */
+const REGISTER_TIMEOUT_MS = 15_000;
+
+/** Beat before the auto-switch so the operator can read the ✓. */
+const DONE_PAUSE_MS = 1100;
+
+/** The transport carries a base URL, not a port. Same regex the daemon
+ *  store's 401 self-heal uses to map an httpBase back to its port. */
+function portOf(httpBase: string): number {
+  const m = /:(\d+)(?:\/|$)/.exec(httpBase);
+  return m && m[1] ? parseInt(m[1], 10) : 0;
+}
 
 /**
  * Map the wizard answers to a POST /projects body, or null when a direct
@@ -55,8 +71,15 @@ function registerBody(
     return name ? { path, name } : { path };
   }
   // 'new' — needs both a parent folder and a name to create-from-scratch.
-  if (path && name) return { parent: path, name };
-  return null;
+  if (!path || !name) return null;
+  // AX10 (OB-F7) — the PATH field is documented as the PARENT directory and
+  // the daemon appends slugify(name) to it, but operators routinely paste the
+  // FULL intended path. Unguarded that produced `<parent>/<slug>/<slug>/`.
+  // genPrompt.ts has had this basename check since it shipped; the direct
+  // register path never did. When the pasted path already ends in the slug it
+  // IS the project folder — send it as an explicit `path` instead.
+  if (basename(path) === slugify(name)) return { path, name };
+  return { parent: path, name };
 }
 
 export default function NewPromptScreen(props: { answers: AddProjectAnswers }) {
@@ -72,18 +95,42 @@ export default function NewPromptScreen(props: { answers: AddProjectAnswers }) {
   // ── FALLBACK path state (only used when !canDirect) ──────────────────
   // Cluster ids already live when this screen opened — anything NEW that
   // appears in liveClusters while we watch is the daemon the operator just
-  // launched. Captured once at mount so we don't match pre-existing projects.
-  const baseline = new Set<string>();
+  // launched.
+  const [baseline, setBaseline] = createSignal<Set<string> | null>(null);
   const [found, setFound] = createSignal<LiveProbe | null>(null);
+  let registerAbort: AbortController | null = null;
+  let registerCancelled = false;
 
   onMount(() => {
     if (canDirect()) {
       void doRegister();
       return;
     }
-    for (const id of liveClusters().keys()) baseline.add(id);
-    try { projectsRailScan.start(); } catch (e) { log.warn('projectsRailScan.start failed', e); }
+    // Baseline FIRST, sweep second: the rail's watch loop is a full
+    // 5570-5589 sweep, so starting it before the baseline is primed
+    // could fold the very daemon we are waiting for into the "already
+    // existed" set and make it undetectable.
+    void (async () => {
+      await primeBaseline();
+      try { projectsRailScan.start(); } catch (e) { log.warn('projectsRailScan.start failed', e); }
+    })();
   });
+
+  /**
+   * AX10 (OB-F5) — the baseline used to be a synchronous snapshot of
+   * `liveClusters()` at mount. If discovery hadn't completed yet that set
+   * was EMPTY, so the first pre-existing project the sweep found was
+   * announced as "your new project" and the wizard switched into it.
+   * Await one discovery pass, then union with every cluster id the
+   * cockpit already knows about — a project that was merely stopped is
+   * not new either.
+   */
+  async function primeBaseline(): Promise<void> {
+    try { await discoverProjects(); } catch { /* probe errors are normal */ }
+    const seen = new Set<string>(liveClusters().keys());
+    for (const p of kp.list()) if (p.cluster_id) seen.add(p.cluster_id);
+    setBaseline(seen);
+  }
 
   async function doRegister(): Promise<void> {
     const client = liveClient();
@@ -92,8 +139,21 @@ export default function NewPromptScreen(props: { answers: AddProjectAnswers }) {
       setReg({ kind: 'error', message: 'No live daemon to register against.' });
       return;
     }
+    // AX10 (OB-F9) — capture the port from the client that is about to do
+    // the POST. Reading `daemonStore.state.health?.port` after the pause
+    // read the LIVE facade, which may have swapped to another project by
+    // then and would have sent the switch to the wrong daemon.
+    const port = portOf(client.transport.httpBase);
     setReg({ kind: 'registering' });
-    const res = await client.projectRegister(body);
+    registerCancelled = false;
+    registerAbort = new AbortController();
+    // AX10 (OB-F6) — bound the POST. Without a signal a hung daemon left
+    // "Scaffolding & registering…" spinning forever with no way out.
+    const timer = setTimeout(() => registerAbort?.abort(), REGISTER_TIMEOUT_MS);
+    const res = await client.projectRegister(body, registerAbort.signal);
+    clearTimeout(timer);
+    registerAbort = null;
+    if (registerCancelled) return; // the cancel handler already set the message
     if (!res.ok) {
       let msg = res.body || res.error || `HTTP ${res.status}`;
       try {
@@ -107,8 +167,18 @@ export default function NewPromptScreen(props: { answers: AddProjectAnswers }) {
     const { id, name, scaffolded } = res.data;
     log.info('add-project: registered', id, 'scaffolded', scaffolded);
     setReg({ kind: 'done', id, name, scaffolded });
-    // The new project lives on the SAME central daemon we just POSTed to.
-    const port = daemonStore.state.health?.port ?? 0;
+    // AX10 (OB-F6) — put the row in the rail BEFORE attempting the switch.
+    // The rail entry used to be a side effect of the switch succeeding, so
+    // a failed switch left a project that exists on the daemon and nowhere
+    // in the UI.
+    projectsStore.upsert({
+      port,
+      base: client.transport.httpBase,
+      cluster_id: id,
+      cluster_name: name || id,
+      status: 'live',
+    });
+    void discoverProjects();
     setTimeout(() => {
       void switchProject(port, id, {
         display: name || id,
@@ -116,29 +186,37 @@ export default function NewPromptScreen(props: { answers: AddProjectAnswers }) {
         cluster_name: name,
       }).catch(() => undefined);
       closeAddProjectWizard();
-    }, 1100); // let the operator see the ✓ before we jump
+    }, DONE_PAUSE_MS);
+  }
+
+  function cancelRegister(): void {
+    registerCancelled = true;
+    registerAbort?.abort();
+    setReg({ kind: 'error', message: 'Cancelled. The daemon may still finish in the background — rescan the rail to check.' });
   }
 
   // First cluster_id that wasn't in the baseline = the newly-launched daemon.
+  // Null baseline = discovery hasn't primed yet; matching now would be the
+  // very race OB-F5 describes.
   const fresh = createMemo<LiveProbe | null>(() => {
-    for (const [id, probe] of liveClusters()) if (!baseline.has(id)) return probe;
+    const base = baseline();
+    if (!base) return null;
+    for (const [id, probe] of liveClusters()) if (!base.has(id)) return probe;
     return null;
   });
 
-  // On first detection (FALLBACK path only): show success. Only auto-switch +
-  // close the wizard if we ALREADY have a token for this cluster (e.g. adopted
-  // via the launch URL in another tab — localStorage is shared). With no token,
-  // do NOT switch: that would pop the unlock modal here. The operator enters
-  // via the auto-unlock link the launch printed (which adopts the token
-  // cleanly).
+  // On first detection (FALLBACK path only): show success, then enter it.
   createEffect(() => {
     if (reg().kind !== 'idle') return; // direct register in progress — ignore scan
     const p = fresh();
     if (!p || found()) return;
     setFound(p);
     log.info('add-project: detected new daemon', p.cluster_id, 'on', p.port);
-    const haveToken = !!tokenForCluster(clusterTokenKey({ cluster_id: p.cluster_id, port: p.port }));
-    if (!haveToken) return; // leave it in the rail; adopt-link is the way in
+    // AX10/AX9 (OB-F12) — this used to refuse to enter without a token
+    // already in localStorage, so a freshly-launched LOCAL daemon (the
+    // whole point of this flow) sat in the rail waiting for a click. The
+    // switch flow acquires a local token itself (GET /auth/local-token)
+    // and falls back to the unlock prompt when it can't — just go.
     setTimeout(() => {
       void switchProject(p.port, p.cluster_id ?? String(p.port), {
         display: p.cluster_name ?? p.cluster_id ?? `:${p.port}`,
@@ -146,7 +224,7 @@ export default function NewPromptScreen(props: { answers: AddProjectAnswers }) {
         cluster_name: p.cluster_name,
       }).catch(() => undefined);
       closeAddProjectWizard();
-    }, 1100); // let the operator see the ✓ before we jump
+    }, DONE_PAUSE_MS);
   });
 
   const copy = async () => {
@@ -172,9 +250,14 @@ export default function NewPromptScreen(props: { answers: AddProjectAnswers }) {
               class="inline-block w-4 h-4 rounded-full border-2 border-emerald-400/30 border-t-emerald-300 animate-spin"
               aria-hidden="true"
             />
-            <span class="font-mono text-[12px] text-emerald-300 tracking-wider">
+            <span class="font-mono text-[12px] text-emerald-300 tracking-wider flex-1">
               Scaffolding &amp; registering…
             </span>
+            <button
+              type="button"
+              onClick={cancelRegister}
+              class="px-2.5 py-1 rounded-md border border-gray-700 text-gray-400 hover:text-gray-100 hover:border-gray-500 font-mono text-[10.5px]"
+            >Cancel</button>
           </div>
         </Show>
 
@@ -251,11 +334,11 @@ export default function NewPromptScreen(props: { answers: AddProjectAnswers }) {
             <div class="flex items-center gap-2.5">
               <span class="text-emerald-300 text-[15px] leading-none">✓</span>
               <span class="font-mono text-[12px] text-emerald-200 tracking-wider">
-                Found “{found()?.cluster_name ?? found()?.cluster_id}” on port {found()?.port} — it's in your rail.
+                Found “{found()?.cluster_name ?? found()?.cluster_id}” on port {found()?.port} — opening it now.
               </span>
             </div>
             <p class="mt-2 text-[11.5px] text-emerald-100/70 leading-relaxed">
-              Open the <strong>auto-unlock link</strong> your terminal printed to enter it with no token paste (or it opens here automatically if this cluster is already unlocked).
+              If it asks for a token, open the <strong>auto-unlock link</strong> your terminal printed — that adopts it cleanly.
             </p>
           </div>
         }
@@ -276,7 +359,7 @@ export default function NewPromptScreen(props: { answers: AddProjectAnswers }) {
           </p>
           <p class="mt-2 text-[11.5px] text-gray-400 leading-relaxed">
             <strong class="text-amber-400">⚠</strong> Most coding agents won't start a long-running downloaded script — that's expected. Watch the agent's output for a{' '}
-            <code class="font-mono text-emerald-300">cd … && python3 .meshkore/scripts/daemon.py</code>{' '}
+            <code class="font-mono text-emerald-300">cd … &amp;&amp; python3 .meshkore/scripts/daemon.py</code>{' '}
             command and paste it in your terminal.
           </p>
           <p class="mt-2 text-[11.5px] text-gray-400 leading-relaxed">

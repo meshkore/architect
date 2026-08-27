@@ -23,7 +23,7 @@
 
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from 'solid-js';
 import { daemonStore, type OfflineSelection } from '~/state/daemon';
-import { switchProject } from '~/components/ProjectsRailRow';
+import { switchProject } from '~/lib/project-switch';
 import { liveClusters } from '~/components/projects-rail/discovery';
 import { daemonHttpBase } from '~/lib/transport';
 import { log } from '~/lib/log';

@@ -29,7 +29,7 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup, onMount } from 'solid-js';
 import { createStore } from 'solid-js/store';
 import { daemonStore } from '~/state/daemon';
-import { ensureMarked } from '~/lib/cdn-loaders';
+import { Markdown } from '~/components/ui/Markdown';
 import { uiStore } from '~/state/ui';
 import type { LogEntry } from '~/lib/daemon-client';
 
@@ -257,31 +257,6 @@ function splitDaySections(md: string): { lead: string; sections: DaySection[] } 
   return { lead: lead.join('\n').trim(), sections };
 }
 
-/** Lazily renders a markdown string to HTML (marked loaded on demand);
- *  falls back to a mono pre-block while/if the renderer is unavailable. */
-function MarkdownBlock(props: { text: string }) {
-  const [html] = createResource(
-    () => props.text,
-    async (text) => {
-      if (!text.trim()) return '';
-      try {
-        const marked = await ensureMarked();
-        return marked.parse(text, { gfm: true }) as string;
-      } catch {
-        return '';
-      }
-    },
-  );
-  return (
-    <Show
-      when={html()}
-      fallback={<pre class="whitespace-pre-wrap text-[12px] text-gray-400 font-mono leading-relaxed">{props.text}</pre>}
-    >
-      <div class="md prose prose-invert max-w-none text-[13px] leading-relaxed" innerHTML={html() ?? ''} />
-    </Show>
-  );
-}
-
 /** One headline row — `▸ HH:MM  summary`; expands to the section detail. */
 function SectionRow(props: { section: DaySection }) {
   const [open, setOpen] = createSignal(false);
@@ -302,7 +277,7 @@ function SectionRow(props: { section: DaySection }) {
       </button>
       <Show when={open() && hasBody()}>
         <div class="pl-6 pr-1 pb-3 pt-1">
-          <MarkdownBlock text={props.section.body} />
+          <Markdown text={props.section.body} />
         </div>
       </Show>
     </li>
@@ -365,12 +340,12 @@ function DayCard(props: {
           <Show when={props.state.body && !props.state.loading}>
             <Show when={parsed().lead}>
               <div class="pb-2 mb-1 border-b border-gray-800/40 opacity-80">
-                <MarkdownBlock text={parsed().lead} />
+                <Markdown text={parsed().lead} />
               </div>
             </Show>
             <Show
               when={parsed().sections.length > 0}
-              fallback={<MarkdownBlock text={props.state.body!} />}
+              fallback={<Markdown text={props.state.body!} />}
             >
               <ul>
                 <For each={parsed().sections}>{(s) => <SectionRow section={s} />}</For>

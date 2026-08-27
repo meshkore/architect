@@ -13,53 +13,27 @@
  * replace the cockpit body with their own panel via `ZoneView`.
  */
 
-import { createEffect, createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
-import { isDaemonBehind } from '~/lib/version';
-import { cockpitOutdated, latestCockpitCommit, COCKPIT_COMMIT, probeCockpitHealth } from '~/lib/cockpit-version';
+import { createEffect, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
 import Header from '~/components/Header';
+import CockpitOutdatedBanner from '~/components/CockpitOutdatedBanner';
 import ProjectsRail from '~/components/ProjectsRail';
 import OfflinePanel from '~/components/OfflinePanel';
 import { TokenUnlockPanel } from '~/components/modals/TokenUnlockModal';
 import RailEmptyPanel from '~/components/RailEmptyPanel';
-import ModulesTree from '~/components/ModulesTree';
-import InitiativesPanel from '~/components/InitiativesPanel';
-import ContextPanel from '~/components/ContextPanel';
-import DiagramsPanel from '~/components/DiagramsPanel';
-import ChatPanel from '~/components/ChatPanel';
-import ChatRail from '~/components/ChatRail';
-import AgentsPanel from '~/components/zones/AgentsPanel';
 import DaemonOutdatedPanel from '~/components/DaemonOutdatedPanel';
 import DaemonAheadPanel from '~/components/DaemonAheadPanel';
 import BootingPanel from '~/components/BootingPanel';
 import DaemonBehindPanel from '~/components/DaemonBehindPanel';
-import ConfigPanel from '~/components/zones/ConfigPanel';
-import BookmarksPanel from '~/components/zones/BookmarksPanel';
-import CronsPanel from '~/components/zones/CronsPanel';
-import LinksPanel from '~/components/zones/LinksPanel';
-import ProtocolsPanel from '~/components/zones/ProtocolsPanel';
-import DiaryPanel from '~/components/zones/DiaryPanel';
 // V106 — StoryBanner removed. Story-run progress is now visible
 // in: (a) the agent's live state in ChatRail, (b) the expanded
 // card's Activity tab. A floating sticky banner duplicates that
 // signal and steals attention.
-import Splitter, { setLayoutWidth } from '~/components/Splitter';
-import { MODULES_COLLAPSE_PX } from '~/components/modules-tree/widths';
-import ColumnDragGrip from '~/components/ColumnDragGrip';
-import { daemonStore } from '~/state/daemon';
-import { serverStore } from '~/state/server';
-import { chatStore } from '~/state/chat';
-import { teamStore } from '~/state/team';
-import { DEFAULT_MODEL, DEFAULT_EFFORT } from '~/lib/models';
+import Splitter from '~/components/Splitter';
+import { Slot, type Tab } from '~/components/cockpit/columns';
+import { createCockpitGate } from '~/state/boot-gate';
 import { nav } from '~/state/nav';
 import { uiStore, type Zone } from '~/state/ui';
-import { layoutStore, type ColumnId } from '~/state/layout';
-
-// 2026-06-19: Tasks parked; Protocols moved in from the header zone.
-type Tab = 'roadmap' | 'context' | 'diagrams' | 'protocols';
-
-// Width the collapsed modules strip expands to on click. The collapse
-// threshold itself is shared with the tree (widths.ts).
-const MODULES_EXPAND_PX = 220;
+import { layoutStore } from '~/state/layout';
 
 const HASH_ZONES: readonly Zone[] = ['architect', 'agents', 'bookmarks', 'crons', 'links', 'protocols', 'diary', 'config'];
 
@@ -73,64 +47,15 @@ export default function Cockpit(props: {
   const setTab = (t: Tab) => nav.setCockpitTab(t);
   const zone = () => uiStore.state.activeZone;
 
-  // 2026-06-13 — BootingPanel escape hatch. The boot gate normally
-  // waits for BOTH the roadmap snapshot AND the chat snapshot to
-  // hydrate. But if the daemon's /chat/snapshot hangs (e.g. a
-  // ChatSessions lock deadlock — ikamiro incident), the panel would
-  // block the ENTIRE project forever. So: once the roadmap snapshot is
-  // in, give chat hydration a grace window; if it doesn't arrive,
-  // fall through and let the cockpit render (chat lazy-loads when the
-  // conv is focused / when the snapshot finally lands). A hung chat
-  // endpoint must never brick the whole UI.
-  const CHAT_HYDRATE_GRACE_MS = 3000;
-  const [chatGraceElapsed, setChatGraceElapsed] = createSignal(false);
-  // Track the boolean readiness, NOT the snapshot OBJECT identity.
-  // `serverStore.state.snapshot` is replaced with a fresh object on every
-  // roadmap refresh (poll/WS, server.ts:188). Reading it directly in the
-  // grace effect re-ran the effect on every refresh — clearing + restarting
-  // the timer so it NEVER reached CHAT_HYDRATE_GRACE_MS, leaving BootingPanel
-  // hung forever whenever /chat/snapshot was slow/hung (ikamiro ChatSessions
-  // deadlock, 2026-06-13). createMemo only notifies on the boolean flip, so
-  // the timer starts once on snapshot-ready and actually fires.
-  const snapReady = createMemo(() => serverStore.state.snapshot !== null && serverStore.state.snapshot !== undefined);
-  const chatReady = createMemo(() => chatStore.state.convsHydratedAt !== null && chatStore.state.convsHydratedAt !== undefined);
-  createEffect(() => {
-    // Start the grace timer once the roadmap snapshot is in but chat
-    // hasn't hydrated. Only re-runs when either BOOLEAN flips.
-    if (snapReady() && !chatReady()) {
-      setChatGraceElapsed(false);
-      const t = setTimeout(() => setChatGraceElapsed(true), CHAT_HYDRATE_GRACE_MS);
-      onCleanup(() => clearTimeout(t));
-    }
-  });
-  // A-BOOT-01 (V109) — the roadmap snapshot was treated as MANDATORY for
-  // boot with no escape (only chat had a grace). If /state errors or
-  // hangs, `snapReady` never flips and BootingPanel bricked the whole
-  // project forever — the same dead-end as the chat hang, on the other
-  // leg. Two escapes: (1) `snapFailed` — the refresh reported an error;
-  // (2) a hard grace window. On escape we render the cockpit; the
-  // roadmap zone shows its empty/error state + a retry banner
-  // (A-ERR-SURFACE-01). Both reset per project switch (keyed on activeId).
-  const BOOT_HARD_GRACE_MS = 10000;
-  const [bootHardGraceElapsed, setBootHardGraceElapsed] = createSignal(false);
-  const snapFailed = createMemo(
-    () =>
-      (serverStore.state.snapshot === null || serverStore.state.snapshot === undefined)
-      && serverStore.state.error !== null
-      && serverStore.state.error !== undefined,
+  // ST-13 — the boot policy (the two grace windows, the failure escapes,
+  // and AX3's "paint from cache on switch-back") lives in
+  // `state/boot-gate.ts`. The gate below is one union rendered by a flat
+  // <Switch>, in place of the six-deep <Show> chain this used to be.
+  const { gate, revalidating } = createCockpitGate(
+    () => !!props.connectionStatus
+      && props.connectionStatus.kind !== 'connected'
+      && !!props.renderConnectionGate,
   );
-  createEffect(() => {
-    void daemonStore.state.activeId; // reset the escape window on every switch (a bare read is the Solid dependency-tracking idiom; `void` makes that explicit to eslint)
-    setBootHardGraceElapsed(false);
-    const t = setTimeout(() => setBootHardGraceElapsed(true), BOOT_HARD_GRACE_MS);
-    onCleanup(() => clearTimeout(t));
-  });
-  const booted = (): boolean => {
-    if (snapFailed() || bootHardGraceElapsed()) return true; // escape — never brick
-    if (!snapReady()) return false; // roadmap snapshot still loading
-    if (chatReady()) return true; // both ready
-    return chatGraceElapsed(); // chat slow/hung → fall through after grace
-  };
 
   // Hash deep-link — read `#zone` on mount + popstate, write it back
   // when the zone changes.
@@ -180,68 +105,35 @@ export default function Cockpit(props: {
               single-cycle miss recovers on the next refresh. Either way the
               operator never sees a dead-end error strip — connected ⇒ it loads,
               disconnected ⇒ the reconnect screen. */}
-          {/* 2026-06-11 UX fix — when no daemon is connected (boot probe
-              in flight, no-daemon, or unauthorized) the ConnectionGate
-              replaces RailEmptyPanel in the main area. ProjectsRail stays
-              interactive so the operator can click any known project
-              without waiting for the initial probe to resolve. */}
-          <Show
-            when={
-              !daemonStore.state.activeId &&
-              props.connectionStatus &&
-              props.connectionStatus.kind !== 'connected' &&
-              props.renderConnectionGate
-            }
-            fallback={
-          <Show
-            when={!daemonStore.state.outdated}
-            fallback={<DaemonOutdatedPanel />}
-          >
-            {/* CVS2 (2026-06-12) — when the daemon is ahead by ≥ minor,
-                the wire format may have evolved beyond what this cockpit
-                bundle understands. Block the body until the operator
-                reloads to pick up the matching frontend.
-                `daemonStore.state.ahead` already gates on major/minor
-                (not patch) via isDaemonAhead — a patch-level difference is
-                deliberately silent (the wire format cannot change in a patch).
-                2026-08-27: the thin `DaemonAheadBanner` this comment used to
-                point at had been orphaned since the outdated-flow unification
-                — declared, never rendered — so tsc flagged it as unused and it
-                is now deleted rather than left as a phantom in the comment. */}
-            <Show
-              when={!daemonStore.state.ahead}
-              fallback={<DaemonAheadPanel />}
-            >
-            {/* 2026-06-12 — DaemonBehindPanel. Promoted from a thin top
-                banner per operator feedback: "todo lo que respecta al
-                daemon bloquea el proyecto, va al centro". Auto-fires
-                /self-update on mount if cluster.yaml permits; falls back
-                to manual instructions in-panel if not. The gate uses
-                `isDaemonBehind` (MIN ≤ daemon < EXPECTED). */}
-            <Show
-              when={!daemonStore.state.version || !isDaemonBehind(daemonStore.state.version)}
-              fallback={<DaemonBehindPanel />}
-            >
-            <Show
-              when={!daemonStore.state.offlineSelection}
-              fallback={<OfflinePanel />}
-            >
-            <Show
-              when={daemonStore.state.activeId}
-              fallback={<RailEmptyPanel />}
-            >
-            {/* CBO1 (2026-06-12) — boot overlay. The moment a daemon
-                WS opens, activeId flips true and the workspace
-                renders with empty data while serverStore.snapshot +
-                chatStore.convsHydratedAt are still in flight. Cover
-                the body with BootingPanel until both hydrate. The
-                ProjectsRail lives outside <main>, stays clickable
-                throughout so the operator can switch clusters
-                without waiting. */}
-            <Show
-              when={booted()}
-              fallback={<BootingPanel />}
-            >
+          <Switch>
+            {/* 2026-06-11 UX fix — when no daemon is connected (boot probe
+                in flight, no-daemon, or unauthorized) the ConnectionGate
+                replaces RailEmptyPanel in the main area. ProjectsRail stays
+                interactive so the operator can click any known project
+                without waiting for the initial probe to resolve. */}
+            <Match when={gate() === 'connection'}>{props.renderConnectionGate?.()}</Match>
+            <Match when={gate() === 'outdated'}><DaemonOutdatedPanel /></Match>
+            {/* CVS2 (2026-06-12) — a daemon ahead by ≥ minor may speak a
+                wire format this bundle doesn't understand, so the body is
+                blocked until the operator reloads. A patch-level
+                difference is deliberately silent. */}
+            <Match when={gate() === 'ahead'}><DaemonAheadPanel /></Match>
+            {/* 2026-06-12 — promoted from a thin top banner per operator
+                feedback: "todo lo que respecta al daemon bloquea el
+                proyecto, va al centro". Auto-fires /self-update on mount
+                when cluster.yaml permits. */}
+            <Match when={gate() === 'behind'}><DaemonBehindPanel /></Match>
+            <Match when={gate() === 'offline'}><OfflinePanel /></Match>
+            <Match when={gate() === 'empty'}><RailEmptyPanel /></Match>
+            {/* CBO1 (2026-06-12) — boot overlay for a FIRST-EVER visit.
+                The moment a daemon WS opens, activeId flips true and the
+                workspace would render with empty data. AX3: a project we
+                already have in memory skips this entirely and paints from
+                the cache while it revalidates. ProjectsRail lives outside
+                <main> and stays clickable throughout. */}
+            <Match when={gate() === 'booting'}><BootingPanel /></Match>
+            <Match when={gate() === 'ready'}>
+              <RevalidatingChip show={revalidating()} />
               <section class="tab-panel two-col">
                 {/* Two MAIN columns, reorderable via the header grips
                  *  (layoutStore: roadmap ⇄ agents). Each column is the
@@ -261,16 +153,8 @@ export default function Cockpit(props: {
                   onSelectModule={props.onSelectModule}
                   tab={tab} setTab={setTab} />
               </section>
-            </Show>
-            </Show>
-            </Show>
-            </Show>
-            </Show>
-          </Show>
-            }
-          >
-            {props.renderConnectionGate?.()}
-          </Show>
+            </Match>
+          </Switch>
           {/* Token unlock — rendered HERE inside <main> (centre project zone),
               not as a root full-screen overlay, so the projects rail stays
               usable. Self-gates on a pending prompt; local clusters
@@ -282,245 +166,31 @@ export default function Cockpit(props: {
   );
 }
 
-/**
- * Slot — picks the MAIN column renderer for a given panel id. Used by
- * the column-reorder system (layoutStore + ColumnDragGrip). Each branch
- * carries `data-panel-id` on its outer element so the drag handler can
- * identify the drop target.
- *
- * 2026-06-19 (2-col): only two panels — `roadmap` and `agents`. The
- * roadmap slot swaps its content for a migrated top-tab zone
- * (Bookmarks, Crons, …) when the active zone isn't `architect`; chat
- * stays put in its own slot.
- */
-type SlotProps = {
-  id: ColumnId;
-  selectedModule: string | null;
-  onSelectModule: (id: string | null) => void;
-  tab: () => Tab;
-  setTab: (t: Tab) => void;
-};
-
-function Slot(props: SlotProps) {
-  const zone = () => uiStore.state.activeZone;
-  return (
-    <Switch>
-      <Match when={props.id === 'roadmap'}>
-        <Show
-          when={zone() === 'architect'}
-          fallback={
-            <div data-panel-id="roadmap" class="roadmap-col col">
-              <ZoneView zone={zone()} />
-            </div>
-          }
-        >
-          <RoadmapColumn
-            selectedModule={props.selectedModule}
-            onSelectModule={props.onSelectModule}
-            tab={props.tab}
-            setTab={props.setTab}
-          />
-        </Show>
-      </Match>
-      <Match when={props.id === 'agents'}>
-        <AgentsColumn selectedModule={props.selectedModule} />
-      </Match>
-    </Switch>
-  );
-}
-
-/**
- * RoadmapColumn — the left-hand work surface. One header row carries
- * the column grip + the sub-tabs (Roadmap › Context · Diagrams ·
- * Protocols). Below it the body is an inner split: the Modules rail
- * (resizable via its own `modules-rail` splitter, like the agents rail)
- * + the workspace content driven by the active sub-tab. Modules stays
- * visible across every sub-tab so a selection can scope Context /
- * Diagrams (selection→list wiring lands later; default is project-wide).
- */
-function RoadmapColumn(props: {
-  selectedModule: string | null;
-  onSelectModule: (id: string | null) => void;
-  tab: () => Tab;
-  setTab: (t: Tab) => void;
-}) {
-  const { tab, setTab } = props;
-  return (
-    <aside data-panel-id="roadmap" class="roadmap-col col">
-      <div class="subtab-bar">
-        <ColumnDragGrip panelId="roadmap" />
-        <SubTab id="roadmap"   label="Roadmap"   active={tab() === 'roadmap'}   onSelect={setTab} global />
-        <span class="subtab-divider" aria-hidden="true">›</span>
-        <SubTab id="context"   label="Context"   active={tab() === 'context'}   onSelect={setTab} />
-        <SubTab id="diagrams"  label="Diagrams"  active={tab() === 'diagrams'}  onSelect={setTab} />
-        <SubTab id="protocols" label="Protocols" active={tab() === 'protocols'} onSelect={setTab} />
-        <div class="flex-1" />
-      </div>
-      <div class="roadmap-body flex-1 flex min-h-0">
-        {/* Modules rail. Below MODULES_COLLAPSE_PX the list collapses to
-            a vertical "Modules" strip — drag the splitter wider, or
-            click the strip, to bring it back. Width-driven, symmetric
-            with how the old top-level Modules column collapsed. */}
-        <aside
-          class="modules-rail"
-          classList={{ collapsed: uiStore.state.modulesRailWidth < MODULES_COLLAPSE_PX }}
-        >
-          <Show
-            when={uiStore.state.modulesRailWidth >= MODULES_COLLAPSE_PX}
-            fallback={
-              <button
-                type="button"
-                class="modules-rail-label"
-                onClick={() => setLayoutWidth('modules-rail', MODULES_EXPAND_PX)}
-                title="Expand modules"
-                aria-label="Expand modules rail"
-              >
-                Modules
-              </button>
-            }
-          >
-            <ModulesTree selected={props.selectedModule} onSelect={props.onSelectModule} />
-          </Show>
-        </aside>
-        <Splitter resize="modules-rail" title="Drag to resize modules rail" />
-        <div class="ws-content flex-1 flex flex-col min-h-0">
-          <Switch>
-            <Match when={tab() === 'roadmap'}>
-              <div class="ws-panel"><InitiativesPanel /></div>
-            </Match>
-            <Match when={tab() === 'context'}>
-              <div class="ws-panel"><ContextPanel moduleId={props.selectedModule} /></div>
-            </Match>
-            <Match when={tab() === 'diagrams'}>
-              <div class="ws-panel"><DiagramsPanel moduleId={props.selectedModule} /></div>
-            </Match>
-            <Match when={tab() === 'protocols'}>
-              <div class="ws-panel"><ProtocolsPanel /></div>
-            </Match>
-          </Switch>
-        </div>
-      </div>
-    </aside>
-  );
-}
-
-/**
- * AgentsColumn — the right-hand column. Header row carries the column
- * grip + "Agents" title + new-agent "+". Body is the inner split: the
- * agents rail (resizable via `chat-rail`) + the chat thread.
- */
-function AgentsColumn(props: { selectedModule: string | null }) {
-  // ATM7 — `+` opens NO modal. It immediately creates a draft conv
-  // pre-bound to the generic `developer` member and focuses it. The
-  // member + model + effort stay editable in the chat header until the
-  // first message is sent. Empty-team edge case: fall back to a free
-  // `custom` agent so the rail never dead-ends.
-  const onNewAgent = () => {
-    const dev = teamStore.developer();
-    if (dev) {
-      chatStore.createConv({
-        type: 'custom',
-        title: dev.name,
-        model: dev.model,
-        effort: dev.effort ?? DEFAULT_EFFORT,
-        member: dev.id,
-        scope: { module: props.selectedModule },
-      });
-    } else {
-      chatStore.createConv({
-        type: 'custom',
-        title: '',
-        model: DEFAULT_MODEL,
-        effort: DEFAULT_EFFORT,
-        scope: { module: props.selectedModule },
-      });
-    }
-  };
-  return (
-    <div data-panel-id="agents" class="center-col col" id="chat-col">
-      <div class="col-header-row" style={{ 'justify-content': 'space-between', gap: '8px' }}>
-        <div class="col-bar-lead">
-          <ColumnDragGrip panelId="agents" />
-          <span class="col-bar-title" style={{ cursor: 'default' }}>Agents</span>
-        </div>
-        <button
-          type="button"
-          onClick={onNewAgent}
-          class="chat-rail-new-btn"
-          title="New agent / conversation"
-        >＋</button>
-      </div>
-      {/* ATM12 follow-up (2026-07-07 operator correction) — the
-          fixed-agent explainer moved OUT of this column header and into
-          ChatScopeStrip, as a second line under each fixed agent's own
-          name/model row (only shown while that agent is selected),
-          instead of one combined note always sitting above the rail. */}
-      <div class="chat-body flex-1 flex min-h-0">
-        <ChatRail />
-        <Splitter resize="chat-rail" title="Drag to resize agent rail" />
-        <div class="chat-main flex-1 flex flex-col min-h-0">
-          <ChatPanel />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // V97 — `DaemonPausedPanel` (empty placeholder behind a floating
 // modal) replaced by `DaemonOutdatedPanel` (the inline full-area
 // mandatory block with auto-poll). The old DaemonOutdatedHost in
 // App.tsx is also gone — no more floating modal for this state.
 
 /**
- * V94 — Slim "refresh recommended" banner that appears when the
- * daemon is ahead of the cockpit's EXPECTED_DAEMON_VERSION. The
- * operator's tab keeps working (the WS event shapes are backward-
- * compatible by daemon contract), but new fields / events may not
- * be rendered until the cockpit reloads to pick up the matching
- * bundle. Non-blocking by design — a hard lock here would be wrong
- * because the daemon SHOULD be backward-compatible.
- *
- * Dismiss is per-session via sessionStorage; reloading drops the
- * dismissal naturally because the next bundle has the matching
- * EXPECTED_DAEMON_VERSION and `ahead` flips back to false anyway.
+ * AX3 — the workspace painted from the in-memory session cache and the
+ * daemon has not answered yet. Deliberately a small corner chip, not a
+ * blocking overlay: the data on screen is the operator's own, seconds
+ * old, and it is about to be replaced in place.
  */
-/**
- * V99 — Sibling banner to <DaemonAheadBanner>, but for the COCKPIT's
- * own version. Fires when /health.json reports a build commit other
- * than the one this bundle was built with — a new cockpit was just
- * deployed and the operator's tab is stale.
- *
- * Same UX as the daemon-ahead banner: cyan strip with a Reload button.
- * No "Later" dismiss here — when the cockpit is stale, fixes and
- * features the operator just asked us to ship are not in their hands
- * until they reload. We want them to do it.
- */
-function CockpitOutdatedBanner() {
-  const refresh = (): void => { window.location.reload(); };
+function RevalidatingChip(props: { show: boolean }) {
   return (
-    <Show when={cockpitOutdated()}>
-      <div class="border-b border-cyan-500/40 bg-cyan-500/15 text-cyan-100 text-[12px] px-4 py-2 flex items-center gap-3">
-        <span class="font-mono text-cyan-300/90 flex-shrink-0">↻ cockpit ahead</span>
-        <span class="flex-1 min-w-0">
-          A new Architect cockpit is live (<span class="font-mono text-cyan-300">{latestCockpitCommit() ?? '?'}</span>).
-          Your tab is running <span class="font-mono text-cyan-300">{COCKPIT_COMMIT}</span>.
-          Reload to pick up the new bundle — fixes shipped after that commit are not in this tab yet.
-        </span>
-        <button
-          type="button"
-          onClick={() => { void probeCockpitHealth(); }}
-          class="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-cyan-500/30 hover:border-cyan-500/60 text-cyan-200/80 hover:text-cyan-100 transition-colors flex-shrink-0"
-          title="Re-probe /health.json"
-        >
-          Re-check
-        </button>
-        <button
-          type="button"
-          onClick={refresh}
-          class="font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded bg-cyan-500/30 hover:bg-cyan-500/50 border border-cyan-500/60 text-cyan-50 transition-colors flex-shrink-0"
-        >
-          Reload now
-        </button>
+    <Show when={props.show}>
+      <div
+        class="absolute top-1.5 right-3 z-10 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider pointer-events-none"
+        style={{
+          background: 'rgba(17,24,39,0.75)',
+          border: '1px solid color-mix(in srgb, var(--theme-accent-bright, #34d399) 30%, transparent)',
+          color: 'var(--theme-accent-bright, #34d399)',
+        }}
+        aria-live="polite"
+      >
+        <span class="w-1.5 h-1.5 rounded-full bg-current animate-pulse-soft" aria-hidden="true" />
+        refreshing…
       </div>
     </Show>
   );
@@ -532,35 +202,3 @@ function CockpitOutdatedBanner() {
 // cockpit/UI signals). See DaemonBehindPanel.tsx.
 
 
-function SubTab(props: {
-  id: Tab;
-  label: string;
-  active: boolean;
-  onSelect: (id: Tab) => void;
-  global?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      data-wstab={props.id}
-      onClick={() => props.onSelect(props.id)}
-      class={`subtab ws-tab ${props.active ? 'active' : ''} ${props.global ? 'subtab-global' : ''}`}
-    >
-      {props.label}
-    </button>
-  );
-}
-
-function ZoneView(props: { zone: Zone }) {
-  return (
-    <Switch fallback={<BookmarksPanel />}>
-      <Match when={props.zone === 'agents'}><AgentsPanel /></Match>
-      <Match when={props.zone === 'bookmarks'}><BookmarksPanel /></Match>
-      <Match when={props.zone === 'crons'}><CronsPanel /></Match>
-      <Match when={props.zone === 'links'}><LinksPanel /></Match>
-      <Match when={props.zone === 'protocols'}><ProtocolsPanel /></Match>
-      <Match when={props.zone === 'diary'}><DiaryPanel /></Match>
-      <Match when={props.zone === 'config'}><ConfigPanel /></Match>
-    </Switch>
-  );
-}

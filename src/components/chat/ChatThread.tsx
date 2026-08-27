@@ -1,7 +1,7 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import { chatStore, INITIAL_PAGE, isAutonomousConv, type ChatMsg } from '~/state/chat';
 import { daemonStore } from '~/state/daemon';
-import { MessageBubble, PreparingBubble, ToolUseBubble, TaskLifecycleBubble, AutonomousRun } from '~/components/ChatBubbles';
+import { MessageBubble, PreparingBubble, ToolUseBubble, TaskLifecycleBubble, AutonomousRun } from '~/components/chat/bubbles';
 import { waitingByConv } from '~/state/server';
 import { groupAutonomous, type StreamItem } from '~/lib/chat-stream';
 
@@ -14,6 +14,10 @@ import { groupAutonomous, type StreamItem } from '~/lib/chat-stream';
 const PREPARING_STALE_MS = 60_000;
 
 export default function ChatThread(props: {
+  /** The conversation this thread renders. Always the active one today,
+   *  but the bubbles take it explicitly (AX13) so a second pane or a
+   *  history view can render another conv without lying about who spoke. */
+  conv: string;
   ref: (el: HTMLDivElement) => void;
   stream: { pre: StreamItem[]; queued: StreamItem[]; live: ChatMsg | null };
 }) {
@@ -131,7 +135,7 @@ export default function ChatThread(props: {
   // 2026-06-20 — autonomous (continuous-timeline) mode for self-driving
   // agents (roadmap-architect "Run all"). Consecutive agent finals render
   // under ONE header; operator messages break the run inline. See
-  // chat-stream.groupAutonomous + ChatBubbles.AutonomousRun.
+  // chat-stream.groupAutonomous + bubbles/AutonomousRun.
   const autonomous = (): boolean => isAutonomousConv(chatStore.state.activeConv);
   const segments = () => groupAutonomous(props.stream.pre, props.stream.live);
 
@@ -197,19 +201,19 @@ export default function ChatThread(props: {
           <>
             <For each={props.stream.pre}>
               {(it) => {
-                if (it.kind === 'msg') return <MessageBubble msg={it.msg} />;
+                if (it.kind === 'msg') return <MessageBubble conv={props.conv} msg={it.msg} />;
                 if (it.kind === 'tool') return <ToolUseBubble ev={it.ev} />;
                 return <TaskLifecycleBubble ev={it.ev} />;
               }}
             </For>
             <For each={props.stream.queued}>
               {(it) => it.kind === 'msg'
-                ? <MessageBubble msg={it.msg} prepend />
+                ? <MessageBubble conv={props.conv} msg={it.msg} prepend />
                 : null}
             </For>
             <Show when={props.stream.live}>
               <div data-live-bubble="1">
-                <MessageBubble msg={props.stream.live!} />
+                <MessageBubble conv={props.conv} msg={props.stream.live!} />
               </div>
             </Show>
           </>
@@ -220,15 +224,15 @@ export default function ChatThread(props: {
             tails its run (data-live-bubble lives inside AutonomousRun). */}
         <For each={segments()}>
           {(seg) => {
-            if (seg.kind === 'run') return <AutonomousRun msgs={seg.msgs} />;
-            if (seg.kind === 'msg') return <MessageBubble msg={seg.msg} />;
+            if (seg.kind === 'run') return <AutonomousRun conv={props.conv} msgs={seg.msgs} />;
+            if (seg.kind === 'msg') return <MessageBubble conv={props.conv} msg={seg.msg} />;
             if (seg.kind === 'tool') return <ToolUseBubble ev={seg.ev} />;
             return <TaskLifecycleBubble ev={seg.ev} />;
           }}
         </For>
       </Show>
       <Show when={preparingAt()}>
-        {(ts) => <PreparingBubble dispatchedAt={ts()} />}
+        {(ts) => <PreparingBubble conv={props.conv} dispatchedAt={ts()} />}
       </Show>
       <Show when={waitingChildren().length > 0 && !preparingAt() && !props.stream.live}>
         <WaitingOnPill children_={waitingChildren()} />

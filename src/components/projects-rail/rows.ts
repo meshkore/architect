@@ -3,8 +3,31 @@ import { daemonStore, selectedRowKey } from '~/state/daemon';
 import { projectsStore } from '~/state/projects';
 import { chatStore } from '~/state/chat';
 import * as kp from '~/lib/known-projects';
-import type { RailRowData } from '~/components/ProjectsRailRow';
+import type { RailRowData, RailRowDot } from '~/components/ProjectsRailRow';
+import { instanceLinkStatus } from '~/lib/connection-status';
 import { livePorts, liveClusters } from './discovery';
+
+/**
+ * AX6 — a row's dot.
+ *
+ * When the cockpit holds an instance for this project, its WebSocket IS
+ * the truth: `live` only when the socket is open, amber while it is
+ * inside the retry budget, gray once it has given up. Before AX6 every
+ * instance was synthesized `live: true` even with `wsState === 'fatal'`,
+ * so a dead project looked healthy forever.
+ *
+ * With no instance we fall back to the last discovery probe — which
+ * only runs at mount, on a manual rescan, and (AX6) on the daemon
+ * store's 60s health-poll tick, so a background project that dies goes
+ * gray within a minute instead of never.
+ */
+function dotFor(rowKey: string, probeLive: boolean): RailRowDot {
+  const status = instanceLinkStatus(rowKey);
+  if (!status) return probeLive ? 'live' : 'dead';
+  if (status === 'connected') return 'live';
+  if (status === 'reconnecting') return 'reconnecting';
+  return 'dead';
+}
 
 function initialsFor(name: string): string {
   const words = name.replace(/[^A-Za-z0-9\s\-_]/g, ' ').split(/[\s\-_]+/).filter(Boolean);
@@ -111,13 +134,17 @@ export const rows = createRoot(() =>
     // exposes the active slice's convMeta); inactive clusters always
     // read false here. Reuses `isActiveBinding` from above.
     const architectActive = !!(isActiveBinding && chatStore.findActiveArchitectConv());
+    const dot = dotFor(rowKey, isLive);
     result.push({
       key: rowKey,
       port, base: liveProbe?.base ?? k.base,
       cluster_id: k.cluster_id ?? null,
       cluster_name: k.cluster_name ?? null,
       display, initials: initialsFor(display),
-      live: isLive,
+      // A row with a dead socket is a stopped row — `is-stopped` styling
+      // stays the base state and the dot refines it.
+      live: dot !== 'dead',
+      dot,
       working,
       hasUnread,
       architectActive,
@@ -147,6 +174,9 @@ export const rows = createRoot(() =>
     const isThisActive =
       (cid && cid === activeClusterId) ||
       (!cid && activePort !== null && port === activePort);
+    // AX6 — was a hardcoded `live: true`, which kept a fatal-socket
+    // project looking connected. The instance's own wsState decides.
+    const synthDot = dotFor(synthKey, true);
     result.push({
       key: synthKey,
       port,
@@ -155,7 +185,8 @@ export const rows = createRoot(() =>
       cluster_name: inst.health.cluster_name ?? null,
       display,
       initials: initialsFor(display),
-      live: true,
+      live: synthDot !== 'dead',
+      dot: synthDot,
       working: false,
       hasUnread: false,
       architectActive: !!(isThisActive && chatStore.findActiveArchitectConv()),

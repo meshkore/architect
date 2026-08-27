@@ -18,6 +18,7 @@
 
 import { createStore } from 'solid-js/store';
 import { log } from '~/lib/log';
+import { captureClusterEpoch, isCurrentEpoch } from '~/lib/swap-guard';
 import type { ClientInfo, DaemonClient, ProviderInfo } from '~/lib/daemon-client';
 import { EFFORT_CATALOG, MODEL_CATALOG } from '~/lib/models';
 
@@ -45,10 +46,19 @@ function bindCluster(clusterId: string | null): void {
 
 /** GET /clients → replace the catalog. Safe to call once per cluster
  *  boot; nothing currently invalidates it mid-session (no client is
- *  installed/uninstalled while the cockpit is open in practice). */
+ *  installed/uninstalled while the cockpit is open in practice).
+ *
+ *  AX5 — epoch-guarded like the roster: the catalog is per-daemon, and
+ *  a late response used to land in whichever project the operator had
+ *  switched to. */
 async function hydrate(client: DaemonClient): Promise<void> {
+  const epoch = captureClusterEpoch();
   setState('loading', true);
   const res = await client.clients();
+  if (!isCurrentEpoch(epoch)) {
+    log.debug('[swap-guard] dropping stale client catalog');
+    return;
+  }
   if (res.ok) {
     setState({ list: res.data ?? [], hydrated: true, loading: false, error: null });
   } else {

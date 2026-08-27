@@ -1,8 +1,8 @@
 import { Show, createSignal } from 'solid-js';
 import { Modal, type ModalButton } from '~/components/Modal';
 import * as kp from '~/lib/known-projects';
-import { projectsStore } from '~/state/projects';
 import { daemonStore } from '~/state/daemon';
+import { liveClusters, livePorts } from '~/components/projects-rail/discovery';
 import StepSwitch, { type Step } from './add-project/StepSwitch';
 import { basename, type AddProjectAnswers } from './add-project/genPrompt';
 
@@ -37,11 +37,25 @@ function AddProjectWizard(props: { onClose: () => void }) {
     setStep(h[h.length - 1]!);
   };
 
+  /**
+   * AX10 (OB-F4) — the REVIVE branch used to be unreachable dead UI.
+   * It filtered on the persisted `status === 'live'` flag, but nothing
+   * in the cockpit ever writes `'stopped'` (grep-verified: every
+   * `upsert` call passes `status: 'live'`), so every known project
+   * counted as live and the list was always empty. The port-based
+   * fallback was wrong too now that ONE daemon serves MANY projects on
+   * one port — a project the daemon no longer serves still "owns" a
+   * live port.
+   *
+   * Derive it from discovery instead: `liveClusters()` is per-PROJECT
+   * (built from the daemon's authoritative /projects table), so a
+   * cluster missing from it really is not being served. Legacy rows
+   * with no cluster_id still fall back to the port probe.
+   */
   const stopped = (): kp.KnownProject[] => {
-    const livePorts = new Set(
-      projectsStore.state.list.filter((p) => p.status === 'live').map((p) => p.port),
-    );
-    return kp.list().filter((k) => !livePorts.has(k.port));
+    const byCluster = liveClusters();
+    const ports = livePorts();
+    return kp.list().filter((k) => (k.cluster_id ? !byCluster.has(k.cluster_id) : !ports.has(k.port)));
   };
 
   // When a central daemon is already attached, the final step registers the

@@ -1,155 +1,41 @@
 /**
- * store.ts — reactive state for the cockpit.
+ * state/store.ts — the last surviving sliver of the pre-Solid global
+ * store: a bounded ring of raw daemon events.
  *
- * One global store, populated by:
- *   • initial GET /state when a daemon connection is established
- *   • subsequent state.rebuilt WS events trigger a refetch
- *   • finer-grained events (task.created, chat.*, agent.online) patch the
- *     store locally without round-tripping when possible
+ * AX4 (cockpit-excellence). What used to live here — a `/state`
+ * snapshot plus `attach()` / `refresh()` — was dead weight AND a bug.
+ * `refresh()` did `await client.state() as DaemonSnapshot`, but
+ * `DaemonClient.state()` returns `Result<unknown>` (`{ok,data,status}`),
+ * so every field the store read (`roadmap`, `modules`, `initiatives`)
+ * was undefined. It fired the fattest endpoint in the API on every
+ * project switch and every `state.rebuilt`, unguarded against A→B
+ * races, and no component ever read the result: `serverStore`
+ * (state/server.ts) has owned the real, cluster-scoped snapshot for
+ * several versions, and `state/live.ts` — this module's WS partner —
+ * was already deleted as dead.
  *
- * Solid signals are used everywhere. Components read via `state.tasks()`
- * and re-render on change.
+ * What remains is `events()`, still read by `lib/chat-stream.ts` to
+ * interleave tool / task.* bubbles into a conv. NOTE: nothing calls
+ * `appendEvent` today (the event bus routes those events elsewhere),
+ * so the ring is empty in practice; it stays because chat-stream's
+ * contract expects it and re-arming the feed is a chat-side decision,
+ * not a connection-layer one.
  */
 
 import { createSignal } from 'solid-js';
-import { createStore } from 'solid-js/store';
-import type { DaemonClient, DaemonEvent } from '~/lib/daemon-client';
-import { log } from '~/lib/log';
-
-export interface ClusterInfo {
-  id?: string;
-  name?: string;
-  type?: string;
-}
-
-export interface Task {
-  id: string;
-  title: string;
-  status: string;
-  category?: string;
-  module?: string;
-  priority?: string;
-  initiative?: string;
-  tags?: string[];
-  [k: string]: unknown;
-}
-
-export interface Module {
-  id: string;
-  name?: string;
-  kind?: string;
-  path?: string;
-  status?: string;
-  [k: string]: unknown;
-}
-
-export interface Initiative {
-  id: string;
-  title: string;
-  status?: string;
-  oneliner?: string;
-  [k: string]: unknown;
-}
-
-export interface DaemonSnapshot {
-  generated_at?: string;
-  cluster?: ClusterInfo;
-  modules?: Module[];
-  roadmap?: { tasks?: Task[]; stats?: Record<string, number> };
-  initiatives?: Initiative[];
-  timeline?: { recent?: DaemonEvent[] };
-  members?: unknown[];
-  docs?: unknown;
-}
-
-// ─── Snapshot ──────────────────────────────────────────────────────────────
-
-const [snapshot, setSnapshot] = createStore<DaemonSnapshot>({});
-
-// ─── Event log (last N) ────────────────────────────────────────────────────
+import type { DaemonEvent } from '~/lib/daemon-client';
 
 const MAX_EVENTS = 500;
 const [events, setEvents] = createSignal<DaemonEvent[]>([]);
-
-// ─── WebSocket connection state ────────────────────────────────────────────
-
-export type WsState = 'connecting' | 'open' | 'closed' | 'error';
-const [wsState, setWsState] = createSignal<WsState>('connecting');
-
-export interface StoreApi {
-  // Reads
-  snapshot: typeof snapshot;
-  events: typeof events;
-  wsState: typeof wsState;
-  tasks: () => Task[];
-  modules: () => Module[];
-  initiatives: () => Initiative[];
-  cluster: () => ClusterInfo;
-  // Writes
-  refresh: () => Promise<void>;
-  appendEvent: (ev: DaemonEvent) => void;
-  setWsState: typeof setWsState;
-  // Lifecycle
-  attach: (client: DaemonClient) => Promise<void>;
-}
-
-let attachedClient: DaemonClient | null = null;
-
-async function refresh(): Promise<void> {
-  if (!attachedClient) {
-    log.warn('refresh called before attach');
-    return;
-  }
-  try {
-    const s = await attachedClient.state() as DaemonSnapshot;
-    setSnapshot(s);
-    log.info('snapshot updated', {
-      tasks: s.roadmap?.tasks?.length ?? 0,
-      modules: s.modules?.length ?? 0,
-      initiatives: s.initiatives?.length ?? 0,
-    });
-  } catch (err) {
-    log.error('failed to fetch /state', err);
-  }
-}
 
 function appendEvent(ev: DaemonEvent): void {
   setEvents((prev) => {
     const next = [...prev, ev];
     return next.length > MAX_EVENTS ? next.slice(next.length - MAX_EVENTS) : next;
   });
-  // Drive snapshot refresh on full rebuild signals. Finer events (task.*,
-  // chat.*) update the snapshot via dedicated reducers below.
-  if (ev.type === 'state.rebuilt') {
-    void refresh();
-  }
 }
 
-async function attach(client: DaemonClient): Promise<void> {
-  attachedClient = client;
-  setWsState('connecting');
-  // V107.21 — Clear the legacy snapshot on attach. This store is
-  // single-snapshot (NOT cluster-scoped) so on project swap there
-  // was a window where readers saw the prior cluster's tasks /
-  // modules / initiatives until refresh() resolved. RoadmapList +
-  // every other reader has been migrated to serverStore, but the
-  // reset stays as defense-in-depth for any future caller.
-  setSnapshot({ generated_at: undefined, cluster: undefined, modules: [], roadmap: { tasks: [], stats: {} }, initiatives: [], timeline: { recent: [] }, members: [], docs: undefined });
-  setEvents([]);
-  await refresh();
-  log.info('store attached to', client.transport.label);
-}
-
-export const store: StoreApi = {
-  snapshot,
+export const store = {
   events,
-  wsState,
-  tasks: () => snapshot.roadmap?.tasks ?? [],
-  modules: () => snapshot.modules ?? [],
-  initiatives: () => snapshot.initiatives ?? [],
-  cluster: () => snapshot.cluster ?? {},
-  refresh,
   appendEvent,
-  setWsState,
-  attach,
 };

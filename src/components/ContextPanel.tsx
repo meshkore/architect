@@ -27,7 +27,7 @@
 
 import { createResource, For, Show } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
-import { ensureMarked } from '~/lib/cdn-loaders';
+import { Markdown } from '~/components/ui/Markdown';
 import { viewStore } from '~/state/view';
 import { contextRev } from '~/state/context-sync';
 import { log } from '~/lib/log';
@@ -239,21 +239,16 @@ function TreeNode(props: {
 
   // Body fetched when opened AND the node carries a body; refetched on a
   // contextRev bump so an open body updates live.
-  const [bodyHtml] = createResource(
+  const [body] = createResource(
     () => (hasBody() && isBodyOpen() ? `${props.node.id}|${contextRev()}` : null),
     async (key: string | null) => {
       if (!key) return '';
       const sep = key.lastIndexOf('|');
       const id = key.slice(0, sep);
       const rev = Number(key.slice(sep + 1));
-      const raw = await loadNodeBody(id, rev);
-      if (raw === null) return null;
-      try {
-        const m = await ensureMarked();
-        return m.parse(raw, { gfm: true }) as string;
-      } catch {
-        return raw;
-      }
+      // `null` (not '') is the read FAILURE — an empty file is a valid,
+      // successfully-read body and must not render as "couldn't load".
+      return loadNodeBody(id, rev);
     },
   );
 
@@ -366,14 +361,14 @@ function TreeNode(props: {
           </div>
           <div class="px-4 py-3">
             <Show
-              when={bodyHtml.state === 'ready' || bodyHtml.state === 'refreshing'}
+              when={body.state === 'ready' || body.state === 'refreshing'}
               fallback={<p class="text-[11px] text-gray-500 italic">loading…</p>}
             >
               <Show
-                when={bodyHtml()}
+                when={body()}
                 fallback={<p class="text-[11px] text-amber-300/70 italic">couldn't load content</p>}
               >
-                <div class={PROSE} innerHTML={bodyHtml() ?? ''} />
+                <Markdown text={body() ?? ''} class={PROSE} />
               </Show>
             </Show>
           </div>

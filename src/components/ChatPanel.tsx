@@ -1,7 +1,7 @@
 import { Show, createMemo, createSignal, createEffect } from 'solid-js';
 import { chatStore, isFixedAgentConv, type ChatMsg } from '~/state/chat';
 import { log } from '~/lib/log';
-import ChatScopeStrip from '~/components/ChatScopeStrip';
+import ChatScopeStrip from '~/components/chat/strip/ChatScopeStrip';
 import ChatHistoryView from '~/components/ChatHistoryView';
 import ChatComposer from '~/components/ChatComposer';
 import RoleMemoryViewer from '~/components/RoleMemoryViewer';
@@ -197,7 +197,7 @@ export default function ChatPanel() {
         <Show when={!historyOpen()} fallback={
           <ChatHistoryView conv={conv()!} onClose={() => setHistoryOpen(false)} />
         }>
-          <ChatThread ref={(el) => { threadEl = el; attachScrollListener(el); }} stream={stream()} />
+          <ChatThread conv={conv()!} ref={(el) => { threadEl = el; attachScrollListener(el); }} stream={stream()} />
         </Show>
         {/* V89.2 — StopBar removed. The Stop control now lives inline
             in the streaming agent bubble's BubbleHeader, on the same

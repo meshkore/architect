@@ -111,3 +111,57 @@ export function clearQueue(): void {
 export function setQueue(next: string[]): void {
   write(next);
 }
+
+// ─── The queue VIEW ─────────────────────────────────────────────────
+
+export interface QueueViewOptions<T extends { id: string }> {
+  /** Every candidate, in roadmap order. */
+  all: T[];
+  /** Is an agent working on this initiative right now? */
+  isLive: (id: string) => boolean;
+  /** Was it just created (still inside its ✨NEW TTL)? Omit to exclude
+   *  fresh-but-not-queued items — the run list wants only live ones. */
+  isFresh?: (id: string) => boolean;
+  /** Text filter. Omit to keep everything. */
+  match?: (it: T) => boolean;
+  /** Float imminent items (live or fresh) to the top. */
+  floatImminent?: boolean;
+}
+
+/**
+ * The queue as rendered and as executed — ONE derivation.
+ *
+ * Base order is the operator's insertion order. Items that are live but
+ * NOT queued are appended so a running story stays visible instead of
+ * vanishing from the wall it is running on. `floatImminent` then lifts
+ * whatever is running-right-now or just-created to the top: before the
+ * queue wall existed, that "fresh at the top" behaviour lived on the
+ * ACTIVE roadmap and was lost when the queue became the execution view.
+ * The sort is stable, so within-band order (queued-insertion, then
+ * appended) survives.
+ *
+ * Reactive — reads the queue signal.
+ */
+export function queueView<T extends { id: string }>(o: QueueViewOptions<T>): T[] {
+  const order = ids();
+  const inQ = new Set(order);
+  const byId = new Map(o.all.map((it) => [it.id, it] as const));
+  const seen = new Set<string>();
+  const out: T[] = [];
+  const add = (it: T | undefined): void => {
+    if (!it || seen.has(it.id)) return;
+    if (o.match && !o.match(it)) return;
+    seen.add(it.id);
+    out.push(it);
+  };
+
+  for (const id of order) add(byId.get(id));
+  for (const it of o.all) {
+    if (inQ.has(it.id)) continue;
+    if (o.isLive(it.id) || (o.isFresh?.(it.id) ?? false)) add(it);
+  }
+
+  if (!o.floatImminent) return out;
+  const imminent = (it: T): boolean => o.isLive(it.id) || (o.isFresh?.(it.id) ?? false);
+  return out.slice().sort((a, b) => Number(imminent(b)) - Number(imminent(a)));
+}

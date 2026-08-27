@@ -23,6 +23,8 @@ import { Show, createEffect, createSignal } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { mcConfirm } from '~/lib/modal';
 import { withAuthRetry } from '~/lib/retry';
+import { useClipboard } from '~/lib/use-clipboard';
+import { askBase as askBaseFor } from '~/lib/team-snippet';
 import { Block } from './atoms';
 
 const COMMS_DOC = '.meshkore/docs/conventions/master-copilot.md';
@@ -79,34 +81,23 @@ export function RemoteControlBlock() {
 
   const [revealed, setRevealed] = createSignal(false);
   const [snippetOpen, setSnippetOpen] = createSignal(false);
-  const [copied, setCopied] = createSignal<'token' | 'snippet' | null>(null);
   const [busy, setBusy] = createSignal<'rotate' | 'delete' | 'mint' | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
 
   const token = () => state()?.token ?? null;
   const minted = () => !!state()?.minted && !!token();
 
-  const copy = async (what: 'token' | 'snippet', text: string): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(what);
-      setTimeout(() => setCopied((c) => (c === what ? null : c)), 1500);
-    } catch {
-      setActionError('Copy failed — your browser blocked clipboard access.');
-    }
+  const clip = useClipboard();
+  const copy = (what: 'token' | 'snippet', text: string): void => {
+    void clip.copy(text, what).then((ok) => {
+      if (!ok) setActionError('Copy failed — your browser blocked clipboard access.');
+    });
   };
 
   /** Endpoint the personal agent targets — the shared daemon on loopback.
-   *  Derive the port from this cockpit's transport (same idiom as TEG-3),
-   *  never hardcode it. */
-  const askBase = (): string => {
-    let port = 5573;
-    try {
-      const raw = new URL(client()?.transport.httpBase ?? '').port;
-      if (raw) port = Number(raw);
-    } catch { /* keep default */ }
-    return `https://127.0.0.1:${port}`;
-  };
+   *  Port comes from this cockpit's transport (shared with TEG-3's
+   *  member snippet), never hardcoded. */
+  const askBase = (): string => askBaseFor(client()?.transport.httpBase);
 
   const connectionSnippet = (tok: string): string => {
     const base = askBase();
@@ -255,10 +246,10 @@ export function RemoteControlBlock() {
               >{revealed() ? 'Hide' : 'Reveal'}</button>
               <button
                 type="button"
-                onClick={() => void copy('token', token() ?? '')}
+                onClick={() => copy('token', token() ?? '')}
                 class="flex-shrink-0 text-[11px] font-mono text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1.5"
                 title="Copy token to clipboard"
-              >{copied() === 'token' ? 'Copied ✓' : 'Copy'}</button>
+              >{clip.isCopied('token') ? 'Copied ✓' : 'Copy'}</button>
             </div>
           </div>
 
@@ -294,10 +285,10 @@ export function RemoteControlBlock() {
                 >{snippetOpen() ? 'Hide' : 'Show'}</button>
                 <button
                   type="button"
-                  onClick={() => void copy('snippet', connectionSnippet(token()!))}
+                  onClick={() => copy('snippet', connectionSnippet(token()!))}
                   class="text-[11px] font-mono uppercase tracking-wider text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1"
                   title="Copy the ready-to-paste snippet (includes the real token)"
-                >{copied() === 'snippet' ? 'Copied ✓' : 'Copy'}</button>
+                >{clip.isCopied('snippet') ? 'Copied ✓' : 'Copy'}</button>
               </div>
             </div>
             <Show when={snippetOpen()}>

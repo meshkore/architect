@@ -21,6 +21,7 @@
 
 import { createStore } from 'solid-js/store';
 import { log } from '~/lib/log';
+import { captureClusterEpoch, isCurrentEpoch } from '~/lib/swap-guard';
 import type {
   DaemonClient,
   DaemonEvent,
@@ -77,10 +78,21 @@ function sortByPinned(members: TeamMember[]): TeamMember[] {
 }
 
 /** GET /team → replace the roster. Idempotent; safe to call on any
- *  team.* WS event. */
+ *  team.* WS event.
+ *
+ *  AX5 — the write is epoch-guarded. `/team` for project A in flight,
+ *  operator switches to B, A's response lands: pre-fix it overwrote B's
+ *  roster with A's until B's own hydrate arrived. The guard is captured
+ *  here rather than passed in so EVERY caller is covered, including the
+ *  WS-triggered re-hydrates in `onTeamEvent`. */
 async function hydrate(client: DaemonClient): Promise<void> {
+  const epoch = captureClusterEpoch();
   setState('loading', true);
   const res = await client.teamList();
+  if (!isCurrentEpoch(epoch)) {
+    log.debug('[swap-guard] dropping stale team roster');
+    return;
+  }
   if (res.ok) {
     setState({ list: sortByPinned(res.data ?? []), hydrated: true, loading: false, error: null });
   } else {
@@ -101,11 +113,15 @@ async function hydrate(client: DaemonClient): Promise<void> {
 /** Lazy-load one member's init-prompt body (GET /team/<id>). Cached. */
 async function detail(client: DaemonClient, id: string, force = false): Promise<TeamMemberDetail | null> {
   if (!force && state.details[id]) return state.details[id]!;
+  const epoch = captureClusterEpoch();
   const res = await client.teamGet(id);
   if (!res.ok) {
     log.warn('teamStore.detail failed', { id, status: res.status });
     return null;
   }
+  // AX5 — same class as the roster: member ids collide across projects,
+  // so a late detail would populate another cluster's cache.
+  if (!isCurrentEpoch(epoch)) return null;
   setState('details', id, res.data);
   return res.data;
 }

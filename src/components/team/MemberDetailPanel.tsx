@@ -7,19 +7,21 @@
  * inside teamStore.update). A concurrent-edit warning fires when the
  * on-disk `updated:` timestamp moves while the panel is open.
  *
- * TEG-3 — "External access" section: exposure toggle (PATCH), token
- * reveal/copy/regenerate/revoke, and a ready-to-paste connection
- * snippet for the consuming project. The token is read from the
- * in-memory teamStore detail cache only (never localStorage).
+ * AX17 split the sections out to `team/detail/`; what stays here is the
+ * shell: the working copies seeded from the member, the `saveSection`
+ * plumbing every section shares, and the danger zone.
  */
 
-import { For, Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
+import { Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
 import { teamStore } from '~/state/team';
-import { clientsStore } from '~/state/clients';
-import { EFFORT_CATALOG, DEFAULT_PROVIDER, providerCatalog } from '~/lib/models';
-import { ensureMarked } from '~/lib/cdn-loaders';
-import { log } from '~/lib/log';
+import { DEFAULT_PROVIDER } from '~/lib/models';
+import type { EngineChoice } from '~/components/team/ClientModelEffortPicker';
+import { ModelSection } from '~/components/team/detail/ModelSection';
+import { PromptSection } from '~/components/team/detail/PromptSection';
+import { RefsSection } from '~/components/team/detail/RefsSection';
+import { ExternalAccessSection } from '~/components/team/detail/ExternalAccessSection';
+import { ConfirmButtons } from '~/components/ui/ConfirmButtons';
 
 export default function MemberDetailPanel(props: { memberId: string; onClose: () => void; onDeleted?: () => void }) {
   const client = () => daemonStore.state.client;
@@ -36,33 +38,12 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
   );
 
   // Editable working copies (seeded from the member / detail once loaded).
-  const [model, setModel] = createSignal<string>('');
-  const [effort, setEffort] = createSignal<string>('default');
-  // DM-CLI-08 (multi-cli-clients) — which CLI dispatches this member.
-  // Named `selectedClient` (not `client`) to avoid shadowing the
-  // daemon-client `client()` accessor already in scope above.
-  const [selectedClient, setSelectedClient] = createSignal<string>('claude-code');
-  // MPV1 (multi-provider-agents) — which LLM provider (Anthropic/ZAI) the
-  // claude-code client runs against. Changing it repopulates the model list
-  // from that provider's catalog. Only shown for claude-code.
-  const [provider, setProvider] = createSignal<string>(DEFAULT_PROVIDER);
-  const catalog = createMemo(() => clientsStore.catalogFor(selectedClient()));
-  const providerOptions = createMemo(() => clientsStore.providersFor('claude-code'));
-  // Grouped model catalog for the active provider (claude-code path).
-  const providerModels = createMemo(() => providerCatalog(provider()));
-  const modelGroups = createMemo(() => [...new Set(providerModels().map((m) => m.group))]);
-  const onClientChange = (id: string) => {
-    setSelectedClient(id);
-    const cat = clientsStore.catalogFor(id);
-    setModel(cat.models[0]?.id ?? '');
-    setEffort(cat.efforts[0]?.id ?? 'default');
-  };
-  const onProviderChange = (id: string) => {
-    setProvider(id);
-    // Reset to the new provider's first model so a leftover Anthropic id is
-    // never submitted for a ZAI member (and vice versa).
-    setModel(providerCatalog(id)[0]?.id ?? '');
-  };
+  const [engine, setEngine] = createSignal<EngineChoice>({
+    client: 'claude-code',
+    provider: DEFAULT_PROVIDER,
+    model: 'sonnet',
+    effort: 'default',
+  });
   const [prompt, setPrompt] = createSignal<string>('');
   const [refs, setRefs] = createSignal<string[]>([]);
   const [promptTab, setPromptTab] = createSignal<'edit' | 'preview'>('edit');
@@ -82,117 +63,20 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
   createEffect(() => {
     const m = member();
     if (m) {
-      setSelectedClient(m.client || 'claude-code');
-      setProvider(m.provider || DEFAULT_PROVIDER);
-      setModel(m.model || 'sonnet');
-      setEffort(m.effort || 'default');
+      setEngine({
+        client: m.client || 'claude-code',
+        provider: m.provider || DEFAULT_PROVIDER,
+        model: m.model || 'sonnet',
+        effort: m.effort || 'default',
+      });
       setRefs(Array.isArray(m.refs) ? [...m.refs] : []);
     }
     const d = detail();
     if (d) setPrompt(d.body ?? '');
   });
 
-  const [previewHtml] = createResource(
-    () => (promptTab() === 'preview' ? prompt() : null),
-    async (raw) => {
-      if (!raw) return '';
-      try {
-        const marked = await ensureMarked();
-        return marked.parse(raw, { gfm: true }) as string;
-      } catch (e) {
-        log.warn('member-detail marked render failed', e instanceof Error ? e.message : String(e));
-        return '<p class="text-red-300">Preview unavailable (renderer failed to load).</p>';
-      }
-    },
-  );
-
   const required = () => member()?.required === true;
-
-  // ── TEG-3 · External access ─────────────────────────────────────────
   const exposure = () => member()?.exposure ?? 'internal';
-  const isExternal = () => exposure() === 'external';
-  // Token comes from the store's in-memory detail cache (authed
-  // GET /team/<id>); reading the store directly keeps it reactive to
-  // rotate / revoke without re-running the resource.
-  const token = () => teamStore.state.details[props.memberId]?.token ?? null;
-  const [extOpen, setExtOpen] = createSignal(false);
-  const [tokenRevealed, setTokenRevealed] = createSignal(false);
-  const [snippetOpen, setSnippetOpen] = createSignal(false);
-  const [copied, setCopied] = createSignal<'token' | 'snippet' | null>(null);
-  // Open the section by default for already-external members (the
-  // member may not be loaded yet on mount, so seed reactively once).
-  createEffect(() => { if (isExternal()) setExtOpen(true); });
-
-  const copy = async (what: 'token' | 'snippet', text: string): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(what);
-      setTimeout(() => setCopied((c) => (c === what ? null : c)), 1500);
-    } catch {
-      setError('Copy failed — your browser blocked clipboard access.');
-    }
-  };
-
-  /** External callers hit the shared daemon on loopback; derive the
-   *  port from this client's transport instead of hardcoding it. */
-  const askBase = (): string => {
-    let port = 5573;
-    try {
-      const raw = new URL(client()?.transport.httpBase ?? '').port;
-      if (raw) port = Number(raw);
-    } catch { /* keep default */ }
-    return `https://127.0.0.1:${port}`;
-  };
-  const clusterId = (): string =>
-    client()?.transport.projectId ?? daemonStore.state.activeId ?? '<cluster-id>';
-
-  const connectionSnippet = (tok: string): string => {
-    const base = askBase();
-    const id = props.memberId;
-    return [
-      `# 1. Ask ${id} — returns {"request_id": "..."}`,
-      `curl -sk -X POST ${base}/team/${id}/ask \\`,
-      `  -H "Authorization: Bearer ${tok}" \\`,
-      `  -H "X-MeshKore-Project: ${clusterId()}" \\`,
-      `  -H "content-type: application/json" \\`,
-      `  -d '{"text": "Your question here"}'`,
-      ``,
-      `# 2. Poll until status is "done" — the answer is in result_text`,
-      `curl -sk ${base}/team/requests/<request_id> \\`,
-      `  -H "Authorization: Bearer ${tok}" \\`,
-      `  -H "X-MeshKore-Project: ${clusterId()}"`,
-    ].join('\n');
-  };
-
-  const setExposureExternal = async (): Promise<void> => {
-    if (isExternal()) return;
-    await saveSection('exposure', { exposure: 'external' });
-    // The PATCH response is frontmatter-only; force-refetch the detail
-    // so the freshly minted token lands in the cache.
-    const c = client();
-    if (c) await teamStore.detail(c, props.memberId, /*force*/ true);
-  };
-
-  const revokeAccess = async (): Promise<void> => {
-    if (!isExternal()) return;
-    if (!confirm('The member becomes private and its token is destroyed — external callers are cut off immediately. Revoke access?')) return;
-    setTokenRevealed(false);
-    await saveSection('exposure', { exposure: 'internal' });
-  };
-
-  const regenerateToken = async (): Promise<void> => {
-    const c = client();
-    if (!c) {
-      setError('Not connected to the daemon — reconnect (reload the page) and try again.');
-      return;
-    }
-    if (!confirm('The old token stops working immediately. Regenerate?')) return;
-    setSavingSection('token');
-    setError(null);
-    const res = await teamStore.rotateToken(c, props.memberId);
-    setSavingSection(null);
-    if (!res.ok) setError(`Token regeneration failed (HTTP ${res.status}).`);
-  };
 
   const saveSection = async (section: string, body: Record<string, unknown>): Promise<void> => {
     const c = client();
@@ -204,14 +88,8 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
     setError(null);
     const res = await teamStore.update(c, props.memberId, body);
     setSavingSection(null);
-    if (!res.ok) {
-      setError(`Save failed (HTTP ${res.status}) — reverted.`);
-    }
+    if (!res.ok) setError(`Save failed (HTTP ${res.status}) — reverted.`);
   };
-
-  const addRef = () => setRefs((xs) => [...xs, '']);
-  const setRefAt = (i: number, v: string) => setRefs((xs) => xs.map((r, j) => (j === i ? v : r)));
-  const removeRef = (i: number) => setRefs((xs) => xs.filter((_, j) => j !== i));
 
   const del = async (): Promise<void> => {
     const c = client();
@@ -219,7 +97,6 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
       setError('Not connected to the daemon — reconnect (reload the page) and try again.');
       return;
     }
-    if (!confirm(`Delete member "${member()?.name ?? props.memberId}"? This cannot be undone.`)) return;
     const res = await teamStore.remove(c, props.memberId);
     if (res.ok) {
       props.onDeleted?.();
@@ -235,7 +112,6 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
     <div class="fixed inset-0 z-50 flex justify-end" onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }}>
       <div class="absolute inset-0 bg-[rgba(2,4,12,0.6)] backdrop-blur-sm" aria-hidden="true" />
       <aside class="relative w-full max-w-xl h-full bg-[#0b1220] border-l border-gray-700/40 shadow-2xl flex flex-col">
-        {/* Header */}
         <header class="flex items-center gap-2.5 px-4 py-3 border-b border-gray-800/60">
           <span class="text-2xl leading-none" aria-hidden="true">{member()?.emoji ?? '🤖'}</span>
           <div class="flex-1 min-w-0">
@@ -264,324 +140,54 @@ export default function MemberDetailPanel(props: { memberId: string; onClose: ()
             <div class="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-200">{error()}</div>
           </Show>
 
-          {/* Section 1 — Client, model & effort */}
-          <section class="space-y-3">
-            <div class="flex items-center justify-between">
-              <h3 class="font-mono text-[10px] uppercase tracking-[0.14em] text-gray-500">Client, model &amp; effort</h3>
-              <button
-                type="button"
-                onClick={() => void saveSection('model', { client: selectedClient(), provider: selectedClient() === 'claude-code' ? provider() : DEFAULT_PROVIDER, model: model(), effort: effort() })}
-                disabled={savingSection() === 'model'}
-                class="text-[11px] font-mono uppercase tracking-wider text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1 disabled:opacity-50"
-              >{savingSection() === 'model' ? 'Saving…' : 'Save'}</button>
-            </div>
-            <select
-              value={selectedClient()}
-              onChange={(e) => onClientChange(e.currentTarget.value)}
-              class="w-full bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[13px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
-            >
-              <For each={clientsStore.options()}>
-                {(c) => (
-                  <option value={c.id} disabled={c.installed === false || c.authConfigured === false}>
-                    {c.label}
-                    {c.installed === false
-                      ? ' (not installed on daemon host)'
-                      : c.authConfigured === false
-                        ? ' (no API key — set in ⚙ General settings)'
-                        : ''}
-                  </option>
-                )}
-              </For>
-            </select>
-            {/* Provider (MPV1) — claude-code only. Unavailable providers
-                (no key set in Config) are shown but not selectable. */}
-            <Show when={selectedClient() === 'claude-code'}>
-              <label class="block font-mono text-[9px] uppercase tracking-[0.14em] text-gray-600">Provider</label>
-              <select
-                value={provider()}
-                onChange={(e) => onProviderChange(e.currentTarget.value)}
-                class="w-full bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[13px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
-              >
-                <For each={providerOptions()}>
-                  {(pr) => (
-                    <option value={pr.id} disabled={!pr.available && pr.id !== provider()}>
-                      {pr.label}
-                      {pr.requiresKey && !pr.available ? ' (needs API key — set in Config)' : ''}
-                    </option>
-                  )}
-                </For>
-              </select>
-            </Show>
-            <Show
-              when={selectedClient() === 'claude-code'}
-              fallback={
-                <select
-                  value={model()}
-                  onChange={(e) => setModel(e.currentTarget.value)}
-                  class="w-full bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[13px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
-                >
-                  <For each={catalog().models}>{(m) => <option value={m.id}>{m.label}</option>}</For>
-                </select>
-              }
-            >
-              <select
-                value={model()}
-                onChange={(e) => setModel(e.currentTarget.value)}
-                class="w-full bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[13px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
-              >
-                <For each={modelGroups()}>{(grp) => (
-                  <optgroup label={grp}>
-                    <For each={providerModels().filter((m) => m.group === grp)}>
-                      {(m) => <option value={m.id}>{m.label}</option>}
-                    </For>
-                  </optgroup>
-                )}</For>
-              </select>
-            </Show>
-            <div class="flex flex-wrap gap-1">
-              <For each={selectedClient() === 'claude-code' ? EFFORT_CATALOG : catalog().efforts}>
-                {(e) => (
-                  <button
-                    type="button"
-                    onClick={() => setEffort(e.id)}
-                    aria-pressed={effort() === e.id}
-                    class="px-2.5 py-1.5 text-[12px] font-mono border transition flex-shrink-0"
-                    classList={{
-                      'bg-emerald-500/12 border-emerald-500/60 text-white': effort() === e.id,
-                      'bg-[rgba(11,18,32,0.5)] border-gray-700/40 text-gray-300 hover:text-gray-100': effort() !== e.id,
-                    }}
-                  >{e.label}</button>
-                )}
-              </For>
-            </div>
-          </section>
+          <ModelSection
+            value={engine()}
+            onChange={setEngine}
+            saving={savingSection() === 'model'}
+            onSave={(body) => { void saveSection('model', body); }}
+          />
 
-          {/* Section 2 — Init prompt */}
-          <section class="space-y-2">
-            <div class="flex items-center justify-between">
-              <h3 class="font-mono text-[10px] uppercase tracking-[0.14em] text-gray-500">Init prompt</h3>
-              <div class="flex items-center gap-1.5">
-                <div class="flex rounded border border-gray-700/50 overflow-hidden">
-                  <button type="button" onClick={() => setPromptTab('edit')}
-                    class={`px-2 py-0.5 text-[11px] font-mono ${promptTab() === 'edit' ? 'bg-emerald-500/15 text-emerald-200' : 'text-gray-400 hover:text-gray-200'}`}>Edit</button>
-                  <button type="button" onClick={() => setPromptTab('preview')}
-                    class={`px-2 py-0.5 text-[11px] font-mono ${promptTab() === 'preview' ? 'bg-emerald-500/15 text-emerald-200' : 'text-gray-400 hover:text-gray-200'}`}>Preview</button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void saveSection('prompt', { prompt: prompt() })}
-                  disabled={savingSection() === 'prompt'}
-                  class="text-[11px] font-mono uppercase tracking-wider text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1 disabled:opacity-50"
-                >{savingSection() === 'prompt' ? 'Saving…' : 'Save'}</button>
-              </div>
-            </div>
-            <Show
-              when={promptTab() === 'edit'}
-              fallback={
-                <div
-                  class="prose prose-sm prose-invert max-w-none bg-[#020617] border border-gray-700/40 rounded px-3 py-2 text-[13px] text-gray-200 min-h-[20rem] overflow-y-auto [&_h1]:text-[15px] [&_h2]:text-[13px] [&_h2]:font-semibold [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-0.5 [&_code]:font-mono [&_code]:text-[11px] [&_code]:text-emerald-300/90 [&_code]:bg-gray-900/60 [&_code]:px-1 [&_code]:rounded [&_a]:text-sky-300 [&_a]:underline"
-                  innerHTML={previewHtml() ?? ''}
-                />
-              }
-            >
-              <textarea
-                rows={20}
-                value={prompt()}
-                onInput={(e) => setPrompt(e.currentTarget.value)}
-                class="w-full bg-[#020617] border border-gray-700/40 rounded px-2.5 py-2 text-[12px] font-mono leading-relaxed text-gray-100 focus:outline-none focus:border-emerald-500/55 resize-y"
-              />
-            </Show>
-          </section>
+          <PromptSection
+            prompt={prompt()}
+            onPrompt={setPrompt}
+            tab={promptTab()}
+            onTab={setPromptTab}
+            saving={savingSection() === 'prompt'}
+            onSave={(body) => { void saveSection('prompt', body); }}
+          />
 
-          {/* Section 3 — References */}
-          <section class="space-y-2">
-            <div class="flex items-center justify-between">
-              <h3 class="font-mono text-[10px] uppercase tracking-[0.14em] text-gray-500">References</h3>
-              <div class="flex items-center gap-1.5">
-                <button type="button" onClick={addRef} class="text-[11px] font-mono text-emerald-300/80 hover:text-emerald-200">+ add</button>
-                <button
-                  type="button"
-                  onClick={() => void saveSection('refs', { refs: refs().map((r) => r.trim()).filter(Boolean) })}
-                  disabled={savingSection() === 'refs'}
-                  class="text-[11px] font-mono uppercase tracking-wider text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1 disabled:opacity-50"
-                >{savingSection() === 'refs' ? 'Saving…' : 'Save'}</button>
-              </div>
-            </div>
-            <div class="space-y-1.5">
-              <For each={refs()}>
-                {(r, i) => (
-                  <div class="flex gap-1.5">
-                    <input
-                      type="text"
-                      value={r}
-                      onInput={(e) => setRefAt(i(), e.currentTarget.value)}
-                      placeholder=".meshkore/context/stack.md"
-                      class="flex-1 bg-[#020617] border border-gray-700/40 rounded px-2 py-1 text-[12px] font-mono text-gray-100 focus:outline-none focus:border-emerald-500/55"
-                    />
-                    <button type="button" onClick={() => removeRef(i())} class="px-2 text-gray-500 hover:text-red-300" title="Remove">✕</button>
-                  </div>
-                )}
-              </For>
-              <Show when={refs().length === 0}>
-                <p class="text-[11px] text-gray-600 italic">No references.</p>
-              </Show>
-            </div>
-          </section>
+          <RefsSection
+            refs={refs()}
+            onRefs={setRefs}
+            saving={savingSection() === 'refs'}
+            onSave={(body) => { void saveSection('refs', body); }}
+          />
 
-          {/* Section 4 — External access (TEG-3) */}
-          <section class="space-y-3 pt-2 border-t border-gray-800/60">
-            <button
-              type="button"
-              onClick={() => setExtOpen((o) => !o)}
-              class="w-full flex items-center justify-between gap-2 text-left"
-              aria-expanded={extOpen()}
-            >
-              <h3 class="font-mono text-[10px] uppercase tracking-[0.14em] text-gray-500">
-                <span class="inline-block w-3 text-gray-600" aria-hidden="true">{extOpen() ? '▾' : '▸'}</span>
-                External access
-              </h3>
-              <Show when={isExternal()}>
-                <span class="inline-flex items-center gap-1 font-mono text-[9px] uppercase tracking-wider text-sky-200 bg-sky-500/10 border border-sky-500/30 rounded px-1.5 py-0.5">
-                  ↗ external
-                </span>
-              </Show>
-            </button>
+          <ExternalAccessSection
+            memberId={props.memberId}
+            exposure={exposure()}
+            savingSection={savingSection()}
+            onError={setError}
+            onSave={saveSection}
+            onSavingSection={setSavingSection}
+          />
 
-            <Show when={extOpen()}>
-              <div class="space-y-3">
-                <p class="text-[11px] text-gray-500 leading-snug">
-                  External members can be queried by other software on this
-                  machine (another project, a bare CLI session) via a
-                  per-member token. Internal members are reachable from this
-                  cockpit only.
-                </p>
-
-                {/* Segmented Internal / External */}
-                <div class="flex gap-1" role="group" aria-label="Exposure">
-                  <button
-                    type="button"
-                    onClick={() => void revokeAccess()}
-                    disabled={savingSection() === 'exposure'}
-                    aria-pressed={!isExternal()}
-                    class="px-2.5 py-1.5 text-[12px] font-mono border transition flex-shrink-0 disabled:opacity-50"
-                    classList={{
-                      'bg-emerald-500/12 border-emerald-500/60 text-white': !isExternal(),
-                      'bg-[rgba(11,18,32,0.5)] border-gray-700/40 text-gray-300 hover:text-gray-100': isExternal(),
-                    }}
-                  >Internal</button>
-                  <button
-                    type="button"
-                    onClick={() => void setExposureExternal()}
-                    disabled={savingSection() === 'exposure'}
-                    aria-pressed={isExternal()}
-                    class="px-2.5 py-1.5 text-[12px] font-mono border transition flex-shrink-0 disabled:opacity-50"
-                    classList={{
-                      'bg-sky-500/12 border-sky-500/60 text-white': isExternal(),
-                      'bg-[rgba(11,18,32,0.5)] border-gray-700/40 text-gray-300 hover:text-gray-100': !isExternal(),
-                    }}
-                  >External</button>
-                  <Show when={savingSection() === 'exposure'}>
-                    <span class="self-center text-[11px] font-mono text-gray-500">Saving…</span>
-                  </Show>
-                </div>
-
-                <Show when={isExternal()}>
-                  {/* Token */}
-                  <div class="space-y-1.5">
-                    <div class="flex items-center justify-between">
-                      <span class="font-mono text-[10px] uppercase tracking-wider text-gray-500">Bearer token</span>
-                      <span class="text-[10px] text-gray-600">Never expires — rotate or revoke below.</span>
-                    </div>
-                    <Show
-                      when={token()}
-                      fallback={
-                        <p class="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded px-2.5 py-1.5">
-                          Token unavailable — the daemon didn't return it (needs py-1.30.0+). Try reopening this panel.
-                        </p>
-                      }
-                    >
-                      <div class="flex gap-1.5 items-center">
-                        <code class="flex-1 min-w-0 truncate bg-[#020617] border border-gray-700/40 rounded px-2.5 py-1.5 text-[12px] font-mono text-gray-100 select-all">
-                          {tokenRevealed() ? token() : '••••••••••••••••••••••••'}
-                        </code>
-                        <button
-                          type="button"
-                          onClick={() => setTokenRevealed((v) => !v)}
-                          class="flex-shrink-0 text-[11px] font-mono text-gray-400 hover:text-gray-100 border border-gray-700/50 hover:border-gray-500/60 rounded px-2 py-1.5"
-                          title={tokenRevealed() ? 'Hide token' : 'Reveal token'}
-                        >{tokenRevealed() ? 'Hide' : 'Reveal'}</button>
-                        <button
-                          type="button"
-                          onClick={() => void copy('token', token() ?? '')}
-                          class="flex-shrink-0 text-[11px] font-mono text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1.5"
-                          title="Copy token to clipboard"
-                        >{copied() === 'token' ? 'Copied ✓' : 'Copy'}</button>
-                      </div>
-                    </Show>
-                    <div class="flex gap-1.5 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => void regenerateToken()}
-                        disabled={savingSection() === 'token'}
-                        class="text-[11px] font-mono text-amber-300 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 rounded px-2.5 py-1.5 disabled:opacity-50"
-                        title="Mint a new token — the old one stops working immediately"
-                      >{savingSection() === 'token' ? 'Regenerating…' : 'Regenerate'}</button>
-                      <button
-                        type="button"
-                        onClick={() => void revokeAccess()}
-                        disabled={savingSection() === 'exposure'}
-                        class="text-[11px] font-mono text-red-300 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 rounded px-2.5 py-1.5 disabled:opacity-50"
-                        title="Make the member private and destroy its token"
-                      >Revoke access</button>
-                    </div>
-                  </div>
-
-                  {/* Connection snippet — collapsed by default; Show/Hide toggles it. */}
-                  <Show when={token()}>
-                    <div class="space-y-1.5">
-                      <div class="flex items-center justify-between">
-                        <span class="font-mono text-[10px] uppercase tracking-wider text-gray-500">Connection snippet</span>
-                        <div class="flex gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setSnippetOpen((v) => !v)}
-                            class="text-[11px] font-mono uppercase tracking-wider text-gray-400 hover:text-gray-100 border border-gray-700/50 hover:border-gray-500/60 rounded px-2 py-1"
-                            aria-expanded={snippetOpen()}
-                          >{snippetOpen() ? 'Hide' : 'Show'}</button>
-                          <button
-                            type="button"
-                            onClick={() => void copy('snippet', connectionSnippet(token()!))}
-                            class="text-[11px] font-mono uppercase tracking-wider text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 hover:border-emerald-500/60 rounded px-2 py-1"
-                            title="Copy the ready-to-paste snippet (includes the real token)"
-                          >{copied() === 'snippet' ? 'Copied ✓' : 'Copy'}</button>
-                        </div>
-                      </div>
-                      <Show when={snippetOpen()}>
-                        <pre class="bg-[#020617] border border-gray-700/40 rounded px-2.5 py-2 text-[11px] font-mono leading-relaxed text-gray-200 overflow-x-auto whitespace-pre">
-                          {connectionSnippet(tokenRevealed() ? token()! : '<token — use Copy>')}
-                        </pre>
-                        <p class="text-[10px] text-gray-600 leading-snug">
-                          Hand this to the consuming project. The copied version
-                          always contains the real token; the endpoint is this
-                          machine's shared daemon (loopback only).
-                        </p>
-                      </Show>
-                    </div>
-                  </Show>
-                </Show>
-              </div>
-            </Show>
-          </section>
-
-          {/* Section 5 — Danger zone (hidden when required) */}
+          {/* Danger zone — hidden when the member is required. */}
           <Show when={!required()}>
             <section class="space-y-2 pt-2 border-t border-gray-800/60">
               <h3 class="font-mono text-[10px] uppercase tracking-[0.14em] text-red-400/80">Danger zone</h3>
-              <button
-                type="button"
-                onClick={() => void del()}
-                class="text-[12px] font-mono text-red-300 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 rounded px-3 py-1.5"
-              >Delete member</button>
+              <ConfirmButtons
+                question={`Delete "${member()?.name ?? props.memberId}"? This cannot be undone.`}
+                confirmLabel="Delete"
+                onConfirm={() => { void del(); }}
+                trigger={(arm) => (
+                  <button
+                    type="button"
+                    onClick={arm}
+                    class="text-[12px] font-mono text-red-300 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 rounded px-3 py-1.5"
+                  >Delete member</button>
+                )}
+              />
             </section>
           </Show>
         </div>

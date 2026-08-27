@@ -36,6 +36,8 @@ import { serverStore } from '~/state/server';
 import { projectsStore } from '~/state/projects';
 import { uiStore } from '~/state/ui';
 import { log } from '~/lib/log';
+import { TabButton } from '~/components/ui/TabButton';
+import { CopyButton } from '~/components/ui/CopyButton';
 
 interface DebugTarget {
   port: number;
@@ -199,7 +201,6 @@ function buildLocalStorageSnapshot(t: DebugTarget): unknown {
 
 export function ProjectDebugModalHost(): JSX.Element {
   const [tab, setTab] = createSignal<Tab>('memory');
-  const [copyOk, setCopyOk] = createSignal(false);
 
   const snapshot = createMemo<{ memory: unknown; localStorage: unknown } | null>(() => {
     const t = target();
@@ -216,17 +217,6 @@ export function ProjectDebugModalHost(): JSX.Element {
     const obj = tab() === 'memory' ? s.memory : s.localStorage;
     try { return JSON.stringify(obj, null, 2); }
     catch (e) { return `(stringify failed: ${e instanceof Error ? e.message : String(e)})`; }
-  };
-
-  const copy = async (): Promise<void> => {
-    const text = currentPayload();
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopyOk(true);
-      setTimeout(() => setCopyOk(false), 1500);
-    } catch (e) {
-      log.warn('copy snapshot failed', e instanceof Error ? e.message : String(e));
-    }
   };
 
   return (
@@ -256,16 +246,19 @@ export function ProjectDebugModalHost(): JSX.Element {
 
             {/* Tabs */}
             <nav class="flex items-center gap-1 px-5 py-2 border-b border-gray-800/60 bg-gray-950/30">
-              <TabPill id="memory"       label="In-memory stores" active={tab() === 'memory'}       onClick={() => setTab('memory')} />
-              <TabPill id="localStorage" label="localStorage"      active={tab() === 'localStorage'} onClick={() => setTab('localStorage')} />
+              <TabButton tone="accent" active={tab() === 'memory'} onClick={() => setTab('memory')}>
+                In-memory stores
+              </TabButton>
+              <TabButton tone="accent" active={tab() === 'localStorage'} onClick={() => setTab('localStorage')}>
+                localStorage
+              </TabButton>
               <span class="flex-1" />
-              <button
-                type="button"
-                onClick={() => { void copy(); }}
+              <CopyButton
+                text={currentPayload}
+                label="Copy snapshot"
+                title="Copy this diagnostic snapshot to the clipboard"
                 class="text-[10px] font-mono uppercase tracking-wider px-2.5 py-1 rounded border border-emerald-500/40 hover:border-emerald-500/70 text-emerald-200 hover:text-emerald-100 transition-colors"
-              >
-                {copyOk() ? 'copied ✓' : 'Copy snapshot'}
-              </button>
+              />
             </nav>
 
             {/* Body — scrollable JSON */}
@@ -292,18 +285,3 @@ export function ProjectDebugModalHost(): JSX.Element {
   );
 }
 
-function TabPill(props: { id: Tab; label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      class={`px-2.5 py-1 rounded text-[11px] font-mono uppercase tracking-wider transition-colors border ${
-        props.active
-          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
-          : 'text-gray-500 hover:text-gray-300 border-transparent hover:border-gray-700'
-      }`}
-    >
-      {props.label}
-    </button>
-  );
-}

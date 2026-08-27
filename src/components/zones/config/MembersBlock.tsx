@@ -6,6 +6,12 @@ import { Block, Btn } from './atoms';
 
 interface AdmissionEntry { id: string; identity?: string; hostname?: string; requested_at?: string }
 
+function asEntries(rows: unknown[] | undefined): AdmissionEntry[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((r): r is AdmissionEntry =>
+    !!r && typeof r === 'object' && typeof (r as AdmissionEntry).id === 'string');
+}
+
 export function MembersBlock() {
   const [pending, setPending] = createSignal<AdmissionEntry[]>([]);
   const [stub, setStub] = createSignal<string | null>(null);
@@ -13,23 +19,23 @@ export function MembersBlock() {
   async function refresh() {
     const c = daemonStore.state.client;
     if (!c) return;
-    try {
-      const headers: Record<string, string> = c.transport.token ? { authorization: `Bearer ${c.transport.token}` } : {};
-      const r = await fetch(`${c.transport.httpBase}/admission/list`, { headers });
-      if (r.status === 501) { setStub('Admission flow not implemented yet on this daemon.'); return; }
-      if (!r.ok) { setStub(`/admission/list → ${r.status}`); return; }
-      const data = await r.json() as { pending?: AdmissionEntry[] };
-      setPending(data.pending ?? []);
+    const r = await c.admissionList();
+    if (r.ok) {
+      setPending(asEntries(r.data.pending));
       setStub(null);
-    } catch (e) { log.warn('admission refresh', e instanceof Error ? e.message : String(e)); }
+      return;
+    }
+    // 501 is the daemon saying "this flow isn't implemented here" — a
+    // capability gap to explain, not a failure to alarm about.
+    if (r.status === 501) { setStub('Admission flow not implemented yet on this daemon.'); return; }
+    setStub(`/admission/list → ${r.status}`);
+    log.warn('admission refresh', { status: r.status });
   }
 
   async function decide(id: string, action: 'approve' | 'reject') {
     const c = daemonStore.state.client;
     if (!c) return;
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
-    if (c.transport.token) headers.authorization = `Bearer ${c.transport.token}`;
-    const r = await fetch(`${c.transport.httpBase}/admission/${action}/${encodeURIComponent(id)}`, { method: 'POST', headers, body: '{}' });
+    const r = await c.admissionDecide(action, id);
     if (!r.ok) { void mcAlert(`${action} failed: ${r.status}`, { title: 'Error' }); return; }
     void refresh();
   }

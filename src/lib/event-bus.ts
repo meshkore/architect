@@ -28,6 +28,7 @@ import { serverStore } from '~/state/server';
 import { storyStore } from '~/state/story';
 import { teamStore } from '~/state/team';
 import { daemonStore } from '~/state/daemon';
+import { viewStore } from '~/state/view';
 import { bumpContextRev } from '~/state/context-sync';
 import { log } from './log';
 
@@ -63,6 +64,26 @@ const CONV_TYPE_PREFIX = 'conv.';
 // lifecycle (team.request.created | done | error {member, request_id,
 // ts}); teamStore.onTeamEvent fans them into the roster activity pulse.
 const TEAM_TYPE_PREFIX = 'team.';
+
+/**
+ * LAL5 — light up the ✨NEW badge + flash for a roadmap row an agent
+ * just anchored to. A freshly-created OR a reactivated (reused-from-
+ * archive) initiative both count as "just happened"; the TTL is enforced
+ * inside viewStore.
+ *
+ * AX12 — this used to live inside `chatStore.ingestConvEvent`, which
+ * made a data store import a view store. The bus is the right place to
+ * fan one event out to two stores.
+ */
+function markAnchorNovelty(ev: DaemonEvent): void {
+  if (ev.type !== 'conv.anchored') return;
+  if ((ev.is_new_init || ev.reactivated) && typeof ev.initiative_id === 'string') {
+    viewStore.markRecentlyCreatedInit(ev.initiative_id);
+  }
+  if (ev.is_new_task && typeof ev.task_id === 'string') {
+    viewStore.markRecentlyCreatedTask(ev.task_id);
+  }
+}
 
 /**
  * Attach the bus. Returns a teardown function — call it from
@@ -135,6 +156,7 @@ export function attachEventBus(
         return;
       }
       chatStore.ingestConvEvent(ev);
+      markAnchorNovelty(ev);
       return;
     }
     if (t.startsWith(QUEUE_TYPE_PREFIX)) {

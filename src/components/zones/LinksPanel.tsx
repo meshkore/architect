@@ -22,6 +22,7 @@ import { daemonStore } from '~/state/daemon';
 import { allModules, clusterInfo } from '~/state/server';
 import { uiStore } from '~/state/ui';
 import { log } from '~/lib/log';
+import { CopyButton } from '~/components/ui/CopyButton';
 import type { LinksModule, LinksRegistry } from '~/lib/daemon-client';
 
 export default function LinksPanel() {
@@ -183,26 +184,16 @@ function ModuleCard(props: { mod: LinksModule }) {
 }
 
 function CommandBlock(props: { cmd: string }) {
-  const [copied, setCopied] = createSignal(false);
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(props.cmd);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
-    } catch { /* clipboard denied */ }
-  };
   return (
     <div class="flex items-center gap-2 rounded border border-gray-800/60 bg-gray-950/60 px-2 py-1">
       <code class="flex-1 min-w-0 text-[10px] font-mono text-gray-400 truncate" title={props.cmd}>
         {props.cmd}
       </code>
-      <button
-        type="button"
-        onClick={onCopy}
+      <CopyButton
+        text={() => props.cmd}
+        copiedLabel="copied"
         class="text-[9px] font-mono uppercase tracking-wider text-gray-500 hover:text-emerald-300 flex-shrink-0"
-      >
-        {copied() ? 'copied' : 'copy'}
-      </button>
+      />
     </div>
   );
 }

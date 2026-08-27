@@ -12,23 +12,35 @@
  *     name. It always shows [Edit] [Stop if live] [Delete].
  *   - Click Edit → name swaps to <input>, action row becomes
  *     [Save] [Cancel].
- *   - Click Delete → action row becomes "Remove from rail? [Cancel] [Confirm]".
+ *   - Click Delete → action row becomes "Forget project? [Cancel] [Forget]".
  *   - Click Stop → action row becomes "Shutdown daemon? [Cancel] [Confirm]".
  *
  * Inactive rows render plain — click to switch. The active marker
  * (green left bar) is the visual selection indicator.
+ *
+ * AX15 — switchProject / stopAllAgents / forgetProject moved to
+ * `lib/project-switch.ts`; this file is rendering only.
  */
 
-import { Show } from 'solid-js';
-import { daemonStore, selectedRowKey } from '~/state/daemon';
-import { projectsStore } from '~/state/projects';
-import { serverStore } from '~/state/server';
-import { chatStore } from '~/state/chat';
+import { Show, createSignal } from 'solid-js';
+import { selectedRowKey } from '~/state/daemon';
 import { railUiStore } from '~/state/rail-ui';
-import { findClusterPort, liveClusters } from '~/components/projects-rail/discovery';
+import { chatStore } from '~/state/chat';
+import { projectsStore } from '~/state/projects';
+import {
+  switchProject,
+  stopAllAgents,
+  forgetProject,
+  forgetErrorFor,
+  clearForgetError,
+} from '~/lib/project-switch';
 import { log } from '~/lib/log';
 import * as kp from '~/lib/known-projects';
 import { openProjectDebugModal } from '~/components/modals/ProjectDebugModal';
+
+/** AX6 — per-row liveness. `live` = the socket is open; `reconnecting`
+ *  = inside the WS retry budget; `dead` = gave up, or never detected. */
+export type RailRowDot = 'live' | 'reconnecting' | 'dead';
 
 export type RailRowData = {
   key: string;
@@ -39,6 +51,9 @@ export type RailRowData = {
   display: string;
   initials: string;
   live: boolean;
+  /** AX6 — 3-state connection dot. Derived from the instance's real
+   *  wsState when one exists, else from the last discovery probe. */
+  dot: RailRowDot;
   isNew: boolean;
   working?: boolean;
   /** MP5 — true when this (inactive) cluster received events since the
@@ -56,182 +71,28 @@ export type RailRowData = {
 // UI survives any `<For>` reconciliation that swaps the component
 // instance underneath the operator's click.
 
-/**
- * V86 — Cancel every running agent turn on a given cluster. Replaces
- * the old "shutdown daemon" semantics that the rail's stop button
- * used to expose. The operator's intent on that button now is a
- * panic-stop: "4-5 agents working in this project, I want them all
- * to stop NOW."
- *
- * Iterates the cluster's `workingConvs` (tracked globally in
- * chatStore.clusterActivity by MP5) and POSTs /chat/cancel on each
- * via the cluster's own DaemonInstance — works even on inactive
- * projects because each instance still has its own client.
- *
- * (Daemon shutdown lives in the operator's terminal — `meshcore stop`
- * or POST /shutdown directly — since it's a less common action than
- * cancelling chat turns.)
- */
-export async function stopAllAgents(clusterKey: string): Promise<{ cancelled: number; failed: number }> {
-  const inst = daemonStore.state.instances[clusterKey];
-  if (!inst) return { cancelled: 0, failed: 0 };
-  const activity = chatStore.state.clusterActivity[clusterKey];
-  const convs = activity ? [...activity.workingConvs] : [];
-  if (convs.length === 0) return { cancelled: 0, failed: 0 };
-  const results = await Promise.all(
-    convs.map(async (conv) => {
-      try {
-        const res = await inst.client.chatCancel(conv);
-        return res.ok;
-      } catch {
-        return false;
-      }
-    }),
+export { switchProject, stopAllAgents } from '~/lib/project-switch';
+
+const DOT_TITLE: Record<RailRowDot, string> = {
+  live: 'Connected — live updates flowing',
+  reconnecting: 'Reconnecting…',
+  dead: 'Not connected — no live updates',
+};
+
+const DOT_CLASS: Record<RailRowDot, string> = {
+  live: 'bg-emerald-400',
+  reconnecting: 'bg-amber-400 animate-pulse-soft',
+  dead: 'bg-gray-600',
+};
+
+function LivenessDot(props: { state: RailRowDot }) {
+  return (
+    <span
+      class={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${DOT_CLASS[props.state]}`}
+      title={DOT_TITLE[props.state]}
+      aria-label={DOT_TITLE[props.state]}
+    />
   );
-  return {
-    cancelled: results.filter((x) => x).length,
-    failed: results.filter((x) => !x).length,
-  };
-}
-
-const switchProjectInFlight = new Set<string>(); // FC-2: keyed by project (row key), not port
-
-/**
- * V108 — per-port re-entrancy guard. A failed/flapping switch (the
- * OfflinePanel /health auto-watcher + its port-reconcile effect both
- * retrying the SAME port) stacked infinite concurrent switchProject
- * calls, each firing a /health probe. Those probes saturated the
- * browser's per-host connection pool and the UI froze in an endless
- * `switchProject → switchToPort → probing` loop (ikamiro hang, field
- * 2026-06-15). Coalesce: while a switch to this port is in flight,
- * re-entrant calls no-op immediately — no reactive mutation, no probe —
- * until the first one settles (attach succeeds, or fails and the slow
- * 2s OfflinePanel poll can retry one-at-a-time).
- */
-export async function switchProject(
-  port: number,
-  key: string,
-  fallback?: { display: string; cluster_id: string | null; cluster_name: string | null },
-): Promise<boolean> {
-  // FC-2 (daemon-centralized) — coalesce by PROJECT (key), not port. One daemon
-  // serves many projects on ONE port, so a port-keyed guard blocked switching
-  // between sibling projects (clicking B while A's switch was in flight no-oped
-  // forever). Keying by the row key lets each project switch independently.
-  if (switchProjectInFlight.has(key)) {
-    log.debug('[RAIL] switchProject coalesced — switch to this project already in flight', { port, key });
-    return false;
-  }
-  switchProjectInFlight.add(key);
-  try {
-    return await switchProjectImpl(port, key, fallback);
-  } finally {
-    switchProjectInFlight.delete(key);
-  }
-}
-
-async function switchProjectImpl(
-  port: number,
-  key: string,
-  fallback?: { display: string; cluster_id: string | null; cluster_name: string | null },
-): Promise<boolean> {
-  log.debug('[RAIL] switchProject called', { port, key });
-  projectsStore.clearNewBadge(key);
-
-  // V86l — reconcile against live discovery BEFORE probing. If the
-  // operator's stored port is stale (typical case: a daemon
-  // self-update briefly moved the port, the bookmark / kp.list()
-  // entry captured the transient port) but the discovery scan
-  // already knows the cluster_id is alive at a different port, use
-  // the live port instead. `/health` is authoritative.
-  let effectivePort = port;
-  if (fallback?.cluster_id) {
-    const live = liveClusters().get(fallback.cluster_id);
-    if (live && live.port !== port) {
-      log.info('[RAIL] reconciling stale port via live discovery', {
-        cluster_id: fallback.cluster_id, stale: port, live: live.port,
-      });
-      effectivePort = live.port;
-    }
-  }
-
-  try { localStorage.setItem('meshcore-last-port', String(effectivePort)); } catch { /* quota */ }
-  // FC-2 — pass the selected project's id so the daemon routes to it (one
-  // daemon may serve many projects; the instance is keyed by projectId).
-  let outcome = await daemonStore.switchToPortDetailed(effectivePort, fallback?.cluster_id ?? undefined);
-  log.debug('[RAIL] switchProject result', { port: effectivePort, key, outcome });
-
-  // V86l — second-chance reconciliation. If the probe failed AND we
-  // know which cluster_id we're after, do a one-shot scan of the
-  // 5570–5589 range looking for that cluster. This covers the boot
-  // path where discovery hadn't run yet so liveClusters was empty.
-  if (!outcome.ok && fallback?.cluster_id && outcome.reason === 'no-daemon') {
-    log.info('[RAIL] probe failed, scanning ports for cluster_id', {
-      cluster_id: fallback.cluster_id, stale: effectivePort,
-    });
-    const found = await findClusterPort(fallback.cluster_id);
-    if (found && found.port !== effectivePort) {
-      log.info('[RAIL] cluster found at new port', {
-        cluster_id: fallback.cluster_id, port: found.port,
-      });
-      try { localStorage.setItem('meshcore-last-port', String(found.port)); } catch { /* quota */ }
-      const retry = await daemonStore.switchToPortDetailed(found.port, fallback?.cluster_id ?? undefined);
-      if (retry.ok) {
-        // Drop any prior offline pick that was anchored to the
-        // stale port — the canonical attach above already cleared
-        // it, but be explicit.
-        daemonStore.clearOfflineSelection();
-        return true;
-      }
-      outcome = retry;
-    }
-  }
-
-  if (!outcome.ok) {
-    // V86b — switch failed, but we still register the operator's
-    // selection so the rail shows the row as selected and the cockpit
-    // body shows OfflinePanel with "start the daemon" guidance.
-    if (fallback) {
-      daemonStore.selectOffline({
-        key,
-        port: effectivePort,
-        cluster_id: fallback.cluster_id,
-        cluster_name: fallback.cluster_name,
-        display: fallback.display,
-        reason: outcome.reason,
-      });
-    } else {
-      console.warn('[RAIL] switch failed — no fallback provided', { port: effectivePort });
-    }
-  }
-  return outcome.ok;
-}
-
-function forgetProjectImmediate(target: { cluster_id?: string | null; port: number }, onAfter: () => void): void {
-  const clusterKey = target.cluster_id && target.cluster_id.trim().length > 0
-    ? target.cluster_id
-    : `port:${target.port}`;
-  log.debug('[RAIL] forget — full eviction', { clusterKey });
-  daemonStore.disconnectInstance(clusterKey);
-  serverStore.clearForCluster(clusterKey);
-  chatStore.clearClusterChat(clusterKey);
-  kp.forget({ cluster_id: target.cluster_id ?? undefined, port: target.port });
-  // Drop any offline selection that pointed at the same row so the
-  // cockpit doesn't keep rendering OfflinePanel for a project that
-  // no longer exists in the rail.
-  const offline = daemonStore.state.offlineSelection;
-  if (offline && offline.key === clusterKey) {
-    daemonStore.clearOfflineSelection();
-  }
-  // After eviction, force the cockpit into the "no selection" state.
-  // The App-level effect picks it up: if exactly one project remains
-  // it auto-selects it; otherwise the operator gets the empty panel.
-  // disconnectInstance's built-in fallback (jumping to the first
-  // remaining instance) is too eager — we want the operator to
-  // confirm which project they switch to next.
-  daemonStore.clearActiveSelection();
-  projectsStore.refresh();
-  railUiStore.clear();
-  onAfter();
 }
 
 export interface ProjectsRailRowProps {
@@ -244,13 +105,11 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
   const r = () => props.row;
   // V86d — `isActive` is read directly off `daemonStore` (not the
   // per-row `active` field) so the green bar + action row morph
-  // doesn't depend on `<For>` re-issuing the row prop. The For
-  // component still remounts on every chatStore/wsState tick (rows()
-  // returns new object references), but the highlight state survives
-  // because each new mount reads the same daemon-store selectedRowKey.
+  // doesn't depend on `<For>` re-issuing the row prop.
   const isActive = () => selectedRowKey() === r().key;
   const mode = () => railUiStore.modeFor(r().key);
   const nameDraft = () => railUiStore.state.draftName;
+  const [forgetting, setForgetting] = createSignal(false);
 
   const wrapCls = (): string => {
     const cls = ['proj-row-wrap'];
@@ -296,20 +155,32 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
     railUiStore.clear();
   };
 
-  const confirmDelete = (): void => {
-    railUiStore.clear();
-    forgetProjectImmediate({ cluster_id: r().cluster_id, port: r().port }, props.onAfterStop);
+  // AX8 — the confirm awaits the daemon's DELETE. Only a successful (or
+  // already-absent) registry delete scrubs the local alias / chat meta /
+  // view state / token, and only then do we let the caller rescan — a
+  // rescan before the delete lands simply re-upserts the row.
+  const confirmDelete = async (): Promise<void> => {
+    if (forgetting()) return;
+    setForgetting(true);
+    try {
+      const res = await forgetProject(
+        { cluster_id: r().cluster_id, port: r().port },
+        props.onAfterStop,
+      );
+      if (res.ok) railUiStore.clear();
+    } finally {
+      setForgetting(false);
+    }
   };
 
   const confirmStopAll = async (): Promise<void> => {
     railUiStore.clear();
     const res = await stopAllAgents(r().key);
     if (res.failed > 0) {
-      // V86 — no native alert(). The chatStore.clusterActivity will
-      // reflect the new workingConvs count, and the row's bouncing
-      // slug + stop button will disappear for the cancelled convs.
-      // Partial failures are logged for the operator's console.
-      console.warn('[RAIL] stop-all partial', {
+      // V86 — no native alert(). chatStore.clusterActivity reflects the
+      // new workingConvs count, and the row's bouncing slug + stop button
+      // disappear for the cancelled convs. Partial failures are logged.
+      log.warn('stop-all partial', {
         cancelled: res.cancelled,
         failed: res.failed,
         cluster: r().key,
@@ -327,7 +198,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
   return (
     <div
       class={wrapCls()}
-      title={`${r().display} · :${r().port}${r().cluster_id ? ' · ' + r().cluster_id : ''}${!r().live ? ' · stopped' : ''}`}
+      title={`${r().display} · :${r().port}${r().cluster_id ? ' · ' + r().cluster_id : ''} · ${DOT_TITLE[r().dot]}`}
       onClick={onRowClick}
     >
       <Show
@@ -336,6 +207,12 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
           <div class={rowCls()}>
             <span class="proj-working-bar" aria-hidden="true" />
             <span class="proj-row-name">{r().display}</span>
+            {/* Short mode is 56 px wide — bar + dot + 3 initials would
+                overflow it, so there the wrap's `is-stopped` accent bar
+                carries the signal on its own. */}
+            <Show when={!props.short}>
+              <LivenessDot state={r().dot} />
+            </Show>
             <span class="proj-row-initials">{r().initials}</span>
           </div>
         }
@@ -362,7 +239,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
         <div class="proj-row-actions">
           <Show when={mode() === 'idle'}>
             {/* V86 — order: stop (only when agents running) · edit · trash.
-                Stop now means "cancel every running agent turn on this
+                Stop means "cancel every running agent turn on this
                 cluster", not "shutdown daemon". The badge in the title
                 shows the count so the operator confirms scope before
                 clicking. */}
@@ -373,7 +250,6 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
                 title={`Stop all running agents (${runningCount()} in flight)`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  log.debug('[RAIL] STOP-ALL click', { port: r().port, running: runningCount() });
                   railUiStore.beginConfirmStop(r().key);
                 }}
               >
@@ -388,7 +264,6 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
               title="Rename"
               onClick={(e) => {
                 e.stopPropagation();
-                log.debug('[RAIL] EDIT click', { port: r().port });
                 railUiStore.beginEdit(r().key, r().display);
               }}
             >
@@ -400,8 +275,7 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
             {/* V103 — Diagnostic snapshot. Opens a centered modal with
                 two tabs (in-memory stores + localStorage) so the
                 operator can paste the cockpit's per-project state
-                into a debug session for review. Read-only; same
-                outline style as the other action buttons. */}
+                into a debug session for review. Read-only. */}
             <button
               type="button"
               class="proj-row-action is-edit"
@@ -428,7 +302,6 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
               title="Forget project"
               onClick={(e) => {
                 e.stopPropagation();
-                log.debug('[RAIL] DELETE click', { port: r().port });
                 railUiStore.beginConfirmDelete(r().key);
               }}
             >
@@ -446,11 +319,18 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
           </Show>
 
           <Show when={mode() === 'confirm-delete'}>
-            <span class="proj-row-prompt">remove?</span>
+            <span
+              class="proj-row-prompt"
+              title="Removes the project from the daemon's registry and from this cockpit (alias, chat metadata, view state, token). Files on disk are NOT touched."
+            >forget?</span>
             <button type="button" class="proj-row-action is-cancel has-label"
-              onClick={(e) => { e.stopPropagation(); railUiStore.clear(); }}>no</button>
-            <button type="button" class="proj-row-action is-danger has-label"
-              onClick={(e) => { e.stopPropagation(); confirmDelete(); }}>remove</button>
+              onClick={(e) => { e.stopPropagation(); clearForgetError(r().key); railUiStore.clear(); }}>no</button>
+            <button
+              type="button"
+              class="proj-row-action is-danger has-label"
+              title="Unregisters it from the daemon and clears this cockpit's copy. Your files stay where they are."
+              onClick={(e) => { e.stopPropagation(); void confirmDelete(); }}
+            >{forgetting() ? 'forgetting…' : 'forget'}</button>
           </Show>
 
           <Show when={mode() === 'confirm-stop-all'}>
@@ -461,6 +341,18 @@ export default function ProjectsRailRow(props: ProjectsRailRowProps) {
               onClick={(e) => { e.stopPropagation(); void confirmStopAll(); }}>stop all</button>
           </Show>
         </div>
+      </Show>
+
+      {/* AX8 — a refused DELETE must be visible: silently scrubbing local
+          state while the daemon still serves the project is how the row
+          used to come back a second later with the operator's alias and
+          token already gone. */}
+      <Show when={forgetErrorFor(r().key)}>
+        {(msg) => (
+          <div class="px-3 pb-2 text-[10.5px] leading-snug text-red-300 break-words">
+            Couldn't forget this project: {msg()}
+          </div>
+        )}
       </Show>
     </div>
   );

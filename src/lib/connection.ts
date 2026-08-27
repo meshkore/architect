@@ -25,6 +25,7 @@ import {
   tokenForCluster,
   saveTokenForCluster,
 } from './tokens';
+import { LAST_PROJECT_KEY } from './known-projects';
 
 export type ConnectionStatus =
   | { kind: 'probing'; message: string }
@@ -45,12 +46,19 @@ export function readStoredToken(health?: HealthResponse, port?: number): string 
 }
 
 /**
- * Persist a token for the current cluster. M1.3 — replaces the
- * pre-Solid singleton-token store; callers MUST pass the cluster
- * identity (from /health) so we file the token under the right slot.
+ * Persist a token under an ALREADY-RESOLVED cluster key.
+ *
+ * AX9 (OB-F2) — the previous helper took an optional health/port pair,
+ * and the ConnectionGate submit handler had neither, so
+ * `clusterTokenKey({})` filed every pasted token under the literal
+ * string `'unknown'`. The retry then looked it up by real cluster key,
+ * found nothing, and asked again — an infinite paste loop for anyone
+ * without a local daemon to auto-unlock from. The `unauthorized`
+ * status already carries the right key; take it, and make it
+ * impossible to call this without one.
  */
-export function storeToken(token: string, health?: HealthResponse, port?: number): void {
-  saveTokenForCluster(clusterTokenKey({ cluster_id: health?.cluster_id, port }), token);
+export function saveTokenForClusterKey(clusterKey: string, token: string): void {
+  saveTokenForCluster(clusterKey, token);
 }
 
 /**
@@ -204,10 +212,9 @@ export async function connect(setStatus: (s: ConnectionStatus) => void): Promise
   }
 }
 
-const LAST_PROJECT_KEY = 'mc-last-project-id-v1';
-
-/** Remember the real project the operator last viewed (written by App.tsx on
- *  every switch to a non-home project) so the next boot lands there directly. */
+/** Remember the real project the operator last viewed (written by the
+ *  cluster-bind bus on every switch to a non-home project) so the next
+ *  boot lands there directly. */
 export function rememberLastProject(projectId: string): void {
   try { localStorage.setItem(LAST_PROJECT_KEY, projectId); } catch { /* quota */ }
 }

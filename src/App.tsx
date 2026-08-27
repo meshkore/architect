@@ -6,33 +6,26 @@
  *   2. Cockpit — once connected, mount header + 3-column body and run the
  *      WS event stream.
  *
- * The unified daemon side-effect bus lives here too: any time a new
- * DaemonClient lands in daemonStore (boot OR hot-swap to another
- * project), refresh every store that depends on the active daemon
- * (legacy `store`, `startLive`, `serverStore`, `projectsStore`,
- * `chatStore`, event bus). Keeping this in one effect prevents the
- * boot-only / swap-only branching that caused stale columns earlier.
+ * AX15 / ST-9 — the daemon side-effect bus that used to live in this
+ * component's body now lives in `lib/cluster-bind.ts`, and the
+ * live-task overlay poll in `state/server.ts`. What is left here is
+ * wiring: boot probe → daemonStore, a handful of selection policies,
+ * and the render tree.
  */
 
-import { batch, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+import { createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import {
   connect,
-  storeToken,
+  saveTokenForClusterKey,
   readStoredToken,
-  rememberLastProject,
   type ConnectionStatus,
 } from '~/lib/connection';
 import { adoptTokenFromUrl } from '~/lib/adopt';
-import { store } from '~/state/store';
 import { daemonStore } from '~/state/daemon';
 import { serverStore, isProjectEmpty } from '~/state/server';
-import { projectsStore } from '~/state/projects';
 import { chatStore, ONBOARDING_CONV_ID, loadLastActiveConv } from '~/state/chat';
-import { viewStore } from '~/state/view';
-import { bindCluster as queueBindCluster } from '~/lib/queue';
-import { storyStore } from '~/state/story';
-import { teamStore } from '~/state/team';
-import { clientsStore } from '~/state/clients';
+import { projectsStore } from '~/state/projects';
+import { bindActiveCluster, installWakeHandler } from '~/lib/cluster-bind';
 import { log } from '~/lib/log';
 import { applyStoredLayout } from '~/components/Splitter';
 import { ModalHost } from '~/lib/modal';
@@ -46,7 +39,7 @@ import StoryRunner from '~/components/story/StoryRunner';
 import ConnectionGate from '~/components/ConnectionGate';
 import Cockpit from '~/components/Cockpit';
 import { rows } from '~/components/projects-rail/rows';
-import { switchProject } from '~/components/ProjectsRailRow';
+import { switchProject } from '~/lib/project-switch';
 
 export default function App() {
   const [status, setStatus] = createSignal<ConnectionStatus>({ kind: 'probing', message: 'Booting…' });
@@ -67,146 +60,35 @@ export default function App() {
   // daemonStore.attachClient / disconnectInstance, so this App-level
   // detachBus is no longer needed.
 
-  // Boot path → daemonStore. From there the unified side-effect bus
-  // below picks up the new client and runs every rebind. We do NOT
-  // call store.attach / startLive here — they belong on the bus so a
-  // hot-swap re-fires them.
+  // Boot path → daemonStore. From there the cluster-bind bus below
+  // picks up the new client and runs every rebind. We do NOT rebind
+  // here — that belongs on the bus so a hot-swap re-fires it.
   createEffect(() => {
     const s = status();
     if (s.kind === 'connected') daemonStore.attachClient(s.client, s.health);
   });
 
-  // V85d — Imperative side-effect bus. Registered SYNCHRONOUSLY in
-  // App's body (not in onMount) so the subscriber exists before any
-  // onMount or async boot path runs daemonStore.attachClient.
-  // Fired DIRECTLY from daemonStore on every active-id change.
-  const detachActive = daemonStore.onActiveChanged((activeId) => {
-    log.debug('[RAIL] side-effect bus firing', { activeId });
-    if (!activeId) return;
-    const inst = daemonStore.state.instances[activeId];
-    if (!inst) {
-      console.warn('[RAIL] bus: no instance for activeId, bail', { activeId });
-      return;
-    }
-    const { client, health } = inst;
-    log.info('daemon bound — running side effects', { port: health.port, cluster: health.cluster_id });
-    batch(() => {
-      void store.attach(client);
-      serverStore.setActiveCluster(activeId);
-      // FC-2 (daemon-centralized) — the server HOME (central store: ideas,
-      // projects registry, external creds) is NOT a project. Don't register it
-      // in the rail; real projects come from discovery (GET /projects).
-      if ((health as { server_home?: boolean }).server_home) {
-        // Durably remember this cluster IS the server home and scrub any stale
-        // known-projects row for it. Persisted so the home stays filtered out
-        // of the rail / no-daemon panel / discovery even while offline.
-        if (health.cluster_id) projectsStore.markHome(health.cluster_id);
-      } else {
-        projectsStore.upsert({
-          port: health.port,
-          base: client.transport.httpBase,
-          cluster_id: health.cluster_id ?? undefined,
-          cluster_name: health.cluster_name ?? undefined,
-          status: 'live',
-        });
-        projectsStore.setActive(health.port, health.cluster_id ?? null);
-        // FC-2 — remember the real project so the NEXT boot lands here directly
-        // (skips the home detour entirely).
-        if (health.cluster_id) rememberLastProject(health.cluster_id);
-      }
-      chatStore.bindCluster(health.cluster_id ?? null);
-      viewStore.bindCluster(health.cluster_id ?? null);
-      // agent-team (ATM3) — reset the roster mirror on project switch;
-      // hydrate() below repopulates it from the new cluster's /team.
-      teamStore.bindCluster(health.cluster_id ?? null);
-      // DM-CLI-07 (multi-cli-clients) — same reset for the CLI-client
-      // catalog mirror; hydrated alongside the roster below.
-      clientsStore.bindCluster(health.cluster_id ?? null);
-      // FC-2 — bind the execution queue to this project too (same cluster_id
-      // path as the stores above) so staged items persist per-project across
-      // refresh, instead of the queue racing daemonStore reads for its key.
-      queueBindCluster(health.cluster_id ?? null);
-      // V89 — run state is now daemon-owned. Reset the in-memory
-      // mirror so the previous cluster's runs don't bleed in, then
-      // hydrate from `/runs?active=1` once attach() resolves.
-      storyStore.resetForClusterSwap();
-    });
-    // py-1.11.0 — chat-state-rearchitecture. The daemon is the single
-    // source of truth for the conv list. One round-trip to
-    // /chat/snapshot replaces the pre-1.11 chain (timeline replay +
-    // /health.chat_active_convs + bulk-archive + /chat/archives).
-    // After this hydrate, WS conv.* events keep convs in sync; chat
-    // messages are lazy-loaded by ChatThread when the conv gains focus.
-    //
-    // V107.21 — Stale-request guard. Each async resolution re-checks
-    // that this swap is still the current one before writing to a
-    // single-facade store. Without this, swap-A→B→C where A's
-    // chatSnapshot resolves AFTER C's bindCluster overwrites C's
-    // slice with A's convs. Captured `swapActiveId` from the closure
-    // at start; if activeId has changed by the time the promise
-    // resolves, drop the result silently — the new cluster's own
-    // chain is already running.
-    const swapActiveId = activeId;
-    const stillCurrent = (): boolean => daemonStore.state.activeId === swapActiveId;
-    void serverStore.refreshNow(client, activeId).then(() => {
-      if (!stillCurrent()) {
-        log.debug('[swap-guard] dropping post-swap chatSnapshot/runs fetch — active changed', { from: swapActiveId, to: daemonStore.state.activeId });
-        return;
-      }
-      // FC-2 — SHORT per-attempt timeout + one retry, same rationale as
-      // server.doRefresh: a stale keep-alive socket (right after a daemon
-      // restart) used to hang the snapshot past the 10s boot grace, so the
-      // cockpit rendered with convs={} → the agent rail fell back to the
-      // localStorage convMeta cache (leaking ARCHIVED convs) and AgentsPanel
-      // showed "0". Failing fast and retrying on a fresh socket lands the real
-      // snapshot in ~1s, so only the 5 active agents show.
-      void (async () => {
-        let res = await client.chatSnapshot(AbortSignal.timeout(4000));
-        if (!res.ok) res = await client.chatSnapshot(AbortSignal.timeout(6000));
-        if (!stillCurrent()) {
-          log.debug('[swap-guard] dropping stale chatSnapshot result', { from: swapActiveId, to: daemonStore.state.activeId });
-          return;
-        }
-        if (res.ok) {
-          chatStore.hydrateFromSnapshot(res.data);
-          log.info('chat.snapshot.v1 hydrated', {
-            convs: res.data.convs.length,
-            live: res.data.convs.filter((c) => c.live).length,
-            archived: res.data.convs.filter((c) => c.archived).length,
-            daemon_version: res.data.version,
-          });
-        } else {
-          log.error('chat.snapshot fetch failed; daemon may be older than py-1.11.0', { status: res.status });
-        }
-      })();
-      // agent-team (ATM3) — hydrate the roster so the Team panel + the
-      // chat-rail picker have members immediately. Guarded by the same
-      // swap check; a daemon without /team returns 404 → empty roster.
-      void teamStore.hydrate(client).then(() => {
-        if (!stillCurrent()) return;
-        log.info('team roster hydrated', { members: teamStore.state.list.length });
-      });
-      // DM-CLI-07 — hydrate the CLI-client catalog so the team dialogs'
-      // Client picker has real, current options as soon as they open.
-      void clientsStore.hydrate(client).then(() => {
-        if (!stillCurrent()) return;
-        log.info('client catalog hydrated', { clients: clientsStore.state.list.length });
-      });
-      // V89 — fetch any active runs from the daemon so the UI paints
-      // ground truth immediately (the WS handles updates from here on).
-      void storyStore.hydrate(client).then(() => {
-        if (!stillCurrent()) {
-          log.debug('[swap-guard] dropping stale runs hydrate', { from: swapActiveId, to: daemonStore.state.activeId });
-          // storyStore.hydrate already wrote to state.runs — wipe so
-          // we don't leave the previous cluster's runs visible until
-          // the new bus's hydrate lands.
-          storyStore.resetForClusterSwap();
-          return;
-        }
-        log.info('runs hydrated from daemon', { count: storyStore.state.runs.length });
-      });
-    });
-  });
+  // V85d — Imperative side-effect bus. Registered SYNCHRONOUSLY in App's
+  // body (not in onMount) so the subscriber exists before any onMount or
+  // async boot path runs daemonStore.attachClient. Fired DIRECTLY from
+  // daemonStore on every active-id change.
+  const detachActive = daemonStore.onActiveChanged(bindActiveCluster);
+
+  // AX15 — server.ts used to `await import('~/state/daemon')` to reach
+  // the reconnect flow after repeated /state failures, purely to dodge
+  // the import cycle. The app owns that wiring instead.
+  serverStore.setDisconnectHandler((key) => daemonStore.markActiveDisconnected(key, 'lost'));
+
+  // AX2 — sleep → wake / offline → online recovery. Without it, a
+  // suspended laptop leaves every socket `fatal` (the retry budget is
+  // spent) and the events missed while asleep are never re-fetched.
+  const detachWake = installWakeHandler();
+
+  // py-1.28.3 — live-task overlay poll (AX15: owned by serverStore now).
+  serverStore.startLiveTaskPoll(() => ({
+    client: daemonStore.state.client,
+    activeId: daemonStore.state.activeId,
+  }));
 
   // Once the server snapshot lands, fall back to the Coordinator conv
   // if the cluster is empty. Then auto-activate the most-recent conv
@@ -252,10 +134,10 @@ export default function App() {
   });
 
   // V86c — Auto-select the lone remaining project. When the operator
-  // deletes the currently-selected row, `forgetProjectImmediate`
-  // clears both `activeId` and `offlineSelection` so the cockpit lands
-  // on `RailEmptyPanel`. If exactly one row remains, the empty panel
-  // would be a dead-end click target — bridge it for the operator by
+  // deletes the currently-selected row, `forgetProject` clears both
+  // `activeId` and `offlineSelection` so the cockpit lands on
+  // `RailEmptyPanel`. If exactly one row remains, the empty panel would
+  // be a dead-end click target — bridge it for the operator by
   // switching to that row immediately. With 2+ rows we keep the empty
   // panel so the operator's next pick is explicit (they just told us
   // they don't want the rail's prior default), and with 0 rows the
@@ -304,35 +186,25 @@ export default function App() {
     }).finally(() => { homeSwitchInFlight = false; });
   });
 
-  // py-1.28.3 — poll the active project's live-task overlay so the roadmap
-  // shows a loader on each task a subagent is working on RIGHT NOW, reliably,
-  // even if a conv.* WS event was missed (reconnect / project switch). Cheap
-  // endpoint (~<1KB). Cleared immediately on project switch to avoid a flash of
-  // the previous project's live set.
-  let lastOverlayProject: string | null = null;
-  const liveTimer = setInterval(() => {
-    const c = daemonStore.state.client;
-    const active = daemonStore.state.activeId;
-    if (!c || !active) { serverStore.setActiveLiveTasks([]); lastOverlayProject = null; return; }
-    if (active !== lastOverlayProject) {
-      serverStore.setActiveLiveTasks([]); // switch — drop the old project's set at once
-      lastOverlayProject = active;
-    }
-    void c.liveTasks().then((r) => {
-      // Guard against a result landing after a switch.
-      if (daemonStore.state.activeId !== active) return;
-      if (r.ok) serverStore.setActiveLiveTasks(r.data.tasks ?? []);
-    });
-  }, 2500);
-
   onCleanup(() => {
-    clearInterval(liveTimer);
+    serverStore.stopLiveTaskPoll();
+    detachWake();
     detachActive();
     daemonStore.disconnectAll();
   });
 
   const retry = () => { log.info('manual retry'); void connect(setStatus); };
-  const saveTokenAndRetry = () => { storeToken(token()); retry(); };
+  // AX9 (OB-F2) — file the pasted token under the cluster key the
+  // `unauthorized` status already carries. It used to go through
+  // `storeToken(token())` with no health/port, i.e. under the literal
+  // key 'unknown', while the retry reads by cluster key — so a remote
+  // operator pasted a valid token and got asked again, forever.
+  const saveTokenAndRetry = () => {
+    const s = status();
+    if (s.kind === 'unauthorized') saveTokenForClusterKey(s.clusterKey, token());
+    else log.warn('token submitted outside the unauthorized state — nothing to key it by');
+    retry();
+  };
 
   // 2026-06-11 — UX fix: keep Cockpit shell mounted at all times so the
   // projects rail + header are interactive WHILE the daemon probe is in
