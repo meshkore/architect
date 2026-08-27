@@ -1,4 +1,3 @@
-import { store } from '~/state/store';
 import { isAutonomousConv, isWakeAuthored, type ChatMsg } from '~/state/chat';
 import type { DaemonEvent } from '~/lib/daemon-client';
 
@@ -55,9 +54,6 @@ export function buildStream(conv: string, msgs: ChatMsg[]): {
   const liveIdx = msgs.findIndex((m) => m.kind === 'assistant' && m.streaming);
   const live: ChatMsg | null = liveIdx >= 0 ? msgs[liveIdx]! : null;
 
-  const events: DaemonEvent[] = (store.events() as DaemonEvent[])
-    .filter((e) => String(e['conv'] ?? '') === conv);
-
   const pre: StreamItem[] = [];
   let queued: StreamItem[] = [];
 
@@ -112,15 +108,6 @@ export function buildStream(conv: string, msgs: ChatMsg[]): {
     }
   }
 
-  for (const e of events) {
-    const t = String(e.type);
-    const ts = String(e['ts'] ?? '');
-    if (t === 'tool.use' || t === 'tool.result') {
-      pre.push({ kind: 'tool', ts, ev: e });
-    } else if (t.startsWith('task.')) {
-      pre.push({ kind: 'task', ts, ev: e });
-    }
-  }
   pre.sort((a, b) => a.ts.localeCompare(b.ts));
   return { pre, queued, live };
 }

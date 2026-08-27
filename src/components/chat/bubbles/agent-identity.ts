@@ -14,7 +14,7 @@
 
 import { chatStore, ONBOARDING_CONV_ID, type ChatMsg, type ConvMeta } from '~/state/chat';
 
-export function convMetaOf(conv: string | null | undefined): ConvMeta | null {
+function convMetaOf(conv: string | null | undefined): ConvMeta | null {
   return conv ? chatStore.state.convMeta[conv] ?? null : null;
 }
 

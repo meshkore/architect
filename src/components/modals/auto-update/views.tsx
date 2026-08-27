@@ -3,7 +3,7 @@ import { daemonStore } from '~/state/daemon';
 import { activeProject } from '~/state/projects';
 import { MIN_DAEMON_VERSION } from '~/lib/version';
 
-export const STEPS = [
+const STEPS = [
   'Asking the daemon to update itself',
   'Downloading + validating the new daemon',
   'Starting the replacement on a fresh port',
@@ -11,7 +11,7 @@ export const STEPS = [
   'Stopping the old daemon',
 ];
 
-export const PRI = 'px-3 py-2 rounded bg-emerald-500 text-gray-950 text-sm font-semibold hover:bg-emerald-400 transition';
+const PRI = 'px-3 py-2 rounded bg-emerald-500 text-gray-950 text-sm font-semibold hover:bg-emerald-400 transition';
 export const SEC = 'px-3 py-2 rounded bg-gray-900 text-gray-300 border border-gray-800 text-sm hover:text-gray-100 transition';
 export const MUT = 'px-3 py-2 rounded bg-gray-900 text-gray-400 border border-gray-800 text-sm hover:text-gray-200 transition';
 export const GHO = 'px-3 py-2 rounded text-gray-500 text-sm hover:text-gray-300 transition';

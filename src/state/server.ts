@@ -411,13 +411,6 @@ const allConvs = createMemo<ChatConvSummary[]>(
   () => Object.values(chatStore.state.convs),
 );
 
-/** Set of conv ids that have their OWN ChatRunner streaming. */
-export const liveConvs = createMemo<Set<string>>(() => {
-  const s = new Set<string>();
-  for (const c of allConvs()) if (c.live) s.add(c.conv);
-  return s;
-});
-
 /** Conv id → list of child conv ids it's waiting on. */
 export const waitingByConv = createMemo<Record<string, string[]>>(() => {
   const out: Record<string, string[]> = {};
@@ -425,26 +418,6 @@ export const waitingByConv = createMemo<Record<string, string[]>>(() => {
     if (c.waiting_on && c.waiting_on.length > 0) out[c.conv] = c.waiting_on;
   }
   return out;
-});
-
-/** Conv ids that are coordinating (waiting on >=1 live child) and
- *  whose own runner is NOT live. The rail / wall use this to render
- *  the 'coordinating' state instead of 'idle'. */
-export const coordinatingConvs = createMemo<Set<string>>(() => {
-  const s = new Set<string>();
-  for (const c of allConvs()) {
-    if (!c.live && c.coordinating) s.add(c.conv);
-  }
-  return s;
-});
-
-/** Initiative ids that have at least one live conv. */
-export const activeInitiativeIds = createMemo<Set<string>>(() => {
-  const s = new Set<string>();
-  for (const c of allConvs()) {
-    if (c.live && c.initiative_id) s.add(c.initiative_id);
-  }
-  return s;
 });
 
 // py-1.28.3 — live-task overlay polled from GET /roadmap/live (App bus, ~2.5s).
@@ -455,10 +428,9 @@ export const activeInitiativeIds = createMemo<Set<string>>(() => {
 const [liveOverlay, setLiveOverlay] = createSignal<LiveTaskEntry[]>([]);
 /** Set by the App bus poller with the active project's live tasks (or [] on
  *  switch / when idle). */
-export function setActiveLiveTasks(entries: LiveTaskEntry[]): void {
+function setActiveLiveTasks(entries: LiveTaskEntry[]): void {
   setLiveOverlay(Array.isArray(entries) ? entries : []);
 }
-export const liveTaskOverlay = (): LiveTaskEntry[] => liveOverlay();
 
 /** Task ids currently being worked on by a live conv. Drives the
  *  per-task chip pulse in the roadmap regardless of the task file's
@@ -566,7 +538,7 @@ createRoot(() => {
   });
 });
 /** Reset the accumulated task→conv links (called on cluster switch). */
-export function resetTaskConvMap(): void {
+function resetTaskConvMap(): void {
   setTaskConvMap(() => ({}));
 }
 /** Conv that worked (or is working) a given task this session, if known. */

@@ -16,7 +16,7 @@
  * Reset link clears every override + reverts to Emerald / Default.
  */
 
-import { createSignal, onCleanup, For, Show } from 'solid-js';
+import { createSignal, onCleanup, For, Show, type JSX } from 'solid-js';
 import { themeStore } from '~/state/theme';
 import {
   THEME_OPTIONS,
@@ -168,11 +168,14 @@ export default function ThemePicker() {
   );
 }
 
+// Deliberately NOT `~/components/ui/TabButton`: this is a real ARIA
+// tablist (role="tab" + aria-selected), while the shared chip is a
+// toggle button (aria-pressed). Same look, different semantics.
 function TabButton(props: {
   id: Tab;
   active: boolean;
   onClick: () => void;
-  children: any;
+  children: JSX.Element;
 }) {
   return (
     <button

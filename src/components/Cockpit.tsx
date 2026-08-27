@@ -13,7 +13,7 @@
  * replace the cockpit body with their own panel via `ZoneView`.
  */
 
-import { createEffect, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
+import { createEffect, Match, onCleanup, onMount, Show, Switch, type JSX } from 'solid-js';
 import Header from '~/components/Header';
 import CockpitOutdatedBanner from '~/components/CockpitOutdatedBanner';
 import ProjectsRail from '~/components/ProjectsRail';
@@ -41,7 +41,7 @@ export default function Cockpit(props: {
   selectedModule: string | null;
   onSelectModule: (id: string | null) => void;
   connectionStatus?: { kind: string };
-  renderConnectionGate?: () => any;
+  renderConnectionGate?: () => JSX.Element;
 }) {
   const tab = nav.cockpitTab;
   const setTab = (t: Tab) => nav.setCockpitTab(t);

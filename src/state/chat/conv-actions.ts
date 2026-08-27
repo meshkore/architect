@@ -9,7 +9,7 @@
  */
 
 import { pickLatestArchitectConv, type ConvStateLike } from '~/lib/conv-state';
-import { state, setState, activeClusterId } from './store';
+import { state, setState } from './store';
 import { saveConvMeta, saveArchivedConvs, saveLastActiveConv } from './persistence';
 import { ONBOARDING_CONV_ID, isFixedAgentConv, type AgentType, type ConvMeta } from './types';
 
@@ -207,8 +207,3 @@ export function findActiveArchitectConv(): string | null {
   return pickLatestArchitectConv(candidates);
 }
 
-/** The cluster this store is currently bound to (read-only helper for
- *  the async guards in dispatch / queue hydration). */
-export function boundCluster(): string | null {
-  return activeClusterId();
-}

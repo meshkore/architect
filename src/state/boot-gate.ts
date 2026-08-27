@@ -47,7 +47,7 @@ export interface BootGate {
   revalidating: () => boolean;
 }
 
-export function createBootGate(): BootGate {
+function createBootGate(): BootGate {
   // Track boolean readiness, NOT snapshot object identity:
   // `serverStore.state.snapshot` is replaced on every roadmap refresh, so
   // reading it directly in the grace effect restarted the timer forever

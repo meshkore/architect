@@ -133,6 +133,20 @@ export function attachEventBus(
     // daemons) have no project_id → pass through unchanged.
     const evProject = (ev as { project_id?: string }).project_id;
     if (evProject && evProject !== clusterKey) return;
+    // CU1 — `chat.usage` is a conv-summary event wearing a `chat.`
+    // prefix, and it carries a `conv`, so the message-reducer branch
+    // below used to swallow it and its handler in conv-events was
+    // unreachable: the usage chip and context gauge only ever updated
+    // from /chat/snapshot, never live. Route it with the conv.* family,
+    // under the same active-cluster guard.
+    if (t === 'chat.usage') {
+      if (!isActiveCluster()) {
+        log.debug('[event-bus] dropping chat.usage from non-active cluster', { clusterKey, active: daemonStore.state.activeId });
+        return;
+      }
+      chatStore.ingestConvEvent(ev);
+      return;
+    }
     if (t.startsWith(CHAT_TYPE_PREFIX) && typeof ev.conv === 'string') {
       // MP4 — route to the right cluster's slice. When the cluster
       // is active, this is a normal ingestEvent (reactive setState);
