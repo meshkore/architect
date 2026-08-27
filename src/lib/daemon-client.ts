@@ -1194,25 +1194,44 @@ export class DaemonClient {
   //   daemon-authoritative conv API. Cockpit only calls these when
   //   `chat.snapshot.v1` is advertised in /health.features. ──────
 
+  // DAH2(b), initiative `daemon-audit-hardening` — the four chat reads below
+  // used to pass `requireAuth: false`. That flag does not merely "allow" an
+  // anonymous call: it SUPPRESSES the Authorization header even when a token
+  // is in hand, and it also disables the 401 self-heal (see `request`). So
+  // the cockpit was reading conversation content — `/chat/conv/<id>/messages`
+  // returns full message BODIES — over an unauthenticated channel by
+  // construction, and the daemon could not gate those routes without breaking
+  // the cockpit.
+  //
+  // Sending the token is harmless against a daemon that does not yet require
+  // it, which is what makes this the SAFE HALF of a two-repo change: this
+  // ships first, the daemon-side gate second. Reversing that order would leave
+  // every un-updated cockpit without chat history until the CDN deploy landed.
+  //
+  // Token availability is not a concern at these call sites: `switchToPort`
+  // auto-unlocks a LOCAL cluster (origin-gated GET /auth/local-token) BEFORE
+  // the instance is attached, so a token exists by the time any chat read
+  // runs; and a stale one now recovers through the 401 self-heal these calls
+  // just regained.
+
   /** Boot consolidated payload — convs + archives + paused + quota +
    *  debug in one round-trip. Replaces the legacy chain of /state +
-   *  /chat/archives + /health.chat_active_convs hydration. Anonymous
-   *  read (matches /chat/archives). */
+   *  /chat/archives + /health.chat_active_convs hydration. */
   async chatSnapshot(signal?: AbortSignal): Promise<Result<ChatSnapshotResponse>> {
-    return this.request<ChatSnapshotResponse>('GET', '/chat/snapshot', undefined, signal, /*requireAuth*/ false);
+    return this.request<ChatSnapshotResponse>('GET', '/chat/snapshot', undefined, signal);
   }
 
   /** Canonical conv list. Cockpit reads this on WS `state.rebuilt` or
    *  any conv.* event when the snapshot.v1 path is active and we
    *  need to resync. */
   async chatConvs(signal?: AbortSignal): Promise<Result<ChatConvsResponse>> {
-    return this.request<ChatConvsResponse>('GET', '/chat/convs', undefined, signal, /*requireAuth*/ false);
+    return this.request<ChatConvsResponse>('GET', '/chat/convs', undefined, signal);
   }
 
   /** One conv's normalised metadata. Deep-link / resync helper. */
   async chatConvMeta(conv: string, signal?: AbortSignal): Promise<Result<ChatConvMetaResponse>> {
     return this.request<ChatConvMetaResponse>(
-      'GET', `/chat/conv/${encodeURIComponent(conv)}/meta`, undefined, signal, /*requireAuth*/ false,
+      'GET', `/chat/conv/${encodeURIComponent(conv)}/meta`, undefined, signal,
     );
   }
 
@@ -1230,7 +1249,7 @@ export class DaemonClient {
     if (opts?.limit) params.set('limit', String(opts.limit));
     const qs = params.toString();
     const path = `/chat/conv/${encodeURIComponent(conv)}/messages${qs ? '?' + qs : ''}`;
-    return this.request<ChatConvMessagesResponse>('GET', path, undefined, signal, /*requireAuth*/ false);
+    return this.request<ChatConvMessagesResponse>('GET', path, undefined, signal);
   }
 
   // py-1.10.0 — Story-run coordinator.
