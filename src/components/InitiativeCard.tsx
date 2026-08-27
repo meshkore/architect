@@ -667,7 +667,14 @@ function fmtStamp(iso: string): string {
 
 /** Pull the `## Resolution` section body out of a task .md (Standard v26). */
 function extractResolution(body: string): string {
-  const m = /^##\s+Resolution[ \t]*$([\s\S]*?)(?=^##\s|\Z)/m.exec(body);
+  // 2026-08-27 — `\Z` is a PYTHON end-of-input anchor. JavaScript has no such
+  // escape, so `\Z` was an identity escape for a literal "Z": the lazy match
+  // stopped at the next `## ` heading OR at the first capital Z in the prose.
+  // A resolution reading "Fixed the ZAI provider fallback" rendered as
+  // "Fixed the ". `(?![\s\S])` is the real end-of-input assertion, and it
+  // still composes with the /m flag that `^##` needs. eslint had been calling
+  // this out as no-useless-escape the whole time.
+  const m = /^##\s+Resolution[ \t]*$([\s\S]*?)(?=^##\s|(?![\s\S]))/m.exec(body);
   return stripResolutionMetaPrefix(m ? (m[1] ?? '').trim() : '');
 }
 

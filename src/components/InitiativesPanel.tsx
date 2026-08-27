@@ -32,7 +32,7 @@ import { viewStore } from '~/state/view';
 import { chatStore } from '~/state/chat';
 import { daemonStore, daemonHealth } from '~/state/daemon';
 import { runArchitectOnScope, stopArchitect } from '~/lib/architect-dispatch';
-import { isQueued, queuedIds, clearQueue, setQueue } from '~/lib/queue';
+import { queuedIds, clearQueue, setQueue } from '~/lib/queue';
 import { log } from '~/lib/log';
 
 type VisibilityFilter = 'all' | 'active' | 'backlog' | 'archived' | 'queue';

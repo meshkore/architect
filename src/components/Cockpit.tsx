@@ -14,7 +14,7 @@
  */
 
 import { createEffect, createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
-import { EXPECTED_DAEMON_VERSION, isDaemonBehind } from '~/lib/version';
+import { isDaemonBehind } from '~/lib/version';
 import { cockpitOutdated, latestCockpitCommit, COCKPIT_COMMIT, probeCockpitHealth } from '~/lib/cockpit-version';
 import Header from '~/components/Header';
 import ProjectsRail from '~/components/ProjectsRail';
@@ -93,8 +93,8 @@ export default function Cockpit(props: {
   // hung forever whenever /chat/snapshot was slow/hung (ikamiro ChatSessions
   // deadlock, 2026-06-13). createMemo only notifies on the boolean flip, so
   // the timer starts once on snapshot-ready and actually fires.
-  const snapReady = createMemo(() => serverStore.state.snapshot != null);
-  const chatReady = createMemo(() => chatStore.state.convsHydratedAt != null);
+  const snapReady = createMemo(() => serverStore.state.snapshot !== null && serverStore.state.snapshot !== undefined);
+  const chatReady = createMemo(() => chatStore.state.convsHydratedAt !== null && chatStore.state.convsHydratedAt !== undefined);
   createEffect(() => {
     // Start the grace timer once the roadmap snapshot is in but chat
     // hasn't hydrated. Only re-runs when either BOOLEAN flips.
@@ -115,10 +115,13 @@ export default function Cockpit(props: {
   const BOOT_HARD_GRACE_MS = 10000;
   const [bootHardGraceElapsed, setBootHardGraceElapsed] = createSignal(false);
   const snapFailed = createMemo(
-    () => serverStore.state.snapshot == null && serverStore.state.error != null,
+    () =>
+      (serverStore.state.snapshot === null || serverStore.state.snapshot === undefined)
+      && serverStore.state.error !== null
+      && serverStore.state.error !== undefined,
   );
   createEffect(() => {
-    daemonStore.state.activeId; // reset the escape window on every switch
+    void daemonStore.state.activeId; // reset the escape window on every switch (a bare read is the Solid dependency-tracking idiom; `void` makes that explicit to eslint)
     setBootHardGraceElapsed(false);
     const t = setTimeout(() => setBootHardGraceElapsed(true), BOOT_HARD_GRACE_MS);
     onCleanup(() => clearTimeout(t));
@@ -200,8 +203,12 @@ export default function Cockpit(props: {
                 bundle understands. Block the body until the operator
                 reloads to pick up the matching frontend.
                 `daemonStore.state.ahead` already gates on major/minor
-                (not patch) via isDaemonAhead — patch differences fall
-                through to the existing thin DaemonAheadBanner up top. */}
+                (not patch) via isDaemonAhead — a patch-level difference is
+                deliberately silent (the wire format cannot change in a patch).
+                2026-08-27: the thin `DaemonAheadBanner` this comment used to
+                point at had been orphaned since the outdated-flow unification
+                — declared, never rendered — so tsc flagged it as unused and it
+                is now deleted rather than left as a phantom in the comment. */}
             <Show
               when={!daemonStore.state.ahead}
               fallback={<DaemonAheadPanel />}
@@ -525,53 +532,6 @@ function CockpitOutdatedBanner() {
 // signals belong in the center, the thin top bar is reserved for
 // cockpit/UI signals). See DaemonBehindPanel.tsx.
 
-function DaemonAheadBanner() {
-  const [dismissed, setDismissed] = createSignal(
-    typeof sessionStorage !== 'undefined' && sessionStorage.getItem('mc-daemon-ahead-dismissed') === '1',
-  );
-  // CVS2 — when ahead === true (≥ minor mismatch) the full-body
-  // DaemonAheadPanel already covers the main area. The thin top
-  // banner is reserved for softer cases (e.g. future patch-level
-  // ahead detection that doesn't warrant a block). Today
-  // isDaemonAhead() only fires on minor/major, so this banner
-  // never actually renders — kept as scaffolding for a future
-  // patch-level signal. Guarded explicitly to make the intent
-  // obvious and prevent double-rendering with the panel.
-  const visible = () => false && daemonStore.state.ahead && !dismissed();
-  const dismiss = (): void => {
-    try { sessionStorage.setItem('mc-daemon-ahead-dismissed', '1'); } catch { /* private mode */ }
-    setDismissed(true);
-  };
-  const refresh = (): void => { window.location.reload(); };
-  return (
-    <Show when={visible()}>
-      <div class="border-b border-cyan-500/30 bg-cyan-500/10 text-cyan-100 text-[12px] px-4 py-2 flex items-center gap-3">
-        <span class="font-mono text-cyan-300/90 flex-shrink-0">↻ daemon ahead</span>
-        <span class="flex-1 min-w-0 truncate">
-          The daemon at <span class="font-mono">{daemonStore.state.health?.cluster_name ?? daemonStore.state.health?.identity ?? 'this project'}</span>
-          {' '}is now <span class="font-mono text-cyan-300">{daemonStore.state.version?.raw ?? '?'}</span>.
-          This cockpit bundle was built for <span class="font-mono text-cyan-300">{EXPECTED_DAEMON_VERSION}</span>.
-          Reload to pick up the matching frontend so you don't miss new event fields.
-        </span>
-        <button
-          type="button"
-          onClick={refresh}
-          class="font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/40 border border-cyan-500/50 text-cyan-100 transition-colors flex-shrink-0"
-        >
-          Reload
-        </button>
-        <button
-          type="button"
-          onClick={dismiss}
-          class="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-cyan-500/30 hover:border-cyan-500/60 text-cyan-200/80 hover:text-cyan-100 transition-colors flex-shrink-0"
-          title="Hide until the next refresh"
-        >
-          Later
-        </button>
-      </div>
-    </Show>
-  );
-}
 
 function SubTab(props: {
   id: Tab;

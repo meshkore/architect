@@ -36,7 +36,7 @@ const ESC: Record<string, string> = {
 };
 
 function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ESC[c]);
+  return s.replace(/[&<>"']/g, (c) => ESC[c] ?? c);
 }
 
 const KIND_ORDER = ['url', 'string', 'stamp', 'path', 'literal', 'number', 'ident'] as const;
@@ -78,7 +78,7 @@ export function tokenizeInlineCode(text: string): string {
     const groups = m.groups ?? {};
     let kind: string = 'default';
     for (const k of KIND_ORDER) {
-      if (groups[k] != null) { kind = k; break; }
+      if (groups[k] !== undefined) { kind = k; break; }
     }
     out += `<span data-tok="${kind}">${escapeHtml(m[0])}</span>`;
     last = TOKEN_RE.lastIndex;
@@ -103,6 +103,7 @@ export function colorizeInlineCodeInHtml(html: string): string {
     const codes = root.querySelectorAll('code');
     for (let i = 0; i < codes.length; i += 1) {
       const code = codes[i];
+      if (!code) continue;
       if (code.closest('pre')) continue;
       const text = code.textContent ?? '';
       if (!text) continue;

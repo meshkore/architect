@@ -23,10 +23,7 @@ import {
   SIZE_OPTIONS,
   CHAT_PALETTE_OPTIONS,
   CHAT_USER_COLOR_CHIPS,
-  THEMES,
   SIZE_PRESETS,
-  type ThemeId,
-  type SizeId,
 } from '~/lib/theme-presets';
 
 type Tab = 'theme' | 'colours' | 'sizes';
@@ -36,7 +33,9 @@ export default function ThemePicker() {
   const [tab, setTab] = createSignal<Tab>('theme');
   let hostEl: HTMLDivElement | undefined;
 
-  const close = (): void => setOpen(false);
+  const close = (): void => {
+    setOpen(false);
+  };
 
   const onDocPointer = (e: PointerEvent): void => {
     if (!open()) return;

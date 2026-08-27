@@ -136,7 +136,7 @@ export function modelShort(id: string | null | undefined): string {
   const fm = id.match(/fable|mythos/i);
   if (fm) {
     const v = id.match(/-(\d+)(?![\d-])/);
-    return v ? `${fm[0][0].toLowerCase()}${v[1]}` : fm[0].slice(0, 3).toLowerCase();
+    return v ? `${(fm[0][0] ?? '').toLowerCase()}${v[1]}` : fm[0].slice(0, 3).toLowerCase();
   }
   const m = id.match(/opus|sonnet|haiku/i);
   if (m) {

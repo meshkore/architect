@@ -1508,7 +1508,7 @@ async function loadConvMessagesPage(
   // (loadEarlierMessages) and the UI's "load earlier" affordance know
   // whether older pages exist and where to resume from.
   const list = state.convMap[conv] ?? [];
-  const oldest = list.length > 0 ? (list[0].ts ?? '') : (res.data.oldest_ts ?? '');
+  const oldest = list[0] ? (list[0].ts ?? '') : (res.data.oldest_ts ?? '');
   setState('paging', conv, {
     hasMore: !!res.data.has_more,
     oldestTs: oldest,
@@ -1568,7 +1568,7 @@ async function loadEarlierMessages(client: DaemonClient, conv: string): Promise<
   setState('convMap', conv, next);
   setState('paging', conv, {
     hasMore: !!res.data.has_more && !capped,
-    oldestTs: next.length > 0 ? (next[0].ts ?? '') : p.oldestTs,
+    oldestTs: next[0] ? (next[0].ts ?? '') : p.oldestTs,
     loading: false,
     capped,
   });
@@ -1725,7 +1725,11 @@ function ingestConvEvent(ev: DaemonEvent): void {
       ...currentList,
       {
         kind: 'system',
-        system_kind: 'warn',
+        // 'warning', not 'warn': SystemBubble tints on 'error' | 'warning' and
+        // falls through to the neutral grey for anything else, so the typo was
+        // rendering a rejected anchor as an ordinary note. tsc had been
+        // flagging it (TS2322) against the ChatMsg union the whole time.
+        system_kind: 'warning',
         text: `Anchor rejected: ${reason}`,
         ts: typeof ev.ts === 'string' ? ev.ts : new Date().toISOString(),
       },
