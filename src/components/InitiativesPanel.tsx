@@ -31,6 +31,7 @@ import { viewStore } from '~/state/view';
 import { runArchitectOnScope } from '~/lib/architect-dispatch';
 import { queuedIds, queueView, setQueue } from '~/lib/queue';
 import { EXIT_ANIM_MS, exitingInitiatives } from '~/lib/roadmap-auto-archive';
+import { allTasksComplete, taskProgress } from '~/lib/task-status';
 
 export default function InitiativesPanel() {
   // FC-2 — the visibility filter is persisted per-project in viewStore so a
@@ -104,7 +105,7 @@ export default function InitiativesPanel() {
       const isArchManual = viewStore.isInitiativeArchived(it.id) && it.status !== 'active';
       const isArchived = isDone || isArchManual;
       const tasks = tbi.get(it.id) ?? [];
-      const complete = tasks.length > 0 && tasks.every((t) => t.status === 'done');
+      const complete = allTasksComplete(tasks); // RSV1 — cancelled tasks are resolved, not pending
       const isBacklog = it.status === 'backlog';
       if (vis === 'active') {
         if (exitingSet.has(it.id)) {
@@ -143,7 +144,7 @@ export default function InitiativesPanel() {
       const it = byId.get(id);
       if (!it) return true; // unknown (snapshot lag) — keep, don't drop blindly
       const tasks = tbi.get(id) ?? [];
-      const complete = tasks.length > 0 && tasks.every((t) => t.status === 'done');
+      const complete = allTasksComplete(tasks); // RSV1
       return it.status !== 'done' && !complete;
     });
     if (keep.length !== order.length) setQueue(keep);
@@ -155,9 +156,10 @@ export default function InitiativesPanel() {
     let done = 0;
     let total = 0;
     for (const it of queueInitiatives()) {
-      const tasks = tbi.get(it.id) ?? [];
-      total += tasks.length;
-      done += tasks.filter((t) => t.status === 'done').length;
+      // RSV1 — cancelled tasks leave both sides of the fraction.
+      const p = taskProgress(tbi.get(it.id) ?? []);
+      total += p.total;
+      done += p.done;
     }
     return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
   });

@@ -620,6 +620,16 @@
 /* done — check in the done hue */
 .rt-task.is-done .rt-task-state { color: var(--theme-status-done, #a78bfa); }
 .rt-task-check { color: currentColor; }
+/* cancelled (RSV1) — closed on purpose, never carried out. Deliberately the
+   quietest state on the row: it is neither an achievement to celebrate nor
+   work still owed, so it recedes rather than competing with either. */
+.rt-task.is-cancelled .rt-task-state { color: #6b7280; }
+.rt-task-cross {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
 /* working — spinner in the running hue */
 .rt-task.is-working .rt-task-state { color: var(--theme-status-running, #ec4899); }
 .rt-task-spinner {
@@ -668,6 +678,12 @@
 }
 .rt-task.is-done .rt-task-text { color: #9aa3af; }
 .rt-task.is-pending .rt-task-text { color: #aab2bd; }
+.rt-task.is-cancelled .rt-task-text {
+  color: #6b7280;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+}
 /* working — title softly blinks in the running hue (operator: "muy suave") */
 .rt-task.is-working .rt-task-text {
   color: var(--theme-status-running-ring, #f9a8d4);

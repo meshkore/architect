@@ -31,13 +31,18 @@ import { CollapsibleText } from '~/components/ui/CollapsibleText';
 import { isTaskOpen, toggleTaskOpen } from '~/components/initiative/task-expand-state';
 import { TaskDetail } from '~/components/initiative/TaskDetail';
 
-type TaskVState = 'done' | 'working' | 'active' | 'blocked' | 'pending';
+type TaskVState = 'done' | 'working' | 'active' | 'blocked' | 'pending' | 'cancelled';
 type SummaryView = 'des' | 'res';
 
 function taskVState(task: ServerTask, live: boolean): TaskVState {
   if (live) return 'working';
   const s = (task.status || '').toLowerCase();
   if (s === 'done') return 'done';
+  // RSV1 — closed on purpose, never carried out. Distinct from `done` (which
+  // is an achievement) and from `pending` (which is outstanding work). The
+  // daemon only started publishing it in py-1.35.3; before that it arrived
+  // normalised to `backlog` and read as work still to do.
+  if (s === 'cancelled') return 'cancelled';
   if (s === 'blocked') return 'blocked';
   if (s === 'active' || s === 'in_progress' || s === 'in-progress') return 'active';
   return 'pending'; // next, planned, backlog, draft, pending_operator, …
@@ -63,6 +68,7 @@ const TASK_STATE_TITLE: Record<TaskVState, string> = {
   active: 'Active — ready to start',
   blocked: 'Blocked',
   pending: 'Pending',
+  cancelled: 'Cancelled — closed without being carried out; not counted in progress',
 };
 
 export function TaskRow(props: { task: ServerTask; archived?: boolean }) {
@@ -157,6 +163,9 @@ export function TaskRow(props: { task: ServerTask; archived?: boolean }) {
             </Show>
             <Show when={vstate() === 'pending'}>
               <span class="rt-task-box" aria-hidden="true" />
+            </Show>
+            <Show when={vstate() === 'cancelled'}>
+              <span class="rt-task-cross" aria-hidden="true">×</span>
             </Show>
           </span>
 
