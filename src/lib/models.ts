@@ -41,6 +41,7 @@ export const MODEL_CATALOG: readonly ModelMeta[] = [
   { id: 'sonnet', label: 'Sonnet (latest)', short: 'son',  hint: 'Balanced workhorse · always newest Sonnet',             group: 'Latest (alias)' },
   { id: 'haiku',  label: 'Haiku (latest)',  short: 'hai',  hint: 'Fastest · cheapest · always newest Haiku',              group: 'Latest (alias)' },
   // Pinned versions — Claude 5 family
+  { id: 'claude-fable-5-1',  label: 'Fable 5.1',  short: 'f5.1', hint: 'Pinned — Fable 5.1 · the flagship · native 1M context (needs claude-code ≥ 2.1.251)', group: 'Pinned version' },
   { id: 'claude-fable-5',    label: 'Fable 5',    short: 'f5',   hint: 'Pinned — Fable 5 · most capable · native 1M context', group: 'Pinned version' },
   { id: 'claude-sonnet-5',   label: 'Sonnet 5',   short: 's5',   hint: 'Pinned — Sonnet 5 · near-Opus quality at Sonnet cost', group: 'Pinned version' },
   // Pinned versions — Opus / Haiku 4.x
@@ -126,7 +127,7 @@ export function modelShort(id: string | null | undefined): string {
   const hit = MODEL_BY_ID.get(id);
   if (hit) return hit.short;
   // Family fallback for unlisted variants (e.g. a [1m]-suffixed or newer id).
-  // Fable/Mythos version as "5" (single-number line); opus/sonnet/haiku as
+  // Fable/Mythos version as "5" / "5.1"; opus/sonnet/haiku as
   // "<letter><major>.<minor>" from a "4-8"-style id.
   const glm = id.match(/glm/i);
   if (glm) {
@@ -135,8 +136,15 @@ export function modelShort(id: string | null | undefined): string {
   }
   const fm = id.match(/fable|mythos/i);
   if (fm) {
-    const v = id.match(/-(\d+)(?![\d-])/);
-    return v ? `${(fm[0][0] ?? '').toLowerCase()}${v[1]}` : fm[0].slice(0, 3).toLowerCase();
+    // Read the version FORWARD from the family word: 'claude-fable-5-1' has
+    // two numbers and the old `-(\d+)(?![\d-])` grabbed the LAST one, so the
+    // flagship would have been badged 'f1' — a Fable 1 that does not exist.
+    // Second group is optional so single-number ids ('claude-fable-5') and
+    // suffixed ones ('claude-fable-5-1[1m]') both still work.
+    const v = id.match(/(?:fable|mythos)-(\d+)(?:-(\d+))?/i);
+    const letter = (fm[0][0] ?? '').toLowerCase();
+    if (v) return `${letter}${v[1]}${v[2] ? `.${v[2]}` : ''}`;
+    return fm[0].slice(0, 3).toLowerCase();
   }
   const m = id.match(/opus|sonnet|haiku/i);
   if (m) {
