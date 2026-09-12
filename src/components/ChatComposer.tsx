@@ -321,6 +321,14 @@ function QueuePanel(props: {
   const [editValue, setEditValue] = createSignal('');
   const [dragId, setDragId] = createSignal<string | null>(null);
   const [collapsed, setCollapsed] = createSignal<boolean>(true);
+  // Auto-expand when NEW items arrive so the ✕/edit controls are
+  // visible; never fights a manual collapse (only opens on growth).
+  let prevCount = props.items.length;
+  createEffect(() => {
+    const n = props.items.length;
+    if (n > prevCount) setCollapsed(false);
+    prevCount = n;
+  });
 
   const beginEdit = (it: ChatQueueItem): void => {
     setEditingId(it.id);
