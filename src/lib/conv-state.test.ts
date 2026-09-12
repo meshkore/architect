@@ -14,6 +14,7 @@ import {
   isConvWorkingFrom,
   isArchitectConv,
   pickLatestArchitectConv,
+  pickUnanchoredLiveConvs,
 } from './conv-state.ts';
 
 test('isConvWorkingFrom: daemon live flag wins', () => {
@@ -80,4 +81,29 @@ test('pickLatestArchitectConv: a conv with no timestamp is still selectable', ()
 test('pickLatestArchitectConv: null when the roster has no architect', () => {
   assert.equal(pickLatestArchitectConv([]), null);
   assert.equal(pickLatestArchitectConv([{ conv: 'work-1', agent_type: 'work' }]), null);
+});
+
+test('pickUnanchoredLiveConvs: live + flagged = reported', () => {
+  // LAL9 — the exact failure the operator saw: a conv skipped its anchor
+  // while live, so the roadmap painted the previous initiative as WORKING.
+  const convs = [
+    { conv: 'muse-dm-cli-11-smoke', live: true },
+    { conv: 'idle-anchored', live: true },
+    { conv: 'dead-flagged', live: false },
+  ];
+  assert.deepEqual(
+    pickUnanchoredLiveConvs(convs, { 'muse-dm-cli-11-smoke': '2026-09-12T10:00:00Z', 'dead-flagged': '2026-09-12T10:00:00Z' }),
+    ['muse-dm-cli-11-smoke'],
+  );
+});
+
+test('pickUnanchoredLiveConvs: coordinating counts, archived excluded', () => {
+  const convs = [
+    { conv: 'coord', coordinating: true },
+    { conv: 'arch', live: true, archived: true },
+  ];
+  assert.deepEqual(
+    pickUnanchoredLiveConvs(convs, { coord: 't', arch: 't' }),
+    ['coord'],
+  );
 });

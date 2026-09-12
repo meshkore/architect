@@ -68,6 +68,27 @@ export function isArchitectConv(conv: string, agentType?: string | null): boolea
  * timestamp sort last but remain selectable, so a freshly created conv
  * that has not reported activity yet is still found.
  */
+/**
+ * Convs that are live right now but skipped the `⟦anchor⟧` marker this
+ * turn (LAL9). The daemon broadcasts `conv.anchor_missing` for them; the
+ * cockpit records it so the queue bar can warn instead of silently
+ * painting the conv's STALE initiative as WORKING. Pure: inputs explicit,
+ * no store — the store-bound wrapper lives in `state/live-selectors.ts`.
+ */
+export function pickUnanchoredLiveConvs(
+  convs: readonly ConvStateLike[],
+  anchorMissing: Readonly<Record<string, string>>,
+): string[] {
+  const out: string[] = [];
+  for (const c of convs) {
+    if (!c.live && !c.coordinating) continue;
+    if (c.archived) continue;
+    if (anchorMissing[c.conv] === undefined) continue;
+    out.push(c.conv);
+  }
+  return out;
+}
+
 export function pickLatestArchitectConv(convs: readonly ConvStateLike[]): string | null {
   let best: string | null = null;
   let bestTs = '';

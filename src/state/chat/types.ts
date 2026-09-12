@@ -131,6 +131,12 @@ export interface ChatStoreState {
   /** V107.41 — Standard v16 chat-turn queue. Per-conv list of items
    *  waiting to be dispatched. Daemon-authoritative. */
   queues: Record<string, ChatQueueItem[]>;
+  /** LAL9 — convs the daemon flagged with `conv.anchor_missing` (conv →
+   *  ISO ts). Set when the agent skipped its `⟦anchor⟧` marker; cleared
+   *  on the next `conv.anchored` or when the conv goes idle. Lets the
+   *  queue bar warn that the WORKING highlight may point at a stale
+   *  initiative instead of failing silent. */
+  anchorMissing: Record<string, string>;
   /** 2026-06-12 — per-conv pagination cursor for the windowed history
    *  loader. Storage keeps everything; we just don't paint past the cap. */
   paging: Record<string, ChatPaging>;
@@ -162,6 +168,7 @@ export const initialChatState: ChatStoreState = {
   convsHydratedAt: null,
   convsStale: false,
   queues: {},
+  anchorMissing: {},
   paging: {},
 };
 

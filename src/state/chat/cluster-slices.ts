@@ -114,6 +114,7 @@ export function bindCluster(clusterId: string | null): void {
       convs: cached.convs,
       convsHydratedAt: cached.convsHydratedAt,
       convsStale: cached.convsHydratedAt !== null,
+      anchorMissing: {},
     });
     return;
   }
@@ -129,6 +130,7 @@ export function bindCluster(clusterId: string | null): void {
     convs: {},
     convsHydratedAt: null,
     convsStale: false,
+    anchorMissing: {},
   });
   loadConvMeta();
 }
@@ -168,6 +170,7 @@ export function clearClusterChat(clusterId: string): void {
       convs: {},
       convsHydratedAt: null,
       convsStale: false,
+      anchorMissing: {},
     });
   }
 }

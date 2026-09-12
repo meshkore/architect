@@ -16,6 +16,7 @@ import { chatStore } from '~/state/chat';
 import {
   isConvWorkingFrom,
   pickLatestArchitectConv,
+  pickUnanchoredLiveConvs,
   type ConvStateLike,
 } from '~/lib/conv-state';
 
@@ -50,4 +51,17 @@ export function activeArchitectConv(): string | null {
 export function isArchitectWorking(): boolean {
   const conv = activeArchitectConv();
   return conv ? isConvWorking(conv) : false;
+}
+
+/**
+ * LAL9 — live convs that skipped their `⟦anchor⟧` marker this turn.
+ * While non-empty the roadmap's WORKING highlight may point at a stale
+ * initiative (the conv keeps its previous `initiative_id`); the queue
+ * bar renders a warning instead of failing silent.
+ */
+export function unanchoredLiveConvs(): string[] {
+  return pickUnanchoredLiveConvs(
+    Object.values(chatStore.state.convs),
+    chatStore.state.anchorMissing,
+  );
 }

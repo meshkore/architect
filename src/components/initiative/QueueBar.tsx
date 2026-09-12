@@ -9,9 +9,9 @@
  * offered "▶ Run queue".
  */
 
-import { Show } from 'solid-js';
+import { For, Show } from 'solid-js';
 import type { ServerInitiative } from '~/state/server';
-import { isArchitectWorking } from '~/state/live-selectors';
+import { isArchitectWorking, unanchoredLiveConvs } from '~/state/live-selectors';
 import { stopArchitect } from '~/lib/architect-dispatch';
 import { clearQueue } from '~/lib/queue';
 import { ConfirmButtons } from '~/components/ui/ConfirmButtons';
@@ -34,6 +34,18 @@ export function QueueBar(props: {
       <span class="rt-qbar-stat">
         {props.progress.done}/{props.progress.total} tasks · {props.queued.length} queued
       </span>
+      {/* LAL9 — a live conv without an anchor keeps its PREVIOUS
+          initiative_id, so the red WORKING highlight may point at the
+          wrong story. Warn in the bar instead of lying in silence. */}
+      <Show when={unanchoredLiveConvs().length > 0}>
+        <span
+          class="rt-qbar-unanchored"
+          title="The agent skipped its anchor marker this turn — the WORKING highlight may show the previous initiative, not what is actually running"
+        >
+          ⚠ <For each={unanchoredLiveConvs()}>{(c) => <span>{c} </span>}</For>
+          sin anchor — el resaltado puede ser la iniciativa anterior
+        </span>
+      </Show>
       <div class="ml-auto flex items-center gap-2 flex-shrink-0">
         <Show
           when={!isArchitectWorking()}

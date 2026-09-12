@@ -113,6 +113,14 @@ function onAnchored(conv: string, ev: DaemonEvent): void {
     task_id: str(ev.task_id) ?? prev?.task_id ?? null,
     last_activity_at: str(ev.ts) ?? prev?.last_activity_at ?? '',
   }));
+  // LAL9 — a fresh anchor clears the missing-anchor flag (guardrail reset).
+  if (state.anchorMissing[conv] !== undefined) {
+    setState('anchorMissing', (prev) => {
+      const next = { ...prev };
+      delete next[conv];
+      return next;
+    });
+  }
 }
 
 function onAnchorRejected(conv: string, ev: DaemonEvent): void {
@@ -165,6 +173,15 @@ function onActivity(conv: string, ev: DaemonEvent): void {
   // the project rail reflects daemon state immediately, not only after
   // the first delta. Pair of snapshot.seedWorkingConvs, which seeds the
   // same set on cluster bind.
+  // LAL9 — the turn is over; a stale missing-anchor flag from this
+  // turn must not warn against the NEXT turn's fresh anchor.
+  if (ev.live !== true && ev.coordinating !== true && state.anchorMissing[conv] !== undefined) {
+    setState('anchorMissing', (prev) => {
+      const next = { ...prev };
+      delete next[conv];
+      return next;
+    });
+  }
   const activeId = activeClusterId();
   if (!activeId) return;
   const isLive = ev.live === true || ev.coordinating === true;
@@ -198,9 +215,14 @@ export function ingestConvEvent(ev: DaemonEvent): void {
       return onAnchored(conv, ev);
     case 'conv.anchor_rejected':
       return onAnchorRejected(conv, ev);
-    case 'conv.anchor_missing':
-      // No bubble — the agent simply skipped the marker.
-      return log.info('agent skipped anchor for conv', conv);
+    case 'conv.anchor_missing': {
+      // LAL9 — record it so the queue bar can warn that the WORKING
+      // highlight may point at the conv's stale initiative. Before this
+      // it was only a console line and the roadmap lied in silence.
+      log.info('agent skipped anchor for conv', conv);
+      const ts = str(ev.ts) ?? new Date().toISOString();
+      return setState('anchorMissing', conv, ts);
+    }
     case 'chat.usage':
       return onUsage(conv, ev);
     case 'conv.task_completed': {
