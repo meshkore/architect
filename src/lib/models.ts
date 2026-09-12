@@ -3,11 +3,15 @@
  * team member dialog/editor (pickers), the chat header's live pickers,
  * and AgentCard / ChatScopeStrip (badges).
  *
- * Two knobs map 1:1 onto what the `claude` CLI (claude-code 2.1.145)
+ * Two knobs map 1:1 onto what the `claude` CLI (claude-code 2.1.267)
  * accepts and what the daemon forwards (MP1/MP3, daemon py-1.13.3+):
  *
- *   --model <id>     alias ('opus'/'sonnet'/'haiku' → always-latest)
+ *   --model <id>     alias ('fable'/'opus'/'sonnet'/'haiku' → always-latest)
  *                    OR a pinned full id ('claude-opus-4-8', …).
+ *
+ * Catalog refresh 2026-09-12 (DM-CLI-12) — see daemon providers.py.
+ * Older pins are KEPT while vendors still serve them (members may be
+ * pinned to one); the daemon never rejects an unlisted id.
  *   --effort <level> low | medium | high | xhigh | max — the
  *                    "thinking" / reasoning-depth dial. There is NO
  *                    separate thinking flag; effort IS it.
@@ -37,12 +41,14 @@ export interface ModelMeta {
 // chip / chat surfaces it; that's the operator's signal.
 export const MODEL_CATALOG: readonly ModelMeta[] = [
   // Latest aliases
+  { id: 'fable',  label: 'Fable (latest)',  short: 'fab',  hint: 'Flagship family · always newest Fable',                  group: 'Latest (alias)' },
   { id: 'opus',   label: 'Opus (latest)',   short: 'opus', hint: 'Highest quality · most expensive · always newest Opus', group: 'Latest (alias)' },
   { id: 'sonnet', label: 'Sonnet (latest)', short: 'son',  hint: 'Balanced workhorse · always newest Sonnet',             group: 'Latest (alias)' },
   { id: 'haiku',  label: 'Haiku (latest)',  short: 'hai',  hint: 'Fastest · cheapest · always newest Haiku',              group: 'Latest (alias)' },
   // Pinned versions — Claude 5 family
   { id: 'claude-fable-5-1',  label: 'Fable 5.1',  short: 'f5.1', hint: 'Pinned — Fable 5.1 · the flagship · native 1M context (needs claude-code ≥ 2.1.251)', group: 'Pinned version' },
   { id: 'claude-fable-5',    label: 'Fable 5',    short: 'f5',   hint: 'Pinned — Fable 5 · most capable · native 1M context', group: 'Pinned version' },
+  { id: 'claude-opus-5',     label: 'Opus 5',     short: 'o5',   hint: 'Pinned — Opus 5 · SOTA coding at lower cost than 4.8', group: 'Pinned version' },
   { id: 'claude-sonnet-5',   label: 'Sonnet 5',   short: 's5',   hint: 'Pinned — Sonnet 5 · near-Opus quality at Sonnet cost', group: 'Pinned version' },
   // Pinned versions — Opus / Haiku 4.x
   { id: 'claude-opus-4-8',   label: 'Opus 4.8',   short: 'o4.8', hint: 'Pinned — Opus 4.8',   group: 'Pinned version' },
@@ -64,9 +70,15 @@ export const MODEL_CATALOG: readonly ModelMeta[] = [
 // lists aren't fetched live) and the daemon reports per-provider
 // availability via GET /clients. Adding a provider = one entry.
 
-/** ZAI's GLM catalog — the model dropdown when Provider = ZAI. */
+/** ZAI's GLM catalog — the model dropdown when Provider = ZAI.
+ *  Refresh 2026-09-12 (DM-CLI-12): GLM 5.x (Coding Plan allowlist). */
 export const GLM_CATALOG: readonly ModelMeta[] = [
-  { id: 'glm-4.6',     label: 'GLM-4.6',      short: 'glm4.6', hint: 'ZAI · GLM-4.6 · strongest GLM', group: 'GLM' },
+  { id: 'glm-5.3',     label: 'GLM-5.3',      short: 'glm5.3', hint: 'ZAI · GLM-5.3 · newest on the Coding Plan', group: 'GLM' },
+  { id: 'glm-5.2',     label: 'GLM-5.2',      short: 'glm5.2', hint: 'ZAI · GLM-5.2', group: 'GLM' },
+  { id: 'glm-5.1',     label: 'GLM-5.1',      short: 'glm5.1', hint: 'ZAI · GLM-5.1', group: 'GLM' },
+  { id: 'glm-5-turbo', label: 'GLM-5 Turbo',  short: 'glm5t',  hint: 'ZAI · GLM-5 Turbo · faster reasoning', group: 'GLM' },
+  { id: 'glm-4.7',     label: 'GLM-4.7',      short: 'glm4.7', hint: 'ZAI · GLM-4.7 · Coding Plan default', group: 'GLM' },
+  { id: 'glm-4.6',     label: 'GLM-4.6',      short: 'glm4.6', hint: 'ZAI · GLM-4.6', group: 'GLM' },
   { id: 'glm-4.5-air', label: 'GLM-4.5 Air',  short: 'glmair', hint: 'ZAI · GLM-4.5 Air · light/fast (also the small-model default)', group: 'GLM' },
 ];
 

@@ -4,17 +4,29 @@
 // dependency-free leaf for this to run at all (no `~/` alias, no logger).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MODEL_CATALOG, modelShort, modelLabel, providerCatalog } from './models.ts';
+import { MODEL_CATALOG, GLM_CATALOG, modelShort, modelLabel, providerCatalog } from './models.ts';
 
 test('the Anthropic flagship is selectable and mirrors the daemon catalog', () => {
   const ids = MODEL_CATALOG.map((m) => m.id);
-  // Both must be present: there is no `fable` ALIAS, so a pinned id is the
-  // ONLY way to reach the flagship from a picker.
+  // Pinned ids must be present (DM-CLI-12: the `fable` alias now exists too,
+  // verified in local `claude --help`, but pins stay for reproducibility).
+  assert.ok(ids.includes('fable'), 'Fable alias missing from the picker');
   assert.ok(ids.includes('claude-fable-5-1'), 'Fable 5.1 missing from the picker');
   assert.ok(ids.includes('claude-fable-5'), 'Fable 5 missing from the picker');
+  assert.ok(ids.includes('claude-opus-5'), 'Opus 5 missing from the picker');
   // Newest first inside the pinned group — the operator scans top-down.
   assert.ok(ids.indexOf('claude-fable-5-1') < ids.indexOf('claude-fable-5'));
   assert.equal(modelLabel('claude-fable-5-1'), 'Fable 5.1');
+  assert.equal(modelShort('fable'), 'fab');
+  assert.equal(modelShort('claude-opus-5'), 'o5');
+});
+
+test('the ZAI catalog tracks the Coding Plan generation (DM-CLI-12)', () => {
+  const ids = GLM_CATALOG.map((m) => m.id);
+  for (const id of ['glm-5.3', 'glm-5.2', 'glm-5.1', 'glm-5-turbo', 'glm-4.7', 'glm-4.6', 'glm-4.5-air']) {
+    assert.ok(ids.includes(id), `${id} missing from the ZAI picker`);
+  }
+  assert.ok(ids.indexOf('glm-5.3') < ids.indexOf('glm-4.6'), 'newest GLM should come first');
 });
 
 test('catalog ids are unique', () => {
