@@ -19,8 +19,13 @@ import { daemonStore } from '~/state/daemon';
 import { projectsStore } from '~/state/projects';
 import { serverStore } from '~/state/server';
 import { chatStore } from '~/state/chat';
+import { teamStore } from '~/state/team';
+import { clientsStore } from '~/state/clients';
+import { viewStore } from '~/state/view';
+import { storyStore } from '~/state/story';
+import { bindCluster as queueBindCluster } from '~/lib/queue';
 import { railUiStore } from '~/state/rail-ui';
-import { findClusterPort, liveClusters } from '~/components/projects-rail/discovery';
+import { discoverProjects, findClusterPort, liveClusters } from '~/components/projects-rail/discovery';
 import { log } from '~/lib/log';
 import * as kp from '~/lib/known-projects';
 import { clearCachedSnapshot } from '~/lib/snapshot-cache';
@@ -73,6 +78,39 @@ async function switchProjectImpl(
 ): Promise<boolean> {
   projectsStore.clearNewBadge(key);
 
+  // AX17 — refuse to switch into a row the operator just deleted. The
+  // tombstone means the rail row is already gone; a raced click (double
+  // click, keyboard) must NOT rebind or repaint — the current project's
+  // view stays exactly as it is, no stale-data flash.
+  if (fallback?.cluster_id && kp.isDeleted(fallback.cluster_id)) {
+    log.info('switchProject refused — project was just deleted', { cluster_id: fallback.cluster_id });
+    return false;
+  }
+
+  // AX18 — synchronous prebind: the workspace must NEVER paint the old
+  // project's data under the new project's selection. BEFORE any network:
+  // move the rail highlight, point the server facade at the target (fresh
+  // key → empty snapshot → boot gate shows BootingPanel loader; known key
+  // → in-memory slice, AX3), and reset every per-cluster UI mirror
+  // (agents roster, chat, view, clients, queue, runs). The full
+  // bindActiveCluster after attach is idempotent over this (same
+  // cluster_id → bindCluster no-ops) and only adds the fetches.
+  const targetClusterId = fallback?.cluster_id ?? null;
+  const targetKey = targetClusterId && targetClusterId.trim().length > 0
+    ? targetClusterId
+    : `port:${port}`;
+  const prevActiveId: string | null = daemonStore.state.activeId;
+  const prevPort = projectsStore.state.activePort;
+  const prevClusterId: string | null = projectsStore.state.activeClusterId;
+  projectsStore.setActive(port, targetClusterId);
+  serverStore.beginSwitch(targetKey);
+  chatStore.bindCluster(targetClusterId);
+  viewStore.bindCluster(targetClusterId);
+  teamStore.bindCluster(targetClusterId);
+  clientsStore.bindCluster(targetClusterId);
+  queueBindCluster(targetClusterId);
+  storyStore.resetForClusterSwap();
+
   // V86l — reconcile against live discovery BEFORE probing. If the
   // operator's stored port is stale (typical case: a daemon self-update
   // briefly moved the port and the kp.list() entry captured the
@@ -117,7 +155,25 @@ async function switchProjectImpl(
     // prompt. That is not an outage: parking the row in OfflinePanel
     // would be a lie and would steal the selection from the project they
     // actually clicked.
-    if (outcome.reason === 'cancelled') return false;
+    // AX18 — undo the prebind: nothing attached, the previous project
+    // is still the live one. Point the facade + mirrors back at it and
+    // revalidate so the workspace repaints instead of hanging on a
+    // loader for a project that never attached.
+    if (outcome.reason === 'cancelled') {
+      if (prevPort !== null) projectsStore.setActive(prevPort, prevClusterId);
+      serverStore.setActiveCluster(prevActiveId);
+      if (prevActiveId) {
+        const prevCid = daemonStore.state.instances[prevActiveId]?.health?.cluster_id ?? prevClusterId;
+        chatStore.bindCluster(prevCid);
+        viewStore.bindCluster(prevCid);
+        teamStore.bindCluster(prevCid);
+        clientsStore.bindCluster(prevCid);
+        queueBindCluster(prevCid);
+        storyStore.resetForClusterSwap();
+        void import('~/lib/cluster-bind').then((m) => m.rehydrateActiveCluster(prevActiveId));
+      }
+      return false;
+    }
     // V86b — switch failed for a real reason, so register the operator's
     // selection: the rail shows the row as selected and the cockpit body
     // shows OfflinePanel with "start the daemon" guidance.
@@ -212,20 +268,22 @@ export interface ForgetOutcome {
 }
 
 /**
- * AX8 — forget a project for real.
+ * AX8 — forget a project for real. AX17 — the local eviction is now
+ * OPTIMISTIC: the rail row, its stores and its selection die THIS TICK,
+ * and the daemon `DELETE /projects/<id>` follows in the background. The
+ * operator asked for instant; the daemon's registry lag (~60s before its
+ * /projects table + discovery stop re-listing the id) must never keep a
+ * dead row on screen. The delete tombstone (known-projects) vetoes any
+ * re-upsert while the daemon catches up.
  *
- * Reachable daemon: `DELETE /projects/<id>` FIRST, and only scrub local
- * state once it lands. The daemon's delete is registry-only — it drops
- * the id from its in-memory table and rewrites `projects.json`; the
- * project folder on disk is never touched (daemon/projectsapi.py
- * `project_unregister`). It refuses (409) to delete its own default
- * (boot) project.
+ * The daemon's delete is registry-only — it drops the id from its
+ * in-memory table and rewrites `projects.json`; the project folder on
+ * disk is never touched (daemon/projectsapi.py `project_unregister`). It
+ * refuses (409) to delete its own default (boot) project.
  *
- * Unreachable daemon: local-only scrub, same as before.
- *
- * A failed delete does NOT scrub: destroying the alias, conv metadata,
- * view state and token while the row is about to be re-upserted by the
- * next discovery pass is exactly the data loss this task exists to fix.
+ * When the daemon REFUSES or is unreachable-after-evict, the tombstone is
+ * lifted and a rediscovery is kicked so the row comes back instead of
+ * vanishing while the daemon still owns it.
  */
 export async function forgetProject(
   target: { cluster_id?: string | null; port: number },
@@ -236,29 +294,47 @@ export async function forgetProject(
     : `port:${target.port}`;
   clearForgetError(clusterKey);
 
+  // 1. Optimistic local eviction — synchronous, this tick.
+  log.info('forget — optimistic local eviction', { clusterKey });
+  evictLocalProject(target, clusterKey);
+  onAfter?.();
+
+  // 2. Daemon DELETE in the background.
   let deletedRemotely = false;
   if (target.cluster_id) {
     const client = clientForRow(clusterKey, target.port);
     if (client) {
       const res = await client.projectDelete(target.cluster_id, AbortSignal.timeout(10_000));
       // 404 = the daemon already doesn't know it; that IS the end state
-      // we want, so treat it as success and scrub.
+      // we want, so treat it as success.
       if (res.ok || res.status === 404) {
         deletedRemotely = true;
       } else {
         const detail = res.status === 409
           ? "the daemon refuses to drop its own default (boot) project — point it at another project first"
           : res.error || res.body.slice(0, 160) || `HTTP ${res.status}`;
-        log.warn('forget: daemon refused DELETE /projects', { cluster_id: target.cluster_id, status: res.status, detail });
+        log.warn('forget: daemon refused DELETE /projects — resurrecting row', { cluster_id: target.cluster_id, status: res.status, detail });
         setForgetErrors((prev) => ({ ...prev, [clusterKey]: detail }));
+        // Undo the optimistic eviction: the daemon still owns this project.
+        kp.revive(target.cluster_id);
+        projectsStore.refresh();
+        void discoverProjects();
         return { ok: false, deletedRemotely: false, error: detail };
       }
     } else {
       log.info('forget: no reachable daemon for this row — local scrub only', { clusterKey });
     }
   }
+  return { ok: true, deletedRemotely };
+}
 
-  log.info('forget — full eviction', { clusterKey, deletedRemotely });
+/** AX17 — the synchronous half of forgetProject: drop every local trace of
+ *  the row (instance, cluster stores, known-projects + tombstone, selection)
+ *  so the next paint already shows the project gone. */
+function evictLocalProject(
+  target: { cluster_id?: string | null; port: number },
+  clusterKey: string,
+): void {
   daemonStore.disconnectInstance(clusterKey);
   serverStore.clearForCluster(clusterKey);
   chatStore.clearClusterChat(clusterKey);
@@ -277,6 +353,4 @@ export async function forgetProject(
   daemonStore.clearActiveSelection();
   projectsStore.refresh();
   railUiStore.clear();
-  onAfter?.();
-  return { ok: true, deletedRemotely };
 }

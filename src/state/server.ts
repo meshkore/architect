@@ -308,6 +308,24 @@ function setActiveCluster(key: string | null): void {
   syncFacade();
 }
 
+/** AX18 — point the facade at the switch TARGET synchronously, before any
+ *  network runs. A fresh key has no slice → facade goes empty →
+ *  the boot gate paints BootingPanel (loader) instead of the previous
+ *  project's snapshot. A known key keeps its in-memory slice (AX3
+ *  paint-from-memory) and just gets flagged refreshing. */
+function beginSwitch(key: string): void {
+  activeClusterKey = key;
+  resetTaskConvMap();
+  setActiveLiveTasks([]);
+  const slice = state.byCluster[key];
+  if (!slice) {
+    setState('byCluster', key, { ...emptySlice, refreshing: true });
+  } else {
+    setState('byCluster', key, 'refreshing', true);
+  }
+  syncFacade();
+}
+
 /** Drop one cluster's snapshot (used by the Forget action). */
 function clearForCluster(key: string): void {
   setState('byCluster', (prev) => {
@@ -383,6 +401,7 @@ export const serverStore = {
   state,
   refresh,
   refreshNow,
+  beginSwitch,
   hydrateFromCache,
   clear,
   clearForCluster,
