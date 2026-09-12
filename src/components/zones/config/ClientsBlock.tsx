@@ -27,6 +27,7 @@
 
 import { For, Show, createEffect, createSignal } from 'solid-js';
 import { daemonStore } from '~/state/daemon';
+import { clientsStore } from '~/state/clients';
 import type { ProviderConfigInfo, ProvidersConfigPatch, ProvidersConfigResponse } from '~/lib/daemon-client';
 import { withAuthRetry } from '~/lib/retry';
 import { Block, Toggle } from './atoms';
@@ -75,6 +76,7 @@ export function ClientsBlock() {
     const r = await withAuthRetry(() => c.providerConfigGet());
     if (r.ok) {
       setCfg({ status: 'ok', data: r.data });
+      await clientsStore.hydrate(c);
       return;
     }
     // 404 → daemon too old for this feature; anything else is a real error.
@@ -148,10 +150,28 @@ export function ClientsBlock() {
         Mac, never copied project-to-project. Enable a provider and (if it
         needs one) paste its key — any project's team members can then
         select it. <b>Anthropic</b> needs no key (Claude Code's own Mac login
-        handles it); <b>Codex</b>/<b>Gemini</b> also keep working via their
+        handles it); <b>Codex</b>/<b>Gemini</b>/<b>Muse</b> also keep working via their
         own native login even without a key here — the key is just a
         convenience for headless agents.
       </div>
+
+      <Show when={clientsStore.state.list.some((c) => c.id === 'muse')}>
+        <div class="rounded-md border border-gray-700/50 p-3 text-[12px] text-gray-300 space-y-2 mb-3">
+          <p><b>Muse Code (Meta)</b> — run these commands on the daemon's machine:</p>
+          <pre class="overflow-x-auto text-[11px]">curl -fsSL https://dev.meta.ai/install.sh | bash</pre>
+          <pre class="overflow-x-auto text-[11px]">muse login</pre>
+          <p>Approve the code in your browser with your Meta account. Alternatively, save a Meta API key below. A saved API key takes priority over account login.</p>
+          <p>Contributor models may use your content to improve Meta products. The CLI default currently selects Muse Spark 1.3 Contributor; choose a named model in the team editor to override it.</p>
+          <p>{(() => {
+            const muse = clientsStore.state.list.find((c) => c.id === 'muse');
+            return !muse?.installed ? 'Status: not installed on daemon host.'
+              : muse.authConfigured ? 'Status: installed and authentication configured.'
+                : 'Status: installed; authentication required or Muse disabled below.';
+          })()}</p>
+          <button type="button" onClick={() => void refetch()} class="text-emerald-300 hover:text-white underline">Refresh installation and login status</button>
+          <p><a href="https://dev.meta.ai/docs/muse-code" target="_blank" rel="noopener noreferrer" class="underline">Meta setup documentation</a></p>
+        </div>
+      </Show>
 
       <Show when={err()}>
         <div class="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-200 mb-3">{err()}</div>

@@ -95,7 +95,7 @@ export function ClientModelEffortPicker(props: {
                 {c.installed === false
                   ? ' (not installed on daemon host)'
                   : c.authConfigured === false
-                    ? ' (no API key — set in ⚙ General settings)'
+                    ? ' (authentication required or disabled — see ⚙ General settings)'
                     : ''}
               </option>
             )}
