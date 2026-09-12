@@ -23,6 +23,8 @@ import ValidationBlock, { isValidationRed, isValidationGreen, isHaltViolation } 
 import ValidationGreenBadge, { stripGreenMarker } from '~/components/architect/ValidationGreenBadge';
 import ArchitectViolationBanner from '~/components/architect/ArchitectViolationBanner';
 import BubbleHeader from './BubbleHeader';
+import QuotaExceededNotice from './QuotaExceededNotice';
+import { detectQuotaError } from './quota-error';
 import { convAgentId, convAgentName } from './agent-identity';
 import { formatBubbleTs } from './format';
 import { StreamingIdleHint, StreamingTail, ThinkingPlaceholder } from './streaming';
@@ -47,6 +49,10 @@ export function AssistantBubble(props: { conv: string; msg: ChatMsg; headerless?
   // literal `═══ … ═══` rule.
   const bodyText = (): string =>
     showsValidationGreen() ? stripGreenMarker(props.msg.text) : props.msg.text;
+
+  // Provider rate-limit / out-of-credit failure → pretty centered
+  // card instead of the raw "[x error] API error 429 …" dump.
+  const showsQuota = (): boolean => settled() && detectQuotaError(props.msg.text) !== null;
 
   return (
     <div class="flex flex-col gap-1.5 items-start w-full">
@@ -75,6 +81,8 @@ export function AssistantBubble(props: { conv: string; msg: ChatMsg; headerless?
       </Show>
       <Show when={showsValidationRed()} fallback={
         <>
+          <Show when={showsQuota()} fallback={
+            <>
           <Show when={showsHaltViolation()}>
             <ArchitectViolationBanner conv={props.conv} />
           </Show>
@@ -104,6 +112,10 @@ export function AssistantBubble(props: { conv: string; msg: ChatMsg; headerless?
               </Show>
             </Show>
           </div>
+            </>
+          }>
+            <QuotaExceededNotice text={props.msg.text} />
+          </Show>
         </>
       }>
         <ValidationBlock conv={props.conv} text={props.msg.text} />
