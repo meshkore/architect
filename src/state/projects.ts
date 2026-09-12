@@ -20,7 +20,7 @@ import * as kp from '~/lib/known-projects';
 import { log } from '~/lib/log';
 
 export interface ProjectsStoreState {
-  /** Sorted most-recent first. Always reflects `lib/known-projects.list()`. */
+  /** Stable creation order. Always reflects `lib/known-projects.list()`. */
   list: kp.KnownProject[];
   activePort: number | null;
   activeClusterId: string | null;
@@ -45,6 +45,8 @@ function upsert(input: Parameters<typeof kp.upsert>[0]): kp.KnownProject {
   const before = new Set(state.list.map((p) => p.cluster_id ?? `port:${p.port}`));
   const merged = kp.upsert(input);
   refresh();
+  // AX17 — tombstone-vetoed upserts persist nothing; never badge them as NEW.
+  if (input.cluster_id && kp.isDeleted(input.cluster_id)) return merged;
   const id = merged.cluster_id ?? `port:${merged.port}`;
   if (!before.has(id) && !state.newClusterIds.includes(id)) {
     setState('newClusterIds', (xs) => [...xs, id]);

@@ -246,13 +246,17 @@ export const THEMES: Record<ThemeId, Record<ThemeVar, string>> = {
   },
 };
 
-/** Font-size schema. */
+/** Font-size schema. `--fs-scale` is the global multiplier: every
+ *  hardcoded `font-size` in cockpit CSS is wrapped as
+ *  `calc(<N>px * var(--fs-scale, 1))` so the size preset scales ALL
+ *  text (header, rails, centre content), not just the `--fs-*` tokens. */
 export const SIZE_VAR_NAMES = [
   '--fs-title',
   '--fs-button',
   '--fs-body',
   '--fs-meta',
   '--fs-chat',
+  '--fs-scale',
 ] as const;
 
 export type SizeVar = (typeof SIZE_VAR_NAMES)[number];
@@ -264,6 +268,7 @@ export const SIZE_PRESETS: Record<SizeId, Record<SizeVar, string>> = {
     '--fs-body':   '12px',
     '--fs-meta':   '9.5px',
     '--fs-chat':   '12.5px',
+    '--fs-scale':  '0.88',
   },
   default: {
     '--fs-title':  '11px',
@@ -271,6 +276,7 @@ export const SIZE_PRESETS: Record<SizeId, Record<SizeVar, string>> = {
     '--fs-body':   '13px',
     '--fs-meta':   '10px',
     '--fs-chat':   '13.5px',
+    '--fs-scale':  '1',
   },
   large: {
     '--fs-title':  '13px',
@@ -278,6 +284,7 @@ export const SIZE_PRESETS: Record<SizeId, Record<SizeVar, string>> = {
     '--fs-body':   '15px',
     '--fs-meta':   '11px',
     '--fs-chat':   '15.5px',
+    '--fs-scale':  '1.18',
   },
 };
 

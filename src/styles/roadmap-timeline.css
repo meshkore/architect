@@ -339,7 +339,7 @@
 .rt-id {
   display: inline-block;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--fs-scale, 1));
   font-weight: 600;
   letter-spacing: .04em;
   background: #161b24;
@@ -368,7 +368,7 @@
    * which would force ACTIVE onto its own line whenever the title wraps. */
   display: inline;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-  font-size: 15px;
+  font-size: calc(15px * var(--fs-scale, 1));
   font-weight: 500;
   color: #f2f4f7;
   margin: 0;
@@ -379,7 +379,7 @@
 /* Status label — colour matches the per-status node hue. */
 .rt-statlabel {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--fs-scale, 1));
   font-weight: 500;
   letter-spacing: .04em;
   text-transform: uppercase;
@@ -395,7 +395,7 @@
 
 .rt-archived-tag {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--fs-scale, 1));
   letter-spacing: .04em;
   text-transform: uppercase;
   color: #b39064;
@@ -411,7 +411,7 @@
   gap: 8px;
   flex-wrap: wrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--fs-scale, 1));
   color: #5a626e;
   transition: opacity .25s ease;
 }
@@ -427,7 +427,7 @@
   background: #11161f;
   border: 1px solid #1c222c;
   color: #8a93a0;
-  font-size: 10px;
+  font-size: calc(10px * var(--fs-scale, 1));
   letter-spacing: .02em;
   line-height: 1.4;
 }
@@ -466,7 +466,7 @@
 .rt-desc {
   margin-top: 6px;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale, 1));
   line-height: 1.55;
   color: #c2c8d0;
   max-width: 430px;
@@ -489,7 +489,7 @@
   padding: 0;
   cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--fs-scale, 1));
   font-weight: 500;
   letter-spacing: .04em;
   text-transform: uppercase;
@@ -554,7 +554,7 @@
    (The parent .rt-arch-detail already indents under the title.) */
 .rt-task-desc {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--fs-scale, 1));
   line-height: 1.55;
   color: #c2c8d0;
 }
@@ -613,7 +613,7 @@
 .rt-task.is-blocked .rt-task-state { color: #f87171; }
 .rt-task-bang {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale, 1));
   font-weight: 700;
   line-height: 1;
 }
@@ -626,7 +626,7 @@
 .rt-task.is-cancelled .rt-task-state { color: #6b7280; }
 .rt-task-cross {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale, 1));
   font-weight: 600;
   line-height: 1;
 }
@@ -647,7 +647,7 @@
  * legacy ids truncate with an ellipsis (full id on hover via title). */
 .rt-task-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--fs-scale, 1));
   background: #161b24;
   color: #8b95a3;
   border-radius: 3px;
@@ -666,7 +666,7 @@
   /* The TITLE: clearly the primary line. Larger + semibold + bright so the
    * eye separates it instantly from the summary/result line below it
    * (operator: "no se entiende qué es el título y qué es el resumen"). */
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--fs-scale, 1));
   font-weight: 600;
   color: #e8edf3;
   min-width: 0;
@@ -708,7 +708,7 @@
 }
 .rt-task-view-btn {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--fs-scale, 1));
   font-weight: 600;
   letter-spacing: .04em;
   color: #9aa6c4;
@@ -742,7 +742,7 @@
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   /* The SUMMARY / RESULT line: clearly SECONDARY to the title — smaller and
    * dimmer so the hierarchy reads at a glance while a queue runs. */
-  font-size: 11px;
+  font-size: calc(11px * var(--fs-scale, 1));
   line-height: 1.5;
   color: #8b95a3;
   /* Indent under the state glyph + code so the summary lines up with the
@@ -829,7 +829,7 @@
   cursor: pointer;
   padding: 4px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: calc(11px * var(--fs-scale, 1));
 }
 .rt-icon-btn:hover { color: #d99a2b; }
 
@@ -878,7 +878,7 @@
 }
 .rt-header .rt-h-title {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale, 1));
   color: #6b7280;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -924,7 +924,7 @@
 .rt-runall:not(:disabled):hover .rt-runall-node { transform: scale(1.08); }
 .rt-runall-label {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--fs-scale, 1));
   font-weight: 600;
   letter-spacing: .05em;
   text-transform: uppercase;
@@ -943,7 +943,7 @@
   border-radius: 999px;
   background: rgba(34, 211, 238, .2);
   color: #67e8f9;
-  font-size: 9px;
+  font-size: calc(9px * var(--fs-scale, 1));
   font-weight: 700;
   line-height: 1;
 }
@@ -979,13 +979,13 @@
 }
 .rt-qbar-stat {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--fs-scale, 1));
   color: #94a3b8;
   white-space: nowrap;
 }
 .rt-qbtn {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--fs-scale, 1));
   font-weight: 600;
   letter-spacing: .03em;
   padding: 6px 12px;
@@ -1020,7 +1020,7 @@
   align-items: center;
   gap: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--fs-scale, 1));
   font-weight: 600;
   letter-spacing: .03em;
   padding: 6px 12px;
@@ -1028,6 +1028,21 @@
   border: 1px solid color-mix(in srgb, var(--theme-status-running-ring, #f9a8d4) 45%, transparent);
   background: color-mix(in srgb, var(--theme-status-running-ring, #f9a8d4) 14%, transparent);
   color: var(--theme-status-running-ring, #f9a8d4);
+}
+/* LAL9 — unanchored-live warning: amber pill in the queue bar. Uses the
+ * global font-scale token like every other roadmap label (THM-04). */
+.rt-qbar-unanchored {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(11px * var(--fs-scale, 1));
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, .45);
+  background: rgba(245, 158, 11, .12);
+  color: #fcd34d;
+  white-space: nowrap;
 }
 .rt-qbar-spinner {
   width: 10px;
@@ -1048,7 +1063,7 @@
   background: rgba(34, 211, 238, .15);
   color: #67e8f9;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--fs-scale, 1));
   font-weight: 700;
   letter-spacing: .03em;
   white-space: nowrap;
@@ -1071,7 +1086,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 10px;
+  font-size: calc(10px * var(--fs-scale, 1));
   color: #94a3b8;
 }
 .rt-arch-stamp {
@@ -1079,10 +1094,10 @@
   letter-spacing: .02em;
   color: #64748b;
 }
-.rt-arch-empty { font-size: 11.5px; font-style: italic; color: #64748b; margin: 0; }
+.rt-arch-empty { font-size: calc(11.5px * var(--fs-scale, 1)); font-style: italic; color: #64748b; margin: 0; }
 .rt-arch-block { display: flex; flex-direction: column; gap: 3px; }
 .rt-arch-label {
-  font-size: 9px;
+  font-size: calc(9px * var(--fs-scale, 1));
   text-transform: uppercase;
   letter-spacing: .14em;
   color: #64748b;
@@ -1091,7 +1106,7 @@
   padding: 6px 10px;
   border-radius: 6px;
   background: rgba(15, 23, 32, .5);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--fs-scale, 1));
   line-height: 1.55;
   color: #d1d5db;
 }
@@ -1102,7 +1117,7 @@
 }
 .rt-arch-file {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--fs-scale, 1));
   padding: 2px 7px;
   border-radius: 5px;
   background: rgba(148, 163, 184, .10);
@@ -1130,7 +1145,7 @@
   background: linear-gradient(120deg, #fbbf24, #f97316);
   color: #1a1300;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--fs-scale, 1));
   font-weight: 700;
   letter-spacing: .06em;
   padding: 2px 7px;

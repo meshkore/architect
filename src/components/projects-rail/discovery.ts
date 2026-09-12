@@ -153,6 +153,9 @@ export async function discoverProjects(opts: { fullScan?: boolean } = {}): Promi
   batch(() => {
     for (const l of live) {
       if (l.cluster_id) clusterMap.set(l.cluster_id, l);
+      // AX17 — the daemon's authoritative table is source of truth: an id
+      // present here was (re-)created, so drop any delete tombstone first.
+      if (l.authoritative && l.cluster_id) kp.revive(l.cluster_id);
       projectsStore.upsert({
         port: l.port, base: l.base,
         cluster_id: l.cluster_id ?? undefined,
@@ -200,6 +203,8 @@ export async function findClusterPort(targetClusterId: string): Promise<LiveProb
     const clusterMap = new Map<string, LiveProbe>();
     for (const l of live) {
       if (l.cluster_id) clusterMap.set(l.cluster_id, l);
+      // AX17 — same resurrection rule as discoverProjects (see above).
+      if (l.authoritative && l.cluster_id) kp.revive(l.cluster_id);
       projectsStore.upsert({
         port: l.port, base: l.base,
         cluster_id: l.cluster_id ?? undefined,

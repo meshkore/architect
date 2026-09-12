@@ -52,6 +52,14 @@ const HOME_IDS_KEY = 'mc-server-home-ids-v1';
  *  per-project localStorage surface. */
 export const LAST_PROJECT_KEY = 'mc-last-project-id-v1';
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+// AX17 — delete tombstones: cluster ids the operator explicitly forgot,
+// with the forget timestamp. `upsert()` refuses to re-add a tombstoned id
+// until the tombstone expires or the daemon's authoritative /projects table
+// resurrects it (via `revive()`). Without this, the ~60s lag between the
+// operator's DELETE and the daemon's table/discovery catching up re-upserted
+// the ghost row (and its click painted the previous project's stale data).
+const DELETED_KEY = 'mc-deleted-projects-v1';
+const TOMBSTONE_TTL_MS = 5 * 60 * 1000; // 5 min — covers daemon propagation lag
 
 export interface KnownProject {
   port: number;
@@ -175,24 +183,94 @@ export function markHome(clusterId: string): void {
 }
 
 /**
- * Return all known projects, sorted most-recent first, dropping any
- * record older than `MAX_AGE_MS` AND any cluster flagged as a server HOME
- * (FC-2 — the home is the global store, never a project; filtered here so
- * EVERY consumer is covered, online or offline).
+ * Return all known projects in STABLE creation order (localStorage
+ * insertion order — first seen stays first), dropping any record older
+ * than `MAX_AGE_MS` AND any cluster flagged as a server HOME (FC-2).
+ *
+ * CN9 — the rail must NEVER re-sort on activity. `upsert()` bumps
+ * `last_seen` on every bind/discovery poll, so sorting by it made the
+ * clicked project jump to the top. `last_seen` is now TTL/freshness
+ * data only; order comes from array position (upsert merges in place,
+ * new projects append at the end).
  */
 export function list(): KnownProject[] {
   const home = readHomeIds();
   return readRaw()
     .filter(fresh)
-    .filter((p) => !(p.cluster_id && home.has(p.cluster_id)))
-    .sort((a, b) => (b.last_seen.localeCompare(a.last_seen)));
+    .filter((p) => !(p.cluster_id && home.has(p.cluster_id)));
+}
+
+function readTombstones(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(DELETED_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v === 'string') out[k] = v;
+      }
+      return out;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+function writeTombstones(map: Record<string, string>): void {
+  try {
+    localStorage.setItem(DELETED_KEY, JSON.stringify(map));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+function tombstoneFresh(since: string): boolean {
+  const t = Date.parse(since);
+  if (Number.isNaN(t)) return false;
+  return Date.now() - t < TOMBSTONE_TTL_MS;
+}
+
+/** AX17 — true when this cluster id was explicitly forgotten recently
+ *  (tombstone still fresh). Discovery upserts for it must be ignored. */
+export function isDeleted(clusterId: string): boolean {
+  if (!clusterId) return false;
+  const ts = readTombstones()[clusterId];
+  return typeof ts === 'string' && tombstoneFresh(ts);
+}
+
+/** AX17 — the daemon's authoritative /projects table lists this id, so any
+ *  tombstone for it is stale (operator re-created it, or the delete never
+ *  landed). Clears the tombstone so discovery upserts flow again. */
+export function revive(clusterId: string): void {
+  if (!clusterId) return;
+  const map = readTombstones();
+  if (clusterId in map) {
+    delete map[clusterId];
+    writeTombstones(map);
+  }
 }
 
 /**
  * Smart upsert. Collapses by cluster_id first (stable); falls back to
  * port. Bumps `last_seen` to now. Returns the merged record.
+ *
+ * AX17 — a fresh delete tombstone vetoes the write (the row stays gone
+ * while the daemon catches up); the input is returned un-persisted.
  */
 export function upsert(input: Partial<KnownProject> & { port: number; base: string }): KnownProject {
+  if (input.cluster_id && isDeleted(input.cluster_id)) {
+    return {
+      port: input.port,
+      base: input.base,
+      cluster_id: input.cluster_id,
+      cluster_name: input.cluster_name,
+      repo_path: input.repo_path,
+      last_seen: new Date().toISOString(),
+      status: input.status,
+    };
+  }
   const arr = readRaw();
   const now = new Date().toISOString();
   const incoming: KnownProject = {
@@ -277,6 +355,15 @@ export function forget(target: { cluster_id?: string; port?: number }): boolean 
   if (target.cluster_id) idx = arr.findIndex((p) => p.cluster_id === target.cluster_id);
   if (idx < 0 && typeof target.port === 'number') {
     idx = arr.findIndex((p) => !p.cluster_id && p.port === target.port);
+  }
+
+  // AX17 — plant the delete tombstone FIRST so any discovery/bind upsert
+  // racing this forget (the daemon still lists the id for ~60s) is vetoed
+  // instead of resurrecting the row the operator just removed.
+  if (target.cluster_id && target.cluster_id.trim().length > 0) {
+    const tombs = readTombstones();
+    tombs[target.cluster_id] = new Date().toISOString();
+    writeTombstones(tombs);
   }
 
   // Per-cluster key used by aliases / tokens / conv-meta / view state.

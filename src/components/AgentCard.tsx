@@ -203,7 +203,7 @@ export default function AgentCard(props: AgentCardProps) {
               /* 2026-06-13 — "idle" text only when there's room (≥150px);
                  below that it steals the name's width → "M..." */
               <Show when={props.active && w() >= 150}>
-                <span class="font-mono text-gray-600 flex-shrink-0" style={{ 'font-size': '9px' }}>idle</span>
+                <span class="font-mono text-gray-600 flex-shrink-0" style={{ 'font-size': 'calc(9px * var(--fs-scale, 1))' }}>idle</span>
               </Show>
             }
           >

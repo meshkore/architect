@@ -194,7 +194,11 @@ export const rows = createRoot(() =>
     });
   }
 
-  result.sort((a, b) => a.port - b.port);
+  // CN9 — NO re-sort here. `known` already arrives in stable creation
+  // order (known-projects.list()); sorting by port (or anything derived
+  // from live probes) re-shuffled siblings sharing one FC-2 port on every
+  // bind/poll and made the clicked row jump. Creation order is the rail
+  // order; operator-saved order (order.ts) applies on top in ProjectsRail.
   return result;
   }),
 );
